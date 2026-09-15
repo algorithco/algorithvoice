@@ -9,9 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
   && rm -rf /var/lib/apt/lists/*
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json turbo.json ./
 COPY apps/backend/package.json apps/backend/
+COPY apps/desktop/package.json apps/desktop/
+COPY apps/web/package.json apps/web/
 COPY packages/shared-types/package.json packages/shared-types/
+COPY packages/ui/package.json packages/ui/
 COPY infra/prisma/package.json infra/prisma/
-# Install all workspaces so prisma CLI is available for generate (filtered install misses dev deps)
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm --filter @algorith-voice/shared-types build

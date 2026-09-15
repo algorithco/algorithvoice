@@ -56,6 +56,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec biome check .
+      # Generate Prisma client and build shared-types before typecheck (backend needs both)
+      - run: pnpm --filter @algorith-voice/shared-types build
+      - run: pnpm --filter @algorith-voice/backend exec prisma generate --schema ../../infra/prisma/schema.prisma
       - run: pnpm --filter @algorith-voice/backend exec prisma migrate deploy --schema ../../infra/prisma/schema.prisma
       - run: pnpm -r run typecheck
       - run: pnpm -r run test
