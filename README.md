@@ -40,7 +40,7 @@ pnpm dev
 
 ## Design system
 
-Website (V5 modern monochrome): `#000/#FFF` + surface/raised/border/text tokens per mode. Inter throughout, JetBrains Mono accents, 6/8/16px radii, scroll-reveal + waveform signature motion, FAQ accordion. Desktop app keeps the v1 instrument tokens (4px controls / 8px cards). Full spec: `apps/web/design-system`.
+Website (V5 modern monochrome): `#000/#FFF` + surface/raised/border/text tokens per mode. Inter throughout, JetBrains Mono accents, 6/8/16px radii, scroll-reveal + waveform signature motion, FAQ accordion. Desktop app keeps the v1 instrument tokens (4px controls / 8px cards). Full spec: `apps/web/app/design-system` route.
 
 ## Privacy
 
@@ -57,7 +57,7 @@ chore/*    ──┘                         ↑
 
 - **Never push directly to `main`** — `.github/workflows/branch-guard.yml` blocks it on free-tier private repos (upgrade to Pro/public for native rulesets). Push to `feature/*` → PR to `develop` → PR to `main` via `release/*`.
 - **CI** runs on PRs to `main`/`develop`/`release/*` and pushes to `develop`/`release/*`/`hotfix/*` (`ci.yml`).
-- **Backend deploy** triggers on pushes to `main` + tags `v*.*.*` + GitHub Releases (`deploy-backend.yml` → `flyctl deploy --config infra/fly.toml`).
+- **Backend deploy is paused** — `deploy-backend.yml` is manual (`workflow_dispatch`) only; auto-triggers on `main`/tags are disabled until production is needed again.
 - **Cut a release:**
   ```bash
   # 1. from develop, create release branch + PR
@@ -71,7 +71,7 @@ chore/*    ──┘                         ↑
   Desktop `.dmg/.msi/.AppImage` attach automatically via `release-desktop.yml` (macOS `aarch64`+`x86_64`, Windows, Linux).
 - **Hotfix:** `git checkout -b hotfix/x.y.z main` → PR to `main` + back-merge to `develop`.
 
-See `CONTRIBUTING.md` for Conventional Commits and `DEVELOPMENT.md` for local dev.
+See `CONTRIBUTING.md` for Conventional Commits and local dev setup.
 
 ## License
 

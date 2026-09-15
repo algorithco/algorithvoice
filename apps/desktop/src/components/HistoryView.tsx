@@ -1,6 +1,5 @@
 import { EmptyState, type HistoryEntry, HistoryList } from "@algorith-voice/ui";
 import { useState } from "react";
-import BlurText from "./BlurText.js";
 
 const DEMO: HistoryEntry[] = [
   {
@@ -29,9 +28,7 @@ export function HistoryView() {
   if (entries.length === 0) {
     return (
       <div className="p-8">
-        <h1 className="av-display">
-          <BlurText text="History" />
-        </h1>
+        <h1 className="av-display">History</h1>
         <EmptyState
           title="Nothing dictated yet"
           hint="Hold the hotkey and speak."
@@ -42,9 +39,7 @@ export function HistoryView() {
 
   return (
     <div className="p-8">
-      <h1 className="av-display">
-        <BlurText text="History" />
-      </h1>
+      <h1 className="av-display">History</h1>
       <p className="av-body mt-2 text-gray-500">Stored only on this device.</p>
       <div className="mt-6 border border-gray-200 dark:border-gray-800">
         <HistoryList

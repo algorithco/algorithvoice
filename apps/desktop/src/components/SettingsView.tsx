@@ -9,7 +9,6 @@ import {
   sessionStatus,
   signup,
 } from "../lib/session.js";
-import BlurText from "./BlurText.js";
 import { OAuthButtons } from "./OAuthButtons.js";
 
 export interface Prefs {
@@ -123,9 +122,7 @@ export function SettingsView({
 
   return (
     <div className="mx-auto max-w-[640px] p-8">
-      <h1 className="av-display">
-        <BlurText text="Settings" />
-      </h1>
+      <h1 className="av-display">Settings</h1>
 
       <section className="mt-8">
         <h2 className="av-h2">Account</h2>

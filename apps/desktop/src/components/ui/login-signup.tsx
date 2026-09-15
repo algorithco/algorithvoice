@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
-import Particles from "@/components/Particles";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -86,29 +85,7 @@ export default function LoginCardSection({ onDone }: Props) {
 
   return (
     <section className="fixed inset-0 overflow-hidden bg-black text-zinc-50">
-      {/* Particles background — OGL points, much lighter than PixelSnow ray-march */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 1.2, ease: [0.22, 0.61, 0.36, 1] }}
-        className="absolute inset-0"
-        aria-hidden
-      >
-        <Particles
-          particleCount={160}
-          particleSpread={9}
-          speed={0.06}
-          particleColors={["#ffffff"]}
-          moveParticlesOnHover={false}
-          alphaParticles={true}
-          particleBaseSize={72}
-          sizeRandomness={0.7}
-          cameraDistance={18}
-          disableRotation={false}
-          pixelRatio={Math.min(window.devicePixelRatio ?? 1, 1.25)}
-          className="h-full w-full opacity-80"
-        />
-      </motion.div>
+      {/* Flat backdrop per the monochrome instrument system — no ambient canvas. */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}

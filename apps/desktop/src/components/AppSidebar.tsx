@@ -1,8 +1,10 @@
 import { Logo } from "@algorith-voice/ui";
 
-const EASE = "cubic-bezier(0.165,0.85,0.45,1)";
-const DURATION = 300;
-const EXPANDED = "18rem";
+// Motion per the instrument system: 150ms micro / 200ms panel,
+// cubic-bezier(0.4, 0, 0.2, 1). Sidebar width 220px expanded.
+const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
+const DURATION = 200;
+const EXPANDED = "220px";
 const COLLAPSED = "3.3rem";
 
 // Demo data — real history lands here when SQLite wires up.
@@ -36,7 +38,12 @@ export function AppSidebar({
   email?: string | null;
 }) {
   const navItems: NavItem[] = [
-    { label: "Dictate", id: "dictate", icon: <MicIcon />, shortcut: "⌥ Space" },
+    {
+      label: "Dictate",
+      id: "dictate",
+      icon: <MicIcon />,
+      shortcut: "Ctrl+Space",
+    },
     { label: "History", id: "history", icon: <HistoryIcon /> },
     { label: "Settings", id: "settings", icon: <SettingsIcon /> },
   ];
@@ -124,7 +131,7 @@ export function AppSidebar({
             onClick={() => onSelect("settings")}
           >
             <div className="flex w-full items-center gap-3">
-              <div className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-semibold text-white dark:bg-white dark:text-black">
+              <div className="grid size-9 shrink-0 place-items-center rounded-control bg-black text-sm font-semibold text-white dark:bg-white dark:text-black">
                 {(email?.[0] ?? "G").toUpperCase()}
               </div>
               <div
@@ -176,7 +183,7 @@ function NavRow({
       aria-label={item.label}
       aria-current={active ? "page" : undefined}
       title={collapsed ? item.label : undefined}
-      className={`group relative flex h-9 w-full items-center overflow-hidden rounded-control px-4 text-sm transition-colors duration-75 active:scale-[0.99] ${
+      className={`group relative flex h-10 w-full items-center overflow-hidden rounded-control px-4 text-sm transition-colors duration-150 active:scale-[0.99] ${
         active
           ? "bg-gray-200 text-black dark:bg-gray-900 dark:text-white"
           : "text-gray-500 hover:bg-gray-200 hover:text-black dark:hover:bg-gray-900 dark:hover:text-white"
@@ -197,7 +204,7 @@ function NavRow({
         </span>
         {item.shortcut ? (
           <span
-            className="text-[11px] text-gray-500 opacity-0 transition-opacity duration-75 group-hover:opacity-100"
+            className="text-[12px] text-gray-500 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
             style={{ display: collapsed ? "none" : undefined }}
           >
             {item.shortcut}
@@ -228,7 +235,7 @@ function Section({
 function ChatRow({ title }: { title: string }) {
   return (
     <li className="list-none">
-      <span className="group relative flex h-8 items-center rounded-control px-3 text-[13px] text-gray-500 transition-colors duration-75 hover:bg-gray-200 hover:text-black dark:hover:bg-gray-900 dark:hover:text-white">
+      <span className="group relative flex h-8 items-center rounded-control px-3 text-[13px] text-gray-500 transition-colors duration-150 hover:bg-gray-200 hover:text-black dark:hover:bg-gray-900 dark:hover:text-white">
         <span className="flex-1 truncate">{title}</span>
         <span className="absolute right-1 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-control text-gray-500 opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:bg-white dark:hover:bg-gray-800">
           <DotsIcon />

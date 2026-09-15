@@ -76,7 +76,7 @@ jobs:
           cat NOTES.md
           echo "" >> NOTES.md
           echo "---" >> NOTES.md
-          echo "Backend: \`flyctl deploy\` runs automatically on tag push. Desktop artifacts build via \`release-desktop\` workflow." >> NOTES.md
+          echo "Backend deploys are paused (deploy-backend is manual-only). Desktop artifacts build via \`release-desktop\` workflow." >> NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -95,4 +95,4 @@ jobs:
         run: |
           echo "✓ Release ${{ steps.ver.outputs.tag }} created"
           echo "  Desktop builds (release-desktop) will trigger on this tag and attach .dmg/.msi/.AppImage"
-          echo "  Backend deploys via deploy-backend (which also triggers on tags)"
+          echo "  Backend deploys are paused (deploy-backend is manual-only)"
