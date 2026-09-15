@@ -58,5 +58,5 @@ jobs:
           projectPath: apps/desktop
           tagName: v__VERSION__
           releaseName: "Algorith Voice v__VERSION__"
-          releaseBody: "Desktop app — see attached .dmg (macOS), .msi (Windows), .AppImage/.deb (Linux). Auto-updates via https://github.com/algorithco/algorithvoice/releases/latest/download/latest.json"
+          releaseBody: "Desktop app — see attached .dmg (macOS), .msi (Windows), .AppImage/.deb (Linux). Public downloads: https://github.com/algorithco/algorithvoice-app/releases/latest"
           args: --target ${{ matrix.target }}
