@@ -1,8 +1,14 @@
 name: release-desktop
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*.*.*", "v*.*.*-*"]
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Override version (e.g. 0.2.0) — used when dispatching without a tag"
+        required: false
 
 permissions:
   contents: write

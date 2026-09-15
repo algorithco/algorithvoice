@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .next/
+.turbo/
 out/
 target/
 src-tauri/target/

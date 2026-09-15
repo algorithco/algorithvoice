@@ -1,0 +1,49 @@
+name: branch-guard
+# Free-tier workaround for branch protection (private repo without Pro):
+# Blocks direct pushes to main. Main must only receive PR merges from develop/release/hotfix.
+# When you upgrade to Pro or make repo public, replace this with a native ruleset.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  enforce-pr-flow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Allow only PR merges to main
+        run: |
+          set -e
+          # Allow bots (release-please, dependabot) and tagged releases
+          if [ "${{ github.actor }}" = "dependabot[bot]" ] || [ "${{ github.actor }}" = "github-actions[bot]" ]; then
+            echo "Bot push allowed: ${{ github.actor }}"
+            exit 0
+          fi
+          # Check if HEAD is a merge commit from a PR OR the commit message looks like a squash-merge PR
+          MSG=$(git log -1 --pretty=%B)
+          echo "Head commit message:"
+          echo "$MSG"
+          # Merge commits created by GitHub PR have 2 parents
+          PARENTS=$(git log -1 --pretty=%P | wc -w)
+          echo "Parents: $PARENTS"
+          if [ "$PARENTS" -ge 2 ]; then
+            echo "✓ Merge commit (PR) — allowed"
+            exit 0
+          fi
+          if echo "$MSG" | grep -qE "Merge pull request|\(# [0-9]+\)"; then
+            echo "✓ Squash-merge PR message — allowed"
+            exit 0
+          fi
+          # Also allow if this push is a tag-triggered release workflow (tags point at main but push event is tags, not branches)
+          echo ""
+          echo "✗ Direct push to main blocked."
+          echo "  Push to a branch (feature/*, fix/*, chore/*) → PR to 'develop' → PR to 'main'."
+          echo "  Or: git checkout -b feature/my-change && git push -u origin feature/my-change && gh pr create --base develop"
+          echo "  Flow: feature/* → develop → release/* → main (tags v* create releases + desktop builds)"
+          exit 1
