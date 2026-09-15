@@ -51,7 +51,13 @@ export default function App() {
     void savePrefs(p);
   };
 
-  if (!ready || session === null) return null;
+  if (!ready || session === null) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-white text-black dark:bg-black dark:text-white">
+        <p className="av-small text-gray-500">Loading…</p>
+      </main>
+    );
+  }
 
   const shell =
     "min-h-screen bg-white text-black dark:bg-black dark:text-white";

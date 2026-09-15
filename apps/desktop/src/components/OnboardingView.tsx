@@ -1,6 +1,5 @@
 import { Button, Input, Logo } from "@algorith-voice/ui";
 import { useState } from "react";
-import BlurText from "./BlurText.js";
 import type { Prefs } from "./SettingsView.js";
 
 const STEPS = ["Hotkey", "Model", "Ready"];
@@ -24,9 +23,7 @@ export function OnboardingView({
   return (
     <div className="mx-auto flex min-h-full max-w-[640px] flex-col justify-center p-8">
       <Logo className="h-6 w-auto text-black dark:text-white" />
-      <h1 className="av-display mt-4">
-        <BlurText text="Welcome to Algorith Voice" delay={120} />
-      </h1>
+      <h1 className="av-display mt-4">Welcome to Algorith Voice</h1>
       <p className="av-small mt-4 text-gray-500">
         Step {step + 1} of {STEPS.length}: {STEPS[step]}
       </p>

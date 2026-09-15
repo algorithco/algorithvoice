@@ -18,3 +18,4 @@ __pycache__/
 *.key
 # Prompt specs live alongside the repo locally but are never pushed
 *-prompt.md
+*-prompt-v2.md
