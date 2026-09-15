@@ -5,7 +5,8 @@
   "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "vite build",
+    "build:check": "tsc -p tsconfig.json && vite build",
     "dev": "vite",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",

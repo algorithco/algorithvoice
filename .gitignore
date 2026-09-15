@@ -12,6 +12,8 @@ src-tauri/target/
 !.env.example
 .DS_Store
 Thumbs.db
+__pycache__/
+*.pyc
 *.pem
 *.key
 # Prompt specs live alongside the repo locally but are never pushed
