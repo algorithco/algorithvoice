@@ -16,6 +16,8 @@ permissions:
 jobs:
   build:
     strategy:
+      # One target failing must not cancel the other OS builds.
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
@@ -54,9 +56,10 @@ jobs:
           # tauri.conf's ad-hoc "-" (env wins over config), so default to "-".
           # Set the APPLE_SIGNING_IDENTITY secret for real signed releases.
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # NOTE: APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID are intentionally
+          # NOT set here. Tauri attempts notarization whenever these env vars
+          # exist (even empty) and fails on the empty Team ID. Re-add all three
+          # together when real Apple Developer credentials are available.
         with:
           projectPath: apps/desktop
           tagName: v__VERSION__
