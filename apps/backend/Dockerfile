@@ -11,7 +11,8 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json turbo.json ./
 COPY apps/backend/package.json apps/backend/
 COPY packages/shared-types/package.json packages/shared-types/
 COPY infra/prisma/package.json infra/prisma/
-RUN pnpm install --frozen-lockfile --filter @algorith-voice/backend...
+# Install all workspaces so prisma CLI is available for generate (filtered install misses dev deps)
+RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm --filter @algorith-voice/shared-types build
 RUN pnpm --filter @algorith-voice/backend exec prisma generate --schema ../../infra/prisma/schema.prisma
