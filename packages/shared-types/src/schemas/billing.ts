@@ -9,6 +9,27 @@ export const checkoutRequestSchema = z
   .strict();
 export type CheckoutRequest = z.infer<typeof checkoutRequestSchema>;
 
+export const checkoutResponseSchema = z
+  .object({
+    url: z.string().url(),
+  })
+  .strict();
+export type CheckoutResponse = z.infer<typeof checkoutResponseSchema>;
+
+export const portalRequestSchema = z
+  .object({
+    returnUrl: z.string().url(),
+  })
+  .strict();
+export type PortalRequest = z.infer<typeof portalRequestSchema>;
+
+export const portalResponseSchema = z
+  .object({
+    url: z.string().url(),
+  })
+  .strict();
+export type PortalResponse = z.infer<typeof portalResponseSchema>;
+
 export const subscriptionSchema = z
   .object({
     status: z.enum([

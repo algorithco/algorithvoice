@@ -1,8 +1,11 @@
+import { PrismaClient } from "@prisma/client";
 import { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import pino from "pino";
 import { loadEnv } from "../config/env.js";
+import { getStripe } from "../modules/billing/stripe.js";
 import { QUEUES } from "./connection.js";
+import { processStripeEvent } from "./stripe-events.js";
 
 // Separate process: `pnpm worker`. Same image, different CMD on Fly.
 const env = loadEnv();
@@ -47,9 +50,15 @@ const workers = [
     new Worker(
       "stripe.webhook-process",
       async (job) => {
-        // Phase 4: idempotent processing via StripeEvent.id.
-        log.info({ jobId: job.id }, "stripe webhook event received");
-        return { ok: true, id: job.id, processed: false };
+        const stripe = getStripe();
+        if (!stripe) throw new Error("STRIPE_SECRET_KEY not configured");
+        const prisma = new PrismaClient();
+        try {
+          const { eventId } = job.data as { eventId: string };
+          return await processStripeEvent(prisma, stripe, eventId, log);
+        } finally {
+          await prisma.$disconnect();
+        }
       },
       {
         connection: makeWorkerRedis(),
