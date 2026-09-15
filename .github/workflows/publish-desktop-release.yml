@@ -1,0 +1,58 @@
+name: publish-desktop-release
+# Copies desktop release assets from this private repo to the public
+# distribution repo algorithco/algorithvoice-app (which hosts downloads).
+#
+# Usage (after desktop artifacts land on the private release):
+#   gh workflow run publish-desktop-release -f tag=v0.2.5
+#
+# Requires repo secret PUBLIC_REPO_PAT: a fine-grained PAT with
+# Contents: read+write on algorithco/algorithvoice-app only.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.2.5)"
+        required: true
+        default: v0.2.5
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download private release assets + notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="${{ inputs.tag }}"
+          mkdir -p dist-assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist-assets
+          ls -la dist-assets
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > NOTES-public.md
+          {
+            echo ""
+            echo "---"
+            echo "Built from the private development repo. Report issues via the website."
+          } >> NOTES-public.md
+
+      - name: Create or update public release
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_PAT }}
+        run: |
+          set -e
+          TAG="${{ inputs.tag }}"
+          PUB="algorithco/algorithvoice-app"
+          if ! gh release view "$TAG" --repo "$PUB" >/dev/null 2>&1; then
+            VER="${TAG#v}"
+            gh release create "$TAG" --repo "$PUB" \
+              --title "Algorith Voice v$VER" \
+              --notes-file NOTES-public.md
+          fi
+          gh release upload "$TAG" --repo "$PUB" --clobber dist-assets/*
+          echo "Published $TAG to $PUB"
+          gh release view "$TAG" --repo "$PUB" --json url,assets --jq '{url, assets: [.assets[].name]}'
