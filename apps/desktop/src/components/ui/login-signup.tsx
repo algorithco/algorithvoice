@@ -48,13 +48,21 @@ export default function LoginCardSection({ onDone }: Props) {
   );
 
   const submit = async () => {
+    if (!email.trim() || !password) {
+      setError("Email and password are required.");
+      return;
+    }
+    if (mode === "signup" && password.length < 12) {
+      setError("Password must be at least 12 characters.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const s =
         mode === "signup"
-          ? await signup(email, password, "Desktop")
-          : await login(email, password);
+          ? await signup(email.trim(), password, "Desktop")
+          : await login(email.trim(), password);
       onDone(s);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");

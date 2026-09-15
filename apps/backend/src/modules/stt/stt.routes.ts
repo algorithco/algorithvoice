@@ -1,6 +1,9 @@
 import {
+  errorDetailsSchema,
+  errorSchema,
   FREE_CLOUD_SECONDS_PER_MONTH,
   transcribeRequestSchema,
+  transcriptSchema,
 } from "@algorith-voice/shared-types";
 import type { FastifyInstance } from "fastify";
 import { getAppEnv } from "../../config/env.js";
@@ -72,7 +75,16 @@ export async function sttRoutes(app: FastifyInstance) {
     "/stt/transcribe",
     {
       onRequest: [app.authenticate],
-      schema: { querystring: transcribeRequestSchema },
+      schema: {
+        querystring: transcribeRequestSchema,
+        response: {
+          200: transcriptSchema,
+          400: errorSchema,
+          402: errorSchema,
+          413: errorDetailsSchema,
+          503: errorSchema,
+        },
+      },
       config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
     },
     async (req, reply) => {

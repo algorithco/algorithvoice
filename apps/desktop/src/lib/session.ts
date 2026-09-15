@@ -71,9 +71,13 @@ export async function signup(
     const body = (await res.json().catch(() => null)) as {
       error?: string;
     } | null;
-    throw new Error(
-      body?.error === "unique" ? "Account already exists." : "Signup failed.",
-    );
+    const err = body?.error;
+    if (err === "email_taken" || err === "conflict" || err === "unique") {
+      throw new Error("That email is already registered.");
+    }
+    if (err === "validation_error")
+      throw new Error("Check your email and password (12+ characters).");
+    throw new Error(err ?? "Signup failed.");
   }
   const data = (await res.json()) as AuthResponse;
   await tauri("store_session", {
@@ -143,6 +147,22 @@ function parseOAuthCallbackUrl(raw: string): {
       if (!query.has(key)) query.set(key, value);
     });
   }
+  // Surface backend errors as readable messages so the Promise can reject
+  // instead of hanging forever when OAuth is not configured.
+  const error = query.get("error");
+  if (error) {
+    if (error === "oauth_not_configured") {
+      throw new Error(
+        "Google/GitHub sign-in is not configured on this server. Use email sign-in or contact support.",
+      );
+    }
+    if (error === "not_implemented") {
+      throw new Error(
+        "Google/GitHub sign-in is coming soon — please use email sign-in for now.",
+      );
+    }
+    throw new Error(error);
+  }
   const accessToken =
     query.get("accessToken") ?? query.get("access_token") ?? query.get("token");
   const email = query.get("email");
@@ -176,19 +196,24 @@ export async function signInWithOAuth(
   });
   const unlisten = await listen<string[]>("auth-callback", (event) => {
     for (const raw of event.payload ?? []) {
-      const parsed = parseOAuthCallbackUrl(raw);
-      if (!parsed) continue;
-      void tauri("store_session", {
-        accessToken: parsed.accessToken,
-        email: parsed.email,
-      }).then(
-        () => resolveSession({ loggedIn: true, email: parsed.email }),
-        () =>
-          rejectSession(
-            new Error("Signed in, but the session could not be saved."),
-          ),
-      );
-      return;
+      try {
+        const parsed = parseOAuthCallbackUrl(raw);
+        if (!parsed) continue;
+        void tauri("store_session", {
+          accessToken: parsed.accessToken,
+          email: parsed.email,
+        }).then(
+          () => resolveSession({ loggedIn: true, email: parsed.email }),
+          () =>
+            rejectSession(
+              new Error("Signed in, but the session could not be saved."),
+            ),
+        );
+        return;
+      } catch (e) {
+        rejectSession(e instanceof Error ? e : new Error(String(e)));
+        return;
+      }
     }
   });
   try {

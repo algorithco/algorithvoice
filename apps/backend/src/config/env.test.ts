@@ -6,7 +6,7 @@ const BASE = {
   REDIS_URL: "redis://localhost:6379",
   JWT_ACCESS_SECRET: "a".repeat(32),
   JWT_REFRESH_PEPPER: "b".repeat(16),
-  ENCRYPTION_KEK: "A".repeat(43) + "=",
+  ENCRYPTION_KEK: `${"A".repeat(43)}=`,
 };
 
 describe("loadEnv", () => {

@@ -1,5 +1,6 @@
 "use client";
 
+import { signupSchema } from "@algorith-voice/shared-types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -21,8 +22,14 @@ export default function RegisterPage() {
       setErr("Passwords do not match.");
       return;
     }
-    if (password.length < 12) {
-      setErr("Password must be at least 12 characters.");
+    const parsed = signupSchema.safeParse({
+      email: email.trim(),
+      password,
+      ...(name.trim() ? { name: name.trim() } : {}),
+    });
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      setErr(issue.message ?? "Check your input.");
       return;
     }
     setBusy(true);

@@ -7,10 +7,10 @@ import { cn } from "../lib/cn.js";
 const buttonVariants = cva(
   "av-body inline-flex cursor-pointer items-center justify-center rounded-control transition-opacity duration-150 ease-app disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--av-focus-ring)",
   {
-      variants: {
-        variant: {
-          primary:
-            "bg-black text-white hover:opacity-85 disabled:border-transparent disabled:bg-gray-200 disabled:text-gray-500 dark:bg-white dark:text-black dark:disabled:border-transparent dark:disabled:bg-gray-800 dark:disabled:text-gray-500",
+    variants: {
+      variant: {
+        primary:
+          "bg-black text-white hover:opacity-85 disabled:border-transparent disabled:bg-gray-200 disabled:text-gray-500 dark:bg-white dark:text-black dark:disabled:border-transparent dark:disabled:bg-gray-800 dark:disabled:text-gray-500",
         secondary:
           "border border-gray-200 bg-transparent text-black hover:bg-gray-200 dark:border-gray-800 dark:text-white dark:hover:bg-gray-800",
         ghost:

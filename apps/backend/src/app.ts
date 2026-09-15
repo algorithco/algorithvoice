@@ -5,10 +5,13 @@ import helmet from "@fastify/helmet";
 import jwt from "@fastify/jwt";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import {
   hasZodFastifySchemaValidationErrors,
+  jsonSchemaTransform,
   serializerCompiler,
   validatorCompiler,
   type ZodTypeProvider,
@@ -67,6 +70,29 @@ export function buildApp() {
   app.register(multipart, { limits: { fileSize: 25 * 1024 * 1024 } });
   app.register(rateLimit, { global: true, max: 100, timeWindow: "1 minute" });
   app.register(websocket);
+
+  app.register(swagger, {
+    openapi: {
+      openapi: "3.0.0",
+      info: {
+        title: "Algorith Voice API",
+        description:
+          "Accounts, licensing, billing, usage, and cloud transcription for the Algorith Voice desktop app.",
+        version: "0.1.0",
+      },
+      servers: [{ url: env.API_URL ?? `http://localhost:${env.PORT}` }],
+      components: {
+        securitySchemes: {
+          bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+        },
+      },
+    },
+    transform: jsonSchemaTransform,
+  });
+  app.register(swaggerUi, {
+    routePrefix: "/docs",
+    uiConfig: { docExpansion: "list", deepLinking: true },
+  });
 
   app.register(prismaPlugin);
   app.register(jwtPlugin);

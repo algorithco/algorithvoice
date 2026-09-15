@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 
 const API = process.env.API_URL ?? "http://localhost:3001";
+const COOKIE_NAME = "__Host-av_at";
+const COOKIE_MAX_AGE = 60 * 15;
 
-async function proxy(req: Request, path: string) {
-  const res = await fetch(`${API}${path}`, {
+export async function POST(req: Request) {
+  const body = await req.text();
+  const res = await fetch(`${API}/auth/signup`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: await req.text(),
+    body,
   });
   const text = await res.text();
   const headers = new Headers({
@@ -14,9 +17,29 @@ async function proxy(req: Request, path: string) {
   });
   const setCookie = res.headers.get("set-cookie");
   if (setCookie) headers.set("set-cookie", setCookie);
-  return new NextResponse(text, { status: res.status, headers });
-}
 
-export async function POST(req: Request) {
-  return proxy(req, "/auth/signup");
+  if (res.ok) {
+    try {
+      const data = JSON.parse(text) as { accessToken?: string };
+      const token = data.accessToken;
+      if (token) {
+        const isProd = process.env.NODE_ENV === "production";
+        const response = new NextResponse(text, {
+          status: res.status,
+          headers,
+        });
+        response.cookies.set(COOKIE_NAME, token, {
+          httpOnly: true,
+          secure: isProd,
+          sameSite: "lax",
+          path: "/",
+          maxAge: COOKIE_MAX_AGE,
+        });
+        return response;
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return new NextResponse(text, { status: res.status, headers });
 }

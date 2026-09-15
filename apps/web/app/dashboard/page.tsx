@@ -1,11 +1,63 @@
+import { redirect } from "next/navigation";
 import { Reveal } from "../../components/Reveal";
 import { SiteFooter } from "../../components/SiteFooter";
 import { SiteNav } from "../../components/SiteNav";
+import { getSession } from "../../lib/dal";
 
-const WIDGETS = ["Usage this period", "Devices", "Subscription"];
+export default async function DashboardPage() {
+  const session = await getSession();
+  if (!session) redirect("/login");
 
-export default function DashboardPage() {
-  // Server Component: session validated via BFF -> Fastify GET /me (Phase 4 wiring).
+  const API = process.env.API_URL ?? "http://localhost:3001";
+  const headers = { Authorization: `Bearer ${session.token}` };
+
+  const [usageRes, subRes] = await Promise.all([
+    fetch(`${API}/usage/summary`, { headers, cache: "no-store" })
+      .then(async (r) => (r.ok ? ((await r.json()) as unknown) : null))
+      .catch(() => null),
+    fetch(`${API}/billing/subscription`, { headers, cache: "no-store" })
+      .then(async (r) => (r.ok ? ((await r.json()) as unknown) : null))
+      .catch(() => null),
+  ]);
+
+  const usage = usageRes as {
+    cloudSecondsUsed: number;
+    cloudSecondsLimit: number;
+    requests: number;
+    planTier: string;
+  } | null;
+  const sub = subRes as {
+    status: string;
+    planTier: string;
+    currentPeriodEnd: string | null;
+  } | null;
+
+  const widgets = [
+    {
+      label: "Usage this period",
+      value:
+        usage != null
+          ? `${Math.round(usage.cloudSecondsUsed)}s / ${usage.cloudSecondsLimit === -1 ? "∞" : `${usage.cloudSecondsLimit}s`}`
+          : "—",
+      hint:
+        usage != null
+          ? `${usage.requests} requests · ${usage.planTier}`
+          : "No data yet.",
+    },
+    {
+      label: "Subscription",
+      value: sub != null ? `${sub.status} · ${sub.planTier}` : "—",
+      hint: sub?.currentPeriodEnd
+        ? `Renews ${new Date(sub.currentPeriodEnd).toLocaleDateString()}`
+        : "No data yet.",
+    },
+    {
+      label: "Account",
+      value: session.user.email,
+      hint: `Plan ${session.user.planTier} · ${session.user.name ?? "no name"}`,
+    },
+  ];
+
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
@@ -14,17 +66,16 @@ export default function DashboardPage() {
           <p className="t-cap text-faint">Dashboard</p>
           <h1 className="t-h1 mt-4">Control deck.</h1>
           <p className="t-body mt-4 max-w-[68ch] text-sub">
-            Usage, devices, billing, and history. Full wiring ships with billing
-            in Phase 4.
+            Signed in as {session.user.email} · {session.user.planTier}
           </p>
         </Reveal>
         <div className="mt-12 grid gap-6 md:grid-cols-3">
-          {WIDGETS.map((t, i) => (
-            <Reveal key={t} delay={i * 80}>
+          {widgets.map((w, i) => (
+            <Reveal key={w.label} delay={i * 80}>
               <div className="h-full rounded-lg border border-line bg-surface p-8">
-                <p className="t-cap text-faint">{t}</p>
-                <p className="t-h2 mt-4 text-sub">—</p>
-                <p className="t-body mt-2 text-faint">No data yet.</p>
+                <p className="t-cap text-faint">{w.label}</p>
+                <p className="t-h2 mt-4 text-sub">{w.value}</p>
+                <p className="t-body mt-2 text-faint">{w.hint}</p>
               </div>
             </Reveal>
           ))}

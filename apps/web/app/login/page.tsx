@@ -1,5 +1,6 @@
 "use client";
 
+import { loginSchema } from "@algorith-voice/shared-types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -16,6 +17,12 @@ export default function LoginPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const parsed = loginSchema.safeParse({ email: email.trim(), password });
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      setErr(issue.message ?? "Check your email and password.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -26,7 +33,11 @@ export default function LoginPage() {
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
-        setErr(data.error ?? "Login failed.");
+        setErr(
+          data.error === "invalid_credentials"
+            ? "Invalid email or password."
+            : (data.error ?? "Login failed."),
+        );
         return;
       }
       router.push("/dashboard");

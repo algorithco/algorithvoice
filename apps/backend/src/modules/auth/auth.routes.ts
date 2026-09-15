@@ -162,6 +162,46 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.code(501).send({ error: "not_implemented" });
   });
 
+  // Desktop deep-link flow: GET /auth/oauth/:provider/start?callback=algorithvoice://auth-callback&device=Desktop
+  // Opens system browser; backend must validate and either redirect to provider OAuth
+  // or redirect back to the deep-link with an error so the Tauri shell can complete.
+  app.get("/oauth/:provider/start", async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    const query = req.query as { callback?: string; device?: string };
+    const callback = query.callback ?? "algorithvoice://auth-callback";
+    const allowedProviders = new Set(["google", "github"]);
+    if (!allowedProviders.has(provider)) {
+      return reply.code(400).send({ error: "unknown_provider" });
+    }
+    // Validate callback scheme — must be algorithvoice:// to avoid open redirect.
+    const isValidCallback =
+      typeof callback === "string" &&
+      callback.toLowerCase().startsWith("algorithvoice:");
+    if (!isValidCallback) {
+      return reply.code(400).send({ error: "invalid_callback" });
+    }
+    // Phase 3 will redirect to real provider OAuth. Until env is configured,
+    // redirect back with error so desktop's auth-callback listener resolves
+    // (otherwise openUrl would show a dead 501 page with no deep-link return).
+    const { getAppEnv } = await import("../../config/env.js");
+    const env = getAppEnv();
+    const configured =
+      provider === "google"
+        ? !!env.OAUTH_GOOGLE_CLIENT_ID && !!env.OAUTH_GOOGLE_CLIENT_SECRET
+        : !!env.OAUTH_GITHUB_CLIENT_ID && !!env.OAUTH_GITHUB_CLIENT_SECRET;
+    if (!configured) {
+      const url = new URL(callback);
+      url.searchParams.set("error", "oauth_not_configured");
+      url.searchParams.set("provider", provider);
+      return reply.redirect(url.toString(), 302);
+    }
+    // Configured but Phase 3 handler not yet wired — return honest stub redirect.
+    const url = new URL(callback);
+    url.searchParams.set("error", "not_implemented");
+    url.searchParams.set("provider", provider);
+    return reply.redirect(url.toString(), 302);
+  });
+
   app.get(
     "/me",
     {

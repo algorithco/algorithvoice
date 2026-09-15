@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 const API = process.env.API_URL ?? "http://localhost:3001";
@@ -5,11 +6,18 @@ const API = process.env.API_URL ?? "http://localhost:3001";
 // Generic BFF proxy: browser -> /api/* (same-origin, httpOnly cookies) -> Fastify.
 async function proxy(req: Request, path: string) {
   const url = `${API}${path}`;
+  const cookieStore = await cookies();
+  const token = cookieStore.get("__Host-av_at")?.value;
+  const headers: Record<string, string> = {
+    "content-type": req.headers.get("content-type") ?? "application/json",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  // Forward Authorization if present in original request (for BFF auth passthrough)
+  const incomingAuth = req.headers.get("authorization");
+  if (incomingAuth) headers.Authorization = incomingAuth;
   const res = await fetch(url, {
     method: req.method,
-    headers: {
-      "content-type": req.headers.get("content-type") ?? "application/json",
-    },
+    headers,
     body:
       req.method === "GET" || req.method === "HEAD"
         ? undefined
