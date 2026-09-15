@@ -2,16 +2,22 @@ name: deploy-backend
 on:
   push:
     branches: [main]
-    paths: ["apps/backend/**", "infra/prisma/**", "packages/shared-types/**"]
+    paths: ["apps/backend/**", "infra/prisma/**", "packages/shared-types/**", "infra/fly.toml"]
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: production
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --config infra/fly.toml --image ${{ secrets.BACKEND_IMAGE }} --ha=false
+      # Builds apps/backend/Dockerfile from the repo root; the
+      # [deploy] release_command runs prisma migrate deploy first.
+      - run: flyctl deploy --config infra/fly.toml
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - run: flyctl status --config infra/fly.toml
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

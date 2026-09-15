@@ -14,7 +14,9 @@ export default fp(async (app: FastifyInstance) => {
       try {
         await req.jwtVerify();
       } catch {
-        reply.code(401).send({ error: "unauthorized" });
+        // Must return the reply: otherwise Fastify continues into the
+        // route handler with req.user unset (auth bypass + double-send).
+        return reply.code(401).send({ error: "unauthorized" });
       }
     },
   );

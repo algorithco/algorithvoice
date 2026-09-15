@@ -34,14 +34,20 @@ enum DeviceType {
   DESKTOP_LINUX
 }
 
+enum PlanTier {
+  free
+  pro
+}
+
 model User {
   id               String         @id @default(cuid())
   email            String         @unique
   passwordHash     String?
   name             String?
   stripeCustomerId String?        @unique
-  planTier         String         @default("free")
+  planTier         PlanTier       @default(free)
   createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
   accounts         Account[]
   sessions         Session[]
   devices          Device[]
@@ -61,23 +67,29 @@ model Account {
   email        String?
   accessToken  String?
   refreshToken String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@unique([provider, providerId])
+  @@index([userId])
 }
 
 model Session {
   id              String    @id @default(uuid())
   userId          String
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refreshHash     String
+  refreshHash     String    @unique
   familyId        String
   deviceInfo      String?
   ip              String?
   expiresAt       DateTime
   absoluteLimitAt DateTime
   revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
 
   @@index([userId, familyId])
+  @@index([familyId])
+  @@index([expiresAt])
 }
 
 model Device {
@@ -92,6 +104,8 @@ model Device {
   createdAt    DateTime   @default(now())
 
   @@index([userId])
+  @@index([userId, fingerprint])
+  @@index([userId, createdAt])
 }
 
 model Subscription {
@@ -105,8 +119,11 @@ model Subscription {
   currentPeriodEnd     DateTime
   cancelAtPeriodEnd    Boolean    @default(false)
   usageRecords         UsageRecord[]
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 
   @@index([userId, status])
+  @@index([status, currentPeriodEnd])
 }
 
 model UsageRecord {
@@ -114,10 +131,10 @@ model UsageRecord {
   userId         String
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   subscriptionId String?
-  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   deviceId       String?
   metric         UsageMetric
-  quantity       Float
+  quantity       Decimal      @db.Decimal(12, 3)
   model          String?
   latencyMs      Int?
   stripeEventId  String?
@@ -126,7 +143,9 @@ model UsageRecord {
   recordedAt     DateTime     @default(now())
 
   @@index([userId, metric, recordedAt])
-  @@index([reportedToStripe])
+  @@index([reportedToStripe, recordedAt])
+  @@index([subscriptionId])
+  @@index([deviceId])
 }
 
 model AudioAsset {
@@ -142,19 +161,26 @@ model AudioAsset {
   createdAt      DateTime @default(now())
 
   @@index([userId, createdAt])
+  @@index([retentionUntil])
+  @@index([userId, retentionUntil])
 }
 
 model ProviderKey {
   id          String   @id @default(cuid())
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String
   wrappedDek  String
   ciphertext  String
   nonce       String
+  algorithm   String   @default("XChaCha20-Poly1305")
   kekVersion  Int      @default(1)
   last4       String
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  revokedAt   DateTime?
 
+  @@unique([userId, provider])
   @@index([userId])
 }
 
@@ -162,7 +188,13 @@ model StripeEvent {
   id          String   @id
   type        String
   payload     Json
+  status      String   @default("received")
+  attempts    Int      @default(0)
+  lastError   String?
   processedAt DateTime @default(now())
+
+  @@index([status, processedAt])
+  @@index([type, processedAt])
 }
 
 model AuditLog {
@@ -179,4 +211,7 @@ model AuditLog {
   createdAt    DateTime @default(now())
 
   @@index([actorUserId, createdAt])
+  @@index([model, recordId, createdAt])
+  @@index([action, createdAt])
+  @@index([createdAt])
 }

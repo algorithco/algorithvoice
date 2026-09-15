@@ -1,152 +1,239 @@
+import {
+  FREE_CLOUD_SECONDS_PER_MONTH,
+  transcribeRequestSchema,
+} from "@algorith-voice/shared-types";
 import type { FastifyInstance } from "fastify";
+import { getAppEnv } from "../../config/env.js";
+import { enqueueMetering } from "../../queues/connection.js";
+import {
+  isAbortError,
+  mimeForFormat,
+  ProviderError,
+  resolveAudioFormat,
+  resolveDurationSec,
+} from "./stt.utils.js";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/audio/transcriptions";
-const PRIMARY_MODEL = "nvidia/parakeet-tdt-0.6b-v3";
-const FALLBACK_MODEL = "openai/whisper-large-v3";
+const MAX_SYNC_BYTES = 25 * 1024 * 1024;
+
+interface ProviderOut {
+  text: string;
+  language?: string;
+  duration?: number;
+  usage?: { cost?: number };
+}
 
 async function transcribeViaOpenRouter(
   apiKey: string,
-  audio: Buffer,
+  audio: ArrayBuffer,
+  filename: string,
   format: string,
   model: string,
   language?: string,
-) {
-  const base64 = audio.toString("base64");
-  const res = await fetch(OPENROUTER_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      input_audio: { data: base64, format },
-      language,
-      response_format: "verbose_json",
-      timestamp_granularities: ["segment"],
-    }),
-  });
-  if (!res.ok)
-    throw Object.assign(new Error(`stt provider ${res.status}`), {
-      statusCode: 502,
+): Promise<ProviderOut> {
+  const appUrl = getAppEnv().APP_URL;
+  const form = new FormData();
+  form.set(
+    "file",
+    new Blob([audio], { type: mimeForFormat(format) }),
+    filename,
+  );
+  form.set("model", model);
+  if (language && language !== "auto") form.set("language", language);
+
+  let res: Response;
+  try {
+    res = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": appUrl,
+        "X-Title": "Algorith Voice",
+      },
+      body: form,
+      signal: AbortSignal.timeout(10_000),
     });
-  return res.json() as Promise<{
-    text: string;
-    language?: string;
-    duration?: number;
-    usage?: { cost?: number };
-  }>;
+  } catch (e: unknown) {
+    if (isAbortError(e)) throw new ProviderError(504, "provider timeout");
+    throw new ProviderError(
+      503,
+      e instanceof Error ? e.message : "network error",
+    );
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new ProviderError(res.status, body.slice(0, 500));
+  }
+  return (await res.json()) as ProviderOut;
 }
 
 export async function sttRoutes(app: FastifyInstance) {
-  // Non-streaming fallback. Primary Voxtral-Realtime WS lands with /stt/stream in Phase 2.
   app.post(
     "/stt/transcribe",
-    { onRequest: [app.authenticate] },
+    {
+      onRequest: [app.authenticate],
+      schema: { querystring: transcribeRequestSchema },
+      config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
+    },
     async (req, reply) => {
-      const apiKey = process.env.OPENROUTER_API_KEY;
-      if (!apiKey)
-        return reply
-          .code(501)
-          .send({ error: "stt_not_configured", next: "phase-2" });
+      const apiKey = getAppEnv().OPENROUTER_API_KEY;
+      if (!apiKey) {
+        return reply.code(503).send({ error: "stt_unavailable" });
+      }
+      const { sub } = req.user as { sub: string };
+      const { language, model } = req.query as {
+        language?: string;
+        model?: string;
+      };
+
+      const primary = getAppEnv().STT_PRIMARY;
+      const fallback = getAppEnv().STT_FALLBACK;
+      const allowed = new Set([primary, fallback]);
+      const chosen = model ?? primary;
+      if (!allowed.has(chosen)) {
+        return reply.code(400).send({ error: "unsupported_model" });
+      }
+
+      // Quota gate BEFORE buffering audio or spending provider money.
+      const user = await app.prisma.user.findUniqueOrThrow({
+        where: { id: sub },
+      });
+      if (user.planTier !== "pro") {
+        const now = new Date();
+        const periodStart = new Date(
+          Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+        );
+        const used = await app.prisma.usageRecord.aggregate({
+          where: {
+            userId: sub,
+            metric: "STT_SECONDS",
+            recordedAt: { gte: periodStart },
+          },
+          _sum: { quantity: true },
+        });
+        const rawQty = used._sum.quantity;
+        const usedSec =
+          typeof rawQty === "number" ? rawQty : (rawQty?.toNumber() ?? 0);
+        if (usedSec >= FREE_CLOUD_SECONDS_PER_MONTH) {
+          await app.prisma.auditLog.create({
+            data: { actorUserId: sub, action: "stt.quota_exceeded" },
+          });
+          return reply.code(402).send({ error: "quota_exceeded" });
+        }
+      }
+
       const file = await req.file();
       if (!file) return reply.code(400).send({ error: "audio_required" });
       const chunks: Uint8Array[] = [];
-      for await (const c of file.file) chunks.push(c as Uint8Array);
-      const total = chunks.reduce((n, c) => n + c.byteLength, 0);
-      const merged = new Uint8Array(total);
+      let total = 0;
+      for await (const chunk of file.file) {
+        const c = chunk as Uint8Array;
+        total += c.byteLength;
+        if (total > MAX_SYNC_BYTES) {
+          file.file.destroy();
+          return reply.code(413).send({ error: "audio_too_large", maxMb: 25 });
+        }
+        chunks.push(c);
+      }
+      const merged = new Uint8Array(new ArrayBuffer(total));
       let off = 0;
       for (const c of chunks) {
         merged.set(c, off);
         off += c.byteLength;
       }
-      const audio = Buffer.from(merged);
-      const format = (file.filename?.split(".").pop() ?? "wav").toLowerCase();
-      const { language, model } = (req.query ?? {}) as {
-        language?: string;
-        model?: string;
-      };
+      const audio = merged.buffer as ArrayBuffer;
+
+      const format = resolveAudioFormat(file.filename, merged);
+      if (!format) {
+        return reply.code(400).send({ error: "unsupported_audio_format" });
+      }
 
       const started = Date.now();
+      const meter = (durationSec: number, usedModel: string, cost?: number) => {
+        enqueueMetering({
+          sessionId: req.id,
+          seq: 0,
+          userId: sub,
+          metric: "STT_SECONDS",
+          quantity: durationSec,
+          model: usedModel,
+          latencyMs: Date.now() - started,
+          providerCost: cost,
+        }).catch((err: unknown) => {
+          // Metering must never break transcription — but must never
+          // fail silently either. Queue retries; this log is the alarm.
+          req.log.error({ err, userId: sub }, "metering enqueue failed");
+        });
+      };
+
+      const respond = (
+        out: ProviderOut,
+        usedModel: string,
+        isFallback: boolean,
+      ) => {
+        const durationSec = resolveDurationSec(out.duration, merged, format);
+        meter(durationSec, usedModel, out.usage?.cost);
+        if (isFallback) reply.header("X-STT-Fallback", "1");
+        return {
+          text: out.text,
+          language: out.language,
+          durationSec,
+          model: usedModel,
+        };
+      };
+
       try {
         const out = await transcribeViaOpenRouter(
           apiKey,
           audio,
+          file.filename ?? "audio.wav",
           format,
-          model ?? PRIMARY_MODEL,
+          chosen,
           language,
         );
-        await meter(
-          app,
-          req,
-          out.duration ?? 0,
-          model ?? PRIMARY_MODEL,
-          Date.now() - started,
+        return respond(out, chosen, false);
+      } catch (e: unknown) {
+        const retryable =
+          e instanceof ProviderError ? e.retryable : isAbortError(e);
+        if (!retryable) throw e;
+        if (chosen === fallback) throw e;
+        req.log.warn(
+          { model: chosen, err: e instanceof Error ? e.message : e },
+          "stt primary failed, trying fallback",
         );
-        return {
-          text: out.text,
-          language: out.language,
-          model: model ?? PRIMARY_MODEL,
-        };
-      } catch {
-        const out = await transcribeViaOpenRouter(
-          apiKey,
-          audio,
-          format,
-          FALLBACK_MODEL,
-          language,
-        );
-        await meter(
-          app,
-          req,
-          out.duration ?? 0,
-          FALLBACK_MODEL,
-          Date.now() - started,
-        );
-        return {
-          text: out.text,
-          language: out.language,
-          model: FALLBACK_MODEL,
-          fallback: true,
-        };
+        try {
+          const out = await transcribeViaOpenRouter(
+            apiKey,
+            audio,
+            file.filename ?? "audio.wav",
+            format,
+            fallback,
+            language,
+          );
+          return respond(out, fallback, true);
+        } catch (fallbackErr: unknown) {
+          req.log.error(
+            {
+              err:
+                fallbackErr instanceof Error
+                  ? fallbackErr.message
+                  : fallbackErr,
+            },
+            "stt fallback failed",
+          );
+          throw fallbackErr;
+        }
       }
     },
   );
 
-  // Streaming: Phase 2 implements Voxtral Realtime proxy (binary PCM16 16k, 60ms frames).
-  // Contract is frozen in @algorith-voice/shared-types voice schemas.
+  // Streaming: Phase 2 proxies Mistral Voxtral Realtime here.
+  // Auth strategy (frozen): POST /stt/token mints a short-lived JWT;
+  // the WS verifies ?token= and closes 4401 on failure. Browsers cannot
+  // send Authorization headers on WebSocket(), so long-lived access
+  // tokens are never accepted in the URL.
   app.get("/stt/stream", { websocket: true }, (socket) => {
-    socket.send(
-      JSON.stringify({
-        type: "error",
-        code: "not_implemented",
-        next: "phase-2",
-      }),
-    );
-    socket.close();
+    socket.send(JSON.stringify({ type: "error", code: "not_implemented" }));
+    socket.close(1013, "try again later");
   });
-}
-
-async function meter(
-  app: FastifyInstance,
-  req: { user?: unknown },
-  durationSec: number,
-  model: string,
-  latencyMs: number,
-) {
-  try {
-    const { sub } = (req.user ?? {}) as { sub?: string };
-    if (!sub) return;
-    await app.prisma.usageRecord.create({
-      data: {
-        userId: sub,
-        metric: "STT_SECONDS",
-        quantity: durationSec,
-        model,
-        latencyMs,
-      },
-    });
-  } catch {
-    // metering must never break transcription
-  }
 }

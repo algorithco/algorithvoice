@@ -1,30 +1,49 @@
-import { licenseActivateSchema } from "@algorith-voice/shared-types";
+import {
+  LICENSE_SEATS,
+  licenseActivateSchema,
+  OFFLINE_GRACE_DAYS,
+} from "@algorith-voice/shared-types";
 import type { FastifyInstance } from "fastify";
 
-// 3 seats/user, 7d offline grace (grace enforced client-side via exp + server refresh).
+// Phase 3 implements seat counting (LICENSE_SEATS), fingerprint binding,
+// and RS256 license JWTs with 7d offline grace. Until then both endpoints
+// require authentication and return honest stubs — no bypass paths.
 export async function licenseRoutes(app: FastifyInstance) {
   app.post(
     "/activate",
-    { schema: { body: licenseActivateSchema } },
-    async (req) => {
-      const { sub } = (req.user ?? {}) as { sub?: string };
-      if (!sub) {
-        const { code } = req.query as { code?: string };
-        if (!code)
-          throw Object.assign(
-            new Error("auth required (Bearer or device code)"),
-            { statusCode: 401 },
-          );
+    { onRequest: [app.authenticate], schema: { body: licenseActivateSchema } },
+    async (req, reply) => {
+      const { sub } = req.user as { sub: string };
+      const device = await app.prisma.device.findFirst({
+        where: { userId: sub },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          lastSeenAt: true,
+          createdAt: true,
+        },
+      });
+      if (!device) {
+        return reply.code(404).send({ error: "no_device" });
       }
-      // TODO Phase 3: seat counting (max 3), fingerprint binding, RS256 license JWT.
       return {
         licenseJwt: "stub.license.jwt",
+        device: {
+          id: device.id,
+          name: device.name,
+          type: device.type.toLowerCase().replace("_", "-"),
+          lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
+          createdAt: device.createdAt.toISOString(),
+        },
         seatsUsed: 1,
-        seatsMax: 3,
-        next: "phase-3",
+        seatsMax: LICENSE_SEATS,
       };
     },
   );
 
-  app.post("/validate", async () => ({ valid: true, graceDays: 7 }));
+  app.post("/validate", { onRequest: [app.authenticate] }, async () => ({
+    valid: false,
+    graceDays: OFFLINE_GRACE_DAYS,
+  }));
 }

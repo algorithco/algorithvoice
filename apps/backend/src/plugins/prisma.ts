@@ -9,7 +9,9 @@ declare module "fastify" {
 }
 
 export default fp(async (app: FastifyInstance) => {
-  const prisma = new PrismaClient();
+  const prisma = new PrismaClient({
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+  });
   await prisma.$connect();
   app.decorate("prisma", prisma);
   app.addHook("onClose", async () => {

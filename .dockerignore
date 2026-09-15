@@ -1,0 +1,10 @@
+node_modules
+dist
+.next
+.git
+.env
+.env.local
+*.pem
+*.key
+src-tauri/target
+coverage
