@@ -12,7 +12,7 @@ Desktop (Tauri 2 + Rust) <— WS/REST —> Backend (Fastify 5) <— BFF —> Web
 ## Monorepo
 
 ```
-algorith-voice/
+.  (repo root)
 ├── apps/desktop   # Tauri 2 (Rust + React)
 ├── apps/web       # Next.js 16 marketing + dashboard
 ├── apps/backend   # Fastify 5 API + WS
@@ -40,7 +40,7 @@ pnpm dev
 
 ## Design system
 
-Pure `#000/#FFF` + `#0A0A0A/#1A1A1A/#E5E5E5/#F5F5F5` only. Inter/system font. 2–6px radius. Dark default. 150–200ms transitions. No gradients, no accent colors — including charts and emails.
+Pure `#000/#FFF` + `#0A0A0A/#F7F7F7/#111/#1E1E1E/#333/#6E6E6E/#B8B8B8/#E4E4E4` only. Inter + Inter Tight display + JetBrains Mono. 4px controls / 8px cards. Dark default. 150–200ms transitions. No gradients, no accent colors — including charts and emails. Full spec: `apps/web/design-system`.
 
 ## Privacy
 

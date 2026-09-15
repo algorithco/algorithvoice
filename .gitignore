@@ -13,3 +13,5 @@ src-tauri/target/
 Thumbs.db
 *.pem
 *.key
+# Prompt specs live alongside the repo locally but are never pushed
+*-prompt.md
