@@ -1,0 +1,87 @@
+name: promote-release
+# Helper to cut a release branch from develop and open a PR to main.
+# Usage: gh workflow run promote-release --ref develop -f version=0.2.0
+# Then merge the PR → tag v0.2.0 → release + release-desktop run automatically.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver without v (e.g. 0.2.0)"
+        required: true
+        type: string
+      from:
+        description: "Source branch (usually develop)"
+        required: false
+        default: develop
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.from }}
+          fetch-depth: 0
+
+      - name: Create release branch
+        run: |
+          set -e
+          VER="${{ inputs.version }}"
+          VER="${VER#v}"
+          BRANCH="release/v$VER"
+          if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
+            echo "Branch $BRANCH already exists"
+            exit 1
+          fi
+          git checkout -b "$BRANCH"
+          # Bump versions in package.jsons (keep 0.1.0 → new) — optional, keep single source:
+          # We only update root + apps/* + packages/* version fields if they exist as 0.1.0
+          # Use pnpm version via json edit without git tag
+          for f in package.json apps/*/package.json packages/*/package.json infra/prisma/package.json; do
+            if [ -f "$f" ]; then
+              # Only bump if current version is 0.1.0 or already Semver; use node to edit
+              node -e "let p=require('./$f'); p.version='$VER'; require('fs').writeFileSync('./$f', JSON.stringify(p,null,2)+'\n')"
+            fi
+          done
+          # Tauri version
+          if [ -f apps/desktop/src-tauri/tauri.conf.json ]; then
+            node -e "let c=require('./apps/desktop/src-tauri/tauri.conf.json'); c.version='$VER'; require('fs').writeFileSync('./apps/desktop/src-tauri/tauri.conf.json', JSON.stringify(c,null,2)+'\n')"
+          fi
+          if [ -f apps/desktop/src-tauri/Cargo.toml ]; then
+            # naive bump version = "x.y.z"
+            sed -i -E "s/^version = \".*\"/version = \"$VER\"/" apps/desktop/src-tauri/Cargo.toml || true
+          fi
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No version bumps needed"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore(release): v$VER"
+          fi
+          git push -u origin "$BRANCH"
+
+      - name: Open PR to main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="${{ inputs.version }}"
+          VER="${VER#v}"
+          BRANCH="release/v$VER"
+          gh pr create --base main --head "$BRANCH" \
+            --title "release: v$VER" \
+            --body "Cut release \`v$VER\` from \`${{ inputs.from }}\`.
+
+          **Flow**
+          1. Merge this PR → \`main\`
+          2. \`git tag v$VER && git push origin v$VER\` (or use \`release\` workflow dispatch)
+          3. GitHub Release + desktop artifacts build automatically
+
+          Checklist: CI green, \`pnpm -r run build\` ok, CHANGELOG updated." \
+            --label release || gh pr create --base main --head "$BRANCH" --title "release: v$VER" --body "release v$VER"

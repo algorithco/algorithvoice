@@ -1,0 +1,7 @@
+# Default owners — require review on PRs to main/develop
+* @Hamroqulovv
+
+# Sensitive areas need explicit review
+/apps/backend/src/config/ @Hamroqulovv
+/infra/prisma/ @Hamroqulovv
+/.github/workflows/ @Hamroqulovv

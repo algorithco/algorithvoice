@@ -80,6 +80,7 @@ impl AppState {
 /// `app_data_dir`, shared via `.manage()`. Phase 3 history lands here;
 /// commands added later read/write through this lock with prepared
 /// statements (no string-interpolated SQL).
+#[allow(dead_code)]
 pub struct Db(pub Mutex<rusqlite::Connection>);
 
 /// Matches the frontend `SessionInfo` shape exactly:

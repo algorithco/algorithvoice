@@ -1,0 +1,98 @@
+name: release
+# Create a GitHub Release from a semver tag v*.*.*.
+# Flow: bump version on develop → PR to main → tag vX.Y.Z on main → this runs → desktop builds follow.
+# Also supports manual dispatch to cut a release without pushing a tag locally.
+on:
+  push:
+    tags: ["v*.*.*", "v*.*.*-*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver without leading v (e.g. 0.2.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as prerelease"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VER="${{ inputs.version }}"
+            VER="${VER#v}"
+            echo "version=$VER" >> "$GITHUB_OUTPUT"
+            echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.prerelease }}" = "true" ]; then
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            VER="${TAG#v}"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "version=$VER" >> "$GITHUB_OUTPUT"
+            if echo "$TAG" | grep -q "-"; then
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          cat "$GITHUB_OUTPUT"
+
+      - name: Create tag if dispatched
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists"
+          else
+            git tag "$TAG" -m "release $TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Generate release notes
+        run: |
+          # GitHub's auto-generated notes, plus our changelog header
+          gh api /repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="${{ steps.ver.outputs.tag }}" \
+            -f target_commitish="main" \
+            -q .body > NOTES.md
+          cat NOTES.md
+          echo "" >> NOTES.md
+          echo "---" >> NOTES.md
+          echo "Backend: \`flyctl deploy\` runs automatically on tag push. Desktop artifacts build via \`release-desktop\` workflow." >> NOTES.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Algorith Voice v${{ steps.ver.outputs.version }}
+          body_path: NOTES.md
+          prerelease: ${{ steps.ver.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "✓ Release ${{ steps.ver.outputs.tag }} created"
+          echo "  Desktop builds (release-desktop) will trigger on this tag and attach .dmg/.msi/.AppImage"
+          echo "  Backend deploys via deploy-backend (which also triggers on tags)"

@@ -1,8 +1,14 @@
 name: release-desktop
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*.*.*", "v*.*.*-*"]
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Override version (e.g. 0.2.0) — used when dispatching without a tag"
+        required: false
 
 permissions:
   contents: write
@@ -24,8 +30,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22

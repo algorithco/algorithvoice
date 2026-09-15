@@ -2,7 +2,10 @@ name: deploy-backend
 on:
   push:
     branches: [main]
+    tags: ["v*.*.*", "v*.*.*-*"]
     paths: ["apps/backend/**", "infra/prisma/**", "packages/shared-types/**", "infra/fly.toml"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
