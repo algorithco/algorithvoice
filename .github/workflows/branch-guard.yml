@@ -1,10 +1,10 @@
 name: branch-guard
 # Free-tier workaround for branch protection (private repo without Pro):
-# Blocks direct pushes to main. Main must only receive PR merges from develop/release/hotfix.
+# Blocks direct pushes to main/develop. Main must only receive PR merges from develop/release/hotfix.
 # When you upgrade to Pro or make repo public, replace this with a native ruleset.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
 
 permissions:
   contents: read
@@ -36,7 +36,7 @@ jobs:
             echo "✓ Merge commit (PR) — allowed"
             exit 0
           fi
-          if echo "$MSG" | grep -qE "Merge pull request|\(# [0-9]+\)"; then
+          if echo "$MSG" | grep -qE "Merge pull request|\(#[0-9]+\)"; then
             echo "✓ Squash-merge PR message — allowed"
             exit 0
           fi
