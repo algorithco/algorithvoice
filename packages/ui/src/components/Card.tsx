@@ -24,7 +24,7 @@ export function Card({
 
 export function Badge({ children }: { children: ReactNode }) {
   return (
-    <span className="av-small inline-flex items-center rounded-control border border-gray-200 px-2 py-0.5 font-medium dark:border-gray-800">
+    <span className="av-small inline-flex items-center rounded-control border border-gray-200 px-2 py-0.5 dark:border-gray-800">
       {children}
     </span>
   );
@@ -33,7 +33,7 @@ export function Badge({ children }: { children: ReactNode }) {
 export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="py-10 text-center">
-      <p className="av-body font-medium">{title}</p>
+      <p className="av-body font-semibold">{title}</p>
       {hint ? <p className="av-small mt-1 text-gray-500">{hint}</p> : null}
     </div>
   );

@@ -1,32 +1,213 @@
 @import "tailwindcss";
 @import "@algorith-voice/ui/styles.css";
 
-/* Single permitted hero reveal (200ms, once, on load). */
-@keyframes av-hero-reveal {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+/* Register the shared package as a Tailwind content source: its utilities
+   (used by @algorith-voice/ui components) live outside this app and are
+   otherwise invisible to automatic content detection. */
+@source "../../../packages/ui/src";
+
+/* ---- V5 theme (website only; desktop keeps v1 tokens).
+   Mode-dependent tokens via `inline` so utilities resolve per theme. */
+/* ---- V5 theme (website only; desktop keeps v1 tokens). Black only. */
+:root {
+  --v5-bg: #000000;
+  --v5-surface: #0a0a0a;
+  --v5-raised: #141414;
+  --v5-border: #262626;
+  --v5-t1: #ffffff;
+  --v5-t2: #9a9a9a;
+  --v5-t3: #5c5c5c;
+  --v5-glow: rgba(255, 255, 255, 0.08);
+  --v5-grid: rgba(255, 255, 255, 0.06);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-canvas: var(--v5-bg);
+  --color-surface: var(--v5-surface);
+  --color-raised: var(--v5-raised);
+  --color-line: var(--v5-border);
+  --color-ink: var(--v5-t1);
+  --color-sub: var(--v5-t2);
+  --color-faint: var(--v5-t3);
+  --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background: var(--v5-bg);
+    color: var(--v5-t1);
   }
 }
 
-.av-hero-reveal {
-  animation: av-hero-reveal 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+/* ---- V5 type scale ---- */
+.t-hero {
+  font-size: 72px;
+  line-height: 78px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+@media (max-width: 767px) {
+  .t-hero {
+    font-size: 56px;
+    line-height: 62px;
+  }
+}
+.t-h1 {
+  font-size: 44px;
+  line-height: 50px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.t-h2 {
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.t-lead {
+  font-size: 18px;
+  line-height: 28px;
+  font-weight: 400;
+}
+.t-body {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+}
+.t-cap {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-/* The product shot carries the site's one soft shadow (light mode only). */
-.av-hero-shot {
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.12);
+/* ---- V5 buttons: 6px radius ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 15px;
+  line-height: 24px;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 6px;
+  transition:
+    opacity 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 200ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
-.dark .av-hero-shot {
-  box-shadow: none;
+.btn-primary {
+  background: var(--v5-t1);
+  color: var(--v5-bg);
+}
+.btn-primary:hover {
+  opacity: 0.85;
+}
+.btn-secondary {
+  border: 1px solid var(--v5-border);
+  background: transparent;
+  color: var(--v5-t1);
+}
+.btn-secondary:hover {
+  background: var(--v5-raised);
+}
+
+/* ---- Signature motion 1: scroll reveal (single pattern, reused) ---- */
+.rv {
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 320ms ease,
+    transform 320ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition-delay: var(--rv-d, 0ms);
+}
+.rv-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---- Signature motion 2: waveform bars (hero + feature minis) ---- */
+@keyframes wf-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.wf-bar {
+  transform-origin: center;
+  animation: wf-bar 1.1s ease-in-out infinite;
+}
+
+/* ---- Hero panel: hairline grid + soft monochrome glow (no hue) ---- */
+.hero-grid {
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% 0%, var(--v5-glow), transparent),
+    repeating-linear-gradient(
+      to right,
+      var(--v5-grid) 0,
+      var(--v5-grid) 1px,
+      transparent 1px,
+      transparent 48px
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      var(--v5-grid) 0,
+      var(--v5-grid) 1px,
+      transparent 1px,
+      transparent 48px
+    );
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .av-hero-reveal {
+  .rv {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .wf-bar {
     animation: none;
   }
+}
+
+/* ---- PixelSwap (vendored effect shell; faces carry V5 tokens) ---- */
+.pixel-swap {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  isolation: isolate;
+  outline: none;
+}
+
+.pixel-swap__layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.pixel-swap__layer[data-visible="false"] {
+  visibility: hidden;
+}
+
+.pixel-swap__grid {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.pixel-swap__pixel {
+  position: absolute;
+  overflow: hidden;
+  opacity: 0;
+  contain: paint;
 }

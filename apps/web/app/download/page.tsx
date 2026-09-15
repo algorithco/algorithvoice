@@ -1,3 +1,4 @@
+import { Reveal } from "../../components/Reveal";
 import { SiteFooter } from "../../components/SiteFooter";
 import { SiteNav } from "../../components/SiteNav";
 
@@ -27,37 +28,46 @@ export default async function DownloadPage() {
     /\.(dmg|msi|AppImage|deb)$/.test(a.name),
   );
   return (
-    <div className="min-h-screen bg-white text-black dark:bg-black dark:text-white">
+    <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
       <main className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
-        <h1 className="av-section-h">Download</h1>
-        <p className="av-body-lg mt-4 text-gray-500">
-          {rel
-            ? `Latest release: ${rel.tag_name}`
-            : "Releases publish on version tags."}
-        </p>
-        <ul className="mt-12 divide-y divide-gray-200 border-y border-gray-200 dark:divide-gray-800 dark:border-gray-800">
-          {assets.map((a) => (
-            <li
-              key={a.name}
-              className="flex items-center justify-between gap-4 py-4"
-            >
-              <a href={a.browser_download_url} className="av-mono underline">
-                {a.name}
-              </a>
-              <span className="av-small shrink-0 text-gray-500">
-                {(a.size / 1e6).toFixed(1)} MB
-              </span>
-            </li>
-          ))}
-          {assets.length === 0 ? (
-            <li className="av-body-lg py-8 text-gray-500">
-              No installers published yet. First signed builds ship in Phase 5.
-            </li>
-          ) : null}
-        </ul>
-        <p className="av-small mt-6 text-gray-500">
-          Linux Wayland sessions need an extra setup step — see the docs.
+        <Reveal>
+          <p className="t-cap text-faint">Download</p>
+          <h1 className="t-h1 mt-4">Get Algorith Voice.</h1>
+          <p className="t-cap mt-4 text-faint">
+            {rel
+              ? `Latest release · ${rel.tag_name}`
+              : "Releases publish on version tags"}
+          </p>
+        </Reveal>
+        <Reveal className="mt-12">
+          <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+            {assets.map((a) => (
+              <li
+                key={a.name}
+                className="flex items-center justify-between gap-4 p-4"
+              >
+                <a
+                  href={a.browser_download_url}
+                  className="font-mono text-sm leading-6 font-medium underline"
+                >
+                  {a.name}
+                </a>
+                <span className="t-cap shrink-0 text-faint">
+                  {(a.size / 1e6).toFixed(1)} MB
+                </span>
+              </li>
+            ))}
+            {assets.length === 0 ? (
+              <li className="t-body p-8 text-sub">
+                No installers published yet. First signed builds ship in Phase
+                5.
+              </li>
+            ) : null}
+          </ul>
+        </Reveal>
+        <p className="t-cap mt-8 text-faint">
+          Linux Wayland needs ydotool — see the docs
         </p>
       </main>
       <SiteFooter />

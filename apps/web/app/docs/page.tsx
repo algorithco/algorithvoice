@@ -1,3 +1,4 @@
+import { Reveal } from "../../components/Reveal";
 import { SiteFooter } from "../../components/SiteFooter";
 import { SiteNav } from "../../components/SiteNav";
 
@@ -33,34 +34,36 @@ const SECTIONS = [
 
 export default function DocsPage() {
   return (
-    <div className="min-h-screen bg-white text-black dark:bg-black dark:text-white">
+    <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
       <main className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
-        <h1 className="av-section-h">Setup guide</h1>
-        <p className="av-body-lg av-prose mt-4 text-gray-500">
-          One page per operating system. Four steps each.
-        </p>
+        <Reveal>
+          <p className="t-cap text-faint">Docs</p>
+          <h1 className="t-h1 mt-4">Setup guide.</h1>
+          <p className="t-body mt-4 max-w-[68ch] text-sub">
+            One panel per operating system. Four steps each.
+          </p>
+        </Reveal>
         <div className="mt-12 grid gap-6 md:grid-cols-3">
-          {SECTIONS.map((s) => (
-            <section
-              key={s.os}
-              className="rounded-card border border-gray-200 p-8 dark:border-gray-800"
-            >
-              <h2 className="av-h2">{s.os}</h2>
-              <ol className="mt-4 flex flex-col gap-3">
-                {s.steps.map((step, i) => (
-                  <li
-                    key={step}
-                    className="av-body border-t border-gray-200 pt-3 text-gray-500 first:border-t-0 first:pt-0 dark:border-gray-800"
-                  >
-                    <span className="av-mono mr-2 text-black dark:text-white">
-                      {i + 1}
-                    </span>
-                    {step}
-                  </li>
-                ))}
-              </ol>
-            </section>
+          {SECTIONS.map((s, i) => (
+            <Reveal key={s.os} delay={i * 80}>
+              <section className="h-full rounded-lg border border-line bg-surface p-8">
+                <h2 className="t-h2">{s.os}</h2>
+                <ol className="mt-4 flex flex-col gap-3">
+                  {s.steps.map((step, j) => (
+                    <li
+                      key={step}
+                      className="t-body border-t border-line pt-3 text-sub first:border-t-0 first:pt-0"
+                    >
+                      <span className="mr-2 font-mono text-[13px] leading-[18px] font-medium text-ink">
+                        {j + 1}.
+                      </span>
+                      {step}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            </Reveal>
           ))}
         </div>
       </main>

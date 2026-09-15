@@ -18,9 +18,10 @@
     "dev:web": "pnpm --filter @algorith-voice/web dev"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.2.4",
+    "playwright-core": "^1.63.0",
     "turbo": "^2.10.4",
-    "typescript": "catalog:",
-    "@biomejs/biome": "2.2.4"
+    "typescript": "catalog:"
   },
   "engines": {
     "node": ">=22",

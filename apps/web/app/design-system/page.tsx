@@ -6,26 +6,27 @@ import {
   Card,
   HistoryList,
   Input,
+  Logo,
   RecordingOverlay,
   Sidebar,
   WaveformGlyph,
 } from "@algorith-voice/ui";
+import Link from "next/link";
+import { Counter } from "../../components/Counter";
+import { Faq } from "../../components/Faq";
 import { SiteFooter } from "../../components/SiteFooter";
 import { SiteNav } from "../../components/SiteNav";
 
-// Living style guide: every token, type step, button state, and component
-// in one place for future contributors. Monochrome only, by construction.
-const SWATCHES = [
-  ["--color-black", "#000000"],
-  ["--color-white", "#FFFFFF"],
-  ["--color-near-black", "#0A0A0A"],
-  ["--color-near-white", "#F7F7F7"],
-  ["--color-gray-900", "#111111"],
-  ["--color-gray-800", "#1E1E1E"],
-  ["--color-gray-700", "#333333"],
-  ["--color-gray-500", "#6E6E6E"],
-  ["--color-gray-300", "#B8B8B8"],
-  ["--color-gray-200", "#E4E4E4"],
+// Living style guide: V5 tokens + type scale for the website, plus the shared
+// desktop component truth. Monochrome only, by construction.
+const SWATCHES: [string, string][] = [
+  ["--v5-bg (background)", "var(--v5-bg)"],
+  ["--v5-surface (surface)", "var(--v5-surface)"],
+  ["--v5-raised (surface-raised)", "var(--v5-raised)"],
+  ["--v5-border (border)", "var(--v5-border)"],
+  ["--v5-t1 (text-primary)", "var(--v5-t1)"],
+  ["--v5-t2 (text-secondary)", "var(--v5-t2)"],
+  ["--v5-t3 (text-tertiary)", "var(--v5-t3)"],
 ];
 
 function Section({
@@ -37,7 +38,7 @@ function Section({
 }) {
   return (
     <section className="mt-16">
-      <h2 className="av-h1">{title}</h2>
+      <h2 className="t-cap text-faint">{title}</h2>
       <div className="mt-6">{children}</div>
     </section>
   );
@@ -45,80 +46,101 @@ function Section({
 
 export default function DesignSystemPage() {
   return (
-    <div className="min-h-screen bg-white text-black dark:bg-black dark:text-white">
+    <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
       <main className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
-        <h1 className="av-section-h">Design system</h1>
-        <p className="av-body-lg av-prose mt-4 text-gray-500">
-          The exact tokens every surface is built from. No value outside this
-          page is permitted in the product.
+        <p className="t-cap text-faint">Design system</p>
+        <h1 className="t-h1 mt-4">Tokens, type, motion.</h1>
+        <p className="t-body mt-4 max-w-[68ch] text-sub">
+          V5 for the website. No value outside this page is permitted in the
+          product.
         </p>
 
         <Section title="Color">
-          <ul className="grid gap-px border border-gray-200 bg-gray-200 sm:grid-cols-2 dark:border-gray-800 dark:bg-gray-800">
-            {SWATCHES.map(([name, hex]) => (
-              <li
-                key={name}
-                className="flex items-center gap-4 bg-white p-4 dark:bg-black"
-              >
+          <ul className="grid gap-px rounded-lg border border-line bg-line sm:grid-cols-2">
+            {SWATCHES.map(([name, value]) => (
+              <li key={name} className="flex items-center gap-4 bg-canvas p-4">
                 <span
-                  className="h-8 w-8 shrink-0 border border-gray-200 dark:border-gray-800"
-                  style={{ backgroundColor: hex }}
+                  className="h-8 w-8 shrink-0 rounded-md border border-line"
+                  style={{ backgroundColor: value }}
                 />
-                <span className="av-mono">{name}</span>
-                <span className="av-small ml-auto text-gray-500">{hex}</span>
+                <span className="font-mono text-[13px] leading-[18px] font-medium">
+                  {name}
+                </span>
               </li>
             ))}
           </ul>
         </Section>
 
-        <Section title="Type scale">
-          <div className="flex flex-col gap-6 border border-gray-200 p-8 dark:border-gray-800">
-            <p className="av-hero">Hero 64/68 Inter Tight</p>
-            <p className="av-section-h">Section 36/42 Inter Tight</p>
-            <p className="av-display">Display 32/38</p>
-            <p className="av-h1">Heading 24/30</p>
-            <p className="av-h2">Subhead 18/24</p>
-            <p className="av-body">
-              Body 14/20 — the quick brown fox jumps over the lazy dog.
+        <Section title="Type — Inter, mono accents only">
+          <div className="flex flex-col gap-6 rounded-lg border border-line bg-surface p-8">
+            <p className="t-hero">Hero 72/78</p>
+            <p className="t-h1">H1 44/50</p>
+            <p className="t-h2">H2 28/34</p>
+            <p className="t-lead">
+              Body large 18/28 — the quick brown fox jumps over the lazy dog.
             </p>
-            <p className="av-small">
-              Small 12/16 — secondary text and captions.
-            </p>
-            <p className="av-mono">
-              Mono 13/18 — hotkeys, paths, transcripts only.
+            <p className="t-body">Body 16/24 — secondary copy and answers.</p>
+            <p className="t-cap">Caption 13/18 — uppercase labels only</p>
+            <p className="font-mono text-[13px] leading-[18px] font-medium">
+              Mono 13/18 — hotkeys, code, versions only.
             </p>
           </div>
         </Section>
 
-        <Section title="Buttons">
+        <Section title="Buttons — 6px radius">
           <div className="flex flex-wrap items-center gap-3">
-            <Button>Primary</Button>
-            <Button variant="secondary">Secondary</Button>
-            <Button variant="ghost">Ghost</Button>
-            <Button size="sm">Small</Button>
-            <Button disabled>Disabled</Button>
+            <Link href="/download" className="btn btn-primary">
+              Primary
+            </Link>
+            <Link href="/docs" className="btn btn-secondary">
+              Secondary →
+            </Link>
+          </div>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Button>Desktop primary</Button>
+            <Button variant="secondary">Desktop secondary</Button>
+            <Button variant="ghost">Desktop ghost</Button>
           </div>
         </Section>
 
-        <Section title="Inputs">
+        <Section title="Motion specimens">
+          <div className="flex flex-wrap items-center gap-8 rounded-lg border border-line bg-surface p-8">
+            <p className="t-h2">
+              <Counter to={42} />
+            </p>
+            <div className="max-w-[320px] flex-1">
+              <Faq
+                items={[["Sample question?", "Sample answer in body copy."]]}
+              />
+            </div>
+          </div>
+        </Section>
+
+        <Section title="Brand mark + indicator (desktop truth)">
+          <div className="flex flex-wrap items-center gap-6 rounded-lg border border-line bg-surface p-8">
+            <Logo className="h-6 w-auto text-ink" />
+            <WaveformGlyph className="text-ink" />
+            <Badge>Badge</Badge>
+          </div>
+        </Section>
+
+        <Section title="Inputs (desktop truth)">
           <div className="max-w-[640px]">
             <Input placeholder="Type here, then tab to see the focus ring" />
           </div>
         </Section>
 
-        <Section title="Surfaces">
+        <Section title="Surfaces (desktop truth)">
           <div className="flex flex-wrap items-center gap-3">
             <Card className="p-6">
-              <p className="av-body">Card, 8px radius</p>
+              <p className="t-body">Card, 8px radius</p>
             </Card>
-            <Badge>Badge</Badge>
-            <WaveformGlyph className="text-black dark:text-white" />
           </div>
         </Section>
 
-        <Section title="Sidebar">
-          <div className="max-w-[220px] border border-gray-200 dark:border-gray-800">
+        <Section title="Sidebar (desktop truth)">
+          <div className="max-w-[220px] rounded-lg border border-line">
             <Sidebar
               items={[
                 { id: "dictate", label: "Dictate" },
@@ -131,8 +153,8 @@ export default function DesignSystemPage() {
           </div>
         </Section>
 
-        <Section title="History rows">
-          <div className="border border-gray-200 dark:border-gray-800">
+        <Section title="History rows (desktop truth)">
+          <div className="rounded-lg border border-line">
             <HistoryList
               entries={[
                 {
@@ -151,7 +173,7 @@ export default function DesignSystemPage() {
           </div>
         </Section>
 
-        <Section title="Recording overlay">
+        <Section title="Recording overlay (desktop truth)">
           <div className="flex flex-wrap gap-4">
             <RecordingOverlay state="listening" />
             <RecordingOverlay state="transcribing" />

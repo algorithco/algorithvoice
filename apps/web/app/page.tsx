@@ -1,121 +1,271 @@
 import Link from "next/link";
-import { DownloadButtons } from "../components/DownloadButtons";
+import { BlurText } from "../components/BlurText";
+import { Counter } from "../components/Counter";
+import { Faq } from "../components/Faq";
+import { Reveal } from "../components/Reveal";
 import { SiteFooter } from "../components/SiteFooter";
 import { SiteNav } from "../components/SiteNav";
-import { TerminalDemo } from "../components/TerminalDemo";
 
-const STEPS = [
+const BARS = Array.from({ length: 56 }, (_, i) => ({
+  id: `bar-${i}`,
+  h: 0.22 + 0.78 * Math.abs(Math.sin(i * 1.7) * Math.cos(i * 0.55) + 0.25),
+}));
+
+function Waveform({ className = "" }: { className?: string }) {
+  return (
+    <div aria-hidden className={`flex h-28 items-center gap-1 ${className}`}>
+      {BARS.map((b, i) => (
+        <span
+          key={b.id}
+          className="wf-bar w-1 flex-1 rounded-full bg-ink"
+          style={{
+            height: `${Math.round(b.h * 100)}%`,
+            animationDelay: `${(i % 12) * 90}ms`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+const STATS: {
+  to: number;
+  decimals?: number;
+  suffix?: string;
+  label: string;
+}[] = [
+  { to: 0.6, decimals: 1, suffix: "s", label: "median injection latency" },
+  { to: 60, suffix: "", label: "free cloud minutes / month" },
+  { to: 3, label: "desktop platforms" },
+  { to: 2, label: "transcription modes" },
+];
+
+const FEATURES = [
   {
-    verb: "Hold",
-    detail: "Press and hold Ctrl+Space — remappable, works in any app.",
+    title: "Push-to-talk, everywhere",
+    copy: "Hold Ctrl+Space in any app — terminal, IDE, browser, AI chat — and release. Text lands at the cursor in under a second.",
+    demo: "keys",
   },
   {
-    verb: "Speak",
-    detail: "Talk naturally. On-device detection finds your speech.",
+    title: "Local-first privacy",
+    copy: "Local mode runs fully offline. Audio never leaves the device, no account needed, no telemetry by default.",
+    demo: "local",
   },
-  { verb: "Release", detail: "Text lands at the cursor in under a second." },
+  {
+    title: "Built for agents",
+    copy: "Dictate prompts, refactors, and release notes straight into the tools you already drive with AI.",
+    demo: "agent",
+  },
+] as const;
+
+const PLATFORMS = [
+  { os: "macOS", cmd: "brew install --cask algorith-voice" },
+  { os: "Windows", cmd: "winget install Algorith.Voice" },
+  { os: "Linux", cmd: "curl -fsSL av.sh | sh" },
+];
+
+const FAQS: [string, string][] = [
+  [
+    "How does push-to-talk work?",
+    "Hold the hotkey and speak. On release, your speech is transcribed and typed at the cursor in the focused app — terminal, editor, browser, anywhere.",
+  ],
+  [
+    "Does my audio leave my device?",
+    "Not in local mode — transcription runs fully offline. Cloud transcription and history sync are opt-in, off by default.",
+  ],
+  [
+    "Which platforms are supported?",
+    "macOS, Windows, and Linux. On Linux Wayland sessions, enable clipboard mode in Settings (see the docs).",
+  ],
+  [
+    "What does the free plan include?",
+    "60 minutes of cloud transcription every month, unlimited local dictation, and 2 devices. Pro adds unlimited cloud, 10 devices, and priority processing.",
+  ],
+  [
+    "Can I remap the hotkey?",
+    "Yes. The default is Ctrl+Space and it is fully remappable per platform in Settings.",
+  ],
 ];
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-white text-black dark:bg-black dark:text-white">
+    <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
       <main>
-        {/* Hero: left-aligned, 8-word headline, Inter Tight 64px */}
-        <section className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
-          <div className="av-hero-reveal">
-            <h1 className="av-hero max-w-[16ch]">
-              Hold to talk. Release to type.
-            </h1>
-            <p className="av-subhead av-prose mt-6 text-gray-500">
-              Push-to-talk dictation for macOS, Windows, and Linux. It types
-              into your terminal, IDE, browser, and AI chat.
+        {/* Hero */}
+        <section className="mx-auto max-w-[1200px] px-6 pt-24 pb-16 md:px-16 md:pt-32">
+          <div className="mx-auto max-w-[800px] text-center">
+            <BlurText
+              text="Talk faster. Type never."
+              className="t-hero mt-6 text-balance"
+              delay={180}
+              animateBy="words"
+              direction="top"
+            />
+            <p className="t-lead mx-auto mt-6 max-w-[52ch] text-sub">
+              Push-to-talk dictation for macOS, Windows, and Linux. Hold the
+              hotkey, speak, and text lands at the cursor — in your terminal,
+              your editor, your browser.
             </p>
-            <div className="mt-8">
-              <DownloadButtons />
+            <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+              <Link href="/download" className="btn btn-primary">
+                Download free
+              </Link>
+              <Link href="/docs" className="btn btn-secondary">
+                Setup guide →
+              </Link>
             </div>
           </div>
-          <div className="mt-16">
-            <TerminalDemo />
+
+          <Reveal className="mt-16">
+            <div className="hero-grid rounded-2xl border border-line bg-surface p-8 shadow-[0_8px_24px_rgba(0,0,0,0.4)] md:p-12">
+              <div className="flex items-center justify-between">
+                <p className="t-cap text-sub">Live · Dictation</p>
+                <p className="font-mono text-xs leading-4 font-normal text-faint">
+                  ctrl+space
+                </p>
+              </div>
+              <Waveform className="mt-8" />
+              <p className="mt-8 font-mono text-sm leading-6 font-normal">
+                <span className="text-faint">&gt; </span>
+                use refresh-token rotation with reuse detection
+              </p>
+              <p className="mt-2 font-mono text-xs leading-4 font-normal text-faint">
+                ✓ injected in 0.6s · local model
+              </p>
+            </div>
+          </Reveal>
+        </section>
+
+        {/* Stats */}
+        <section className="border-y border-line bg-surface">
+          <dl className="mx-auto grid max-w-[1200px] grid-cols-2 gap-8 px-6 py-12 md:grid-cols-4 md:px-16">
+            {STATS.map((s) => (
+              <div key={s.label}>
+                <dt className="t-h2">
+                  <Counter
+                    to={s.to}
+                    decimals={s.decimals ?? 0}
+                    suffix={s.suffix ?? ""}
+                  />
+                </dt>
+                <dd className="t-cap mt-2 text-faint">{s.label}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        {/* Features */}
+        <section className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
+          <Reveal>
+            <p className="t-cap text-faint">Why Algorith Voice</p>
+            <h2 className="t-h1 mt-4 max-w-[20ch]">
+              An instrument for talking to machines.
+            </h2>
+          </Reveal>
+          <div className="mt-12 grid gap-6 md:grid-cols-3">
+            {FEATURES.map((f, i) => (
+              <Reveal key={f.title} delay={i * 80}>
+                <article className="flex h-full flex-col rounded-lg border border-line bg-surface p-8 transition-all duration-200 ease-app hover:-translate-y-0.5 hover:bg-raised">
+                  <h3 className="t-h2">{f.title}</h3>
+                  <p className="t-body mt-4 flex-1 text-sub">{f.copy}</p>
+                  {f.demo === "keys" ? (
+                    <p className="mt-6 flex items-center gap-2">
+                      <kbd className="rounded-md border border-line bg-raised px-3 py-2 font-mono text-[13px] leading-[18px] font-medium">
+                        Ctrl
+                      </kbd>
+                      <span className="text-faint">+</span>
+                      <kbd className="rounded-md border border-line bg-raised px-3 py-2 font-mono text-[13px] leading-[18px] font-medium">
+                        Space
+                      </kbd>
+                      <span className="t-cap ml-2 text-faint">
+                        hold to talk
+                      </span>
+                    </p>
+                  ) : null}
+                  {f.demo === "local" ? (
+                    <p className="mt-6">
+                      <span className="t-cap inline-flex items-center gap-2 rounded-full border border-line bg-raised px-4 py-2">
+                        <span
+                          aria-hidden
+                          className="h-2 w-2 rounded-full bg-ink"
+                        />
+                        Local · On
+                      </span>
+                    </p>
+                  ) : null}
+                  {f.demo === "agent" ? (
+                    <p className="mt-6 rounded-md border border-line bg-raised p-4 font-mono text-[13px] leading-[18px] font-normal">
+                      <span className="text-faint">$ </span>agent &quot;refactor
+                      auth&quot;
+                    </p>
+                  ) : null}
+                </article>
+              </Reveal>
+            ))}
           </div>
         </section>
 
-        {/* How it works: mono verbs joined by a 1px line — sequential, earned */}
-        <section className="border-t border-gray-200 dark:border-gray-800">
+        {/* Platform */}
+        <section className="border-y border-line bg-surface">
           <div className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
-            <h2 className="av-section-h">Three moves, no learning curve</h2>
-            <ol className="mt-12 grid gap-8 md:grid-cols-3 md:gap-6">
-              {STEPS.map((s, i) => (
-                <li key={s.verb} className="relative pt-6">
-                  <span
-                    aria-hidden
-                    className="absolute inset-x-0 top-0 h-px bg-gray-200 dark:bg-gray-800"
-                  />
-                  <span
-                    aria-hidden
-                    className={
-                      i === 0
-                        ? "absolute left-0 top-0 h-px w-12 bg-black dark:bg-white"
-                        : undefined
-                    }
-                  />
-                  <p className="av-mono">{s.verb}</p>
-                  <p className="av-body-lg mt-2 text-gray-500">{s.detail}</p>
-                </li>
+            <Reveal>
+              <p className="t-cap text-faint">Platforms</p>
+              <h2 className="t-h1 mt-4">One line to install.</h2>
+            </Reveal>
+            <div className="mt-12 grid gap-6 md:grid-cols-3">
+              {PLATFORMS.map((p, i) => (
+                <Reveal key={p.os} delay={i * 80} className="min-w-0">
+                  <article className="flex h-full flex-col rounded-lg border border-line bg-canvas p-8">
+                    <h3 className="t-h2">{p.os}</h3>
+                    <pre className="mt-6 flex-1 overflow-x-auto rounded-md border border-line bg-surface p-4 font-mono text-[13px] leading-[18px] font-normal">
+                      <code>
+                        <span className="text-faint">$ </span>
+                        {p.cmd}
+                      </code>
+                    </pre>
+                    <Link
+                      href="/download"
+                      className="btn btn-secondary mt-6 w-full"
+                    >
+                      Download →
+                    </Link>
+                  </article>
+                </Reveal>
               ))}
-            </ol>
+            </div>
           </div>
         </section>
 
         {/* Pricing teaser */}
-        <section className="border-t border-gray-200 dark:border-gray-800">
-          <div className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
-            <h2 className="av-section-h">Free until it earns its keep</h2>
-            <div className="mt-12 grid gap-6 md:grid-cols-2">
-              <div className="rounded-card border border-gray-200 p-8 dark:border-gray-800">
-                <p className="av-h2">Free</p>
-                <p className="av-body-lg mt-2 text-gray-500">
-                  60 minutes of cloud transcription monthly. Unlimited local
-                  dictation. Two devices.
-                </p>
-                <p className="av-section-h mt-6">$0</p>
-              </div>
-              <div className="rounded-card border border-gray-200 bg-near-white p-8 dark:border-gray-800 dark:bg-near-black">
-                <p className="av-h2">Pro</p>
-                <p className="av-body-lg mt-2 text-gray-500">
-                  Unlimited cloud transcription. Ten devices. Priority
-                  processing.
-                </p>
-                <p className="av-section-h mt-6">
-                  $12<span className="av-body-lg text-gray-500">/month</span>
-                </p>
-                <Link
-                  href="/pricing"
-                  className="av-body mt-6 inline-block rounded-control bg-black px-4 py-2.5 text-white transition-opacity duration-150 ease-app hover:opacity-85 dark:bg-white dark:text-black"
-                >
-                  Compare plans
-                </Link>
-              </div>
+        <section className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
+          <Reveal>
+            <div className="rounded-2xl bg-ink p-8 text-canvas md:p-12">
+              <p className="t-cap opacity-70">Pricing</p>
+              <h2 className="t-h1 mt-4">Free until it earns its keep.</h2>
+              <p className="t-lead mt-4 max-w-[52ch] opacity-80">
+                60 cloud minutes monthly, unlimited local dictation. Pro is
+                $12/month when dictation becomes the way you work.
+              </p>
+              <Link
+                href="/pricing"
+                className="btn mt-8 bg-canvas text-ink hover:opacity-85"
+              >
+                Compare plans →
+              </Link>
             </div>
-          </div>
+          </Reveal>
         </section>
 
-        {/* Privacy note */}
-        <section className="border-t border-gray-200 dark:border-gray-800">
-          <div className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
-            <h2 className="av-section-h">Local means local</h2>
-            <p className="av-body-lg av-prose mt-6 text-gray-500">
-              In local mode your audio never leaves the device — no account, no
-              network, no telemetry. Cloud transcription and sync are opt-in,
-              off by default, and documented in plain language.
-            </p>
-            <Link
-              href="/docs"
-              className="av-body mt-6 inline-block rounded-control border border-gray-200 px-4 py-2.5 transition-colors duration-150 ease-app hover:bg-gray-200 dark:border-gray-800 dark:hover:bg-gray-800"
-            >
-              Read the setup guide
-            </Link>
-          </div>
+        {/* FAQ */}
+        <section className="mx-auto max-w-[1200px] px-6 pb-24 md:px-16 md:pb-32">
+          <Reveal>
+            <p className="t-cap text-faint">FAQ</p>
+            <h2 className="t-h1 mt-4">Questions, answered.</h2>
+          </Reveal>
+          <Reveal className="mt-12 max-w-[800px]">
+            <Faq items={FAQS} />
+          </Reveal>
         </section>
       </main>
       <SiteFooter />

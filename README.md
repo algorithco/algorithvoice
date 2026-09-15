@@ -40,7 +40,7 @@ pnpm dev
 
 ## Design system
 
-Pure `#000/#FFF` + `#0A0A0A/#F7F7F7/#111/#1E1E1E/#333/#6E6E6E/#B8B8B8/#E4E4E4` only. Inter + Inter Tight display + JetBrains Mono. 4px controls / 8px cards. Dark default. 150–200ms transitions. No gradients, no accent colors — including charts and emails. Full spec: `apps/web/design-system`.
+Website (V5 modern monochrome): `#000/#FFF` + surface/raised/border/text tokens per mode. Inter throughout, JetBrains Mono accents, 6/8/16px radii, scroll-reveal + waveform signature motion, FAQ accordion. Desktop app keeps the v1 instrument tokens (4px controls / 8px cards). Full spec: `apps/web/design-system`.
 
 ## Privacy
 

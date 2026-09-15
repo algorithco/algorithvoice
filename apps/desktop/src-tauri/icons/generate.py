@@ -19,15 +19,17 @@ def app_icon(size: int) -> Image.Image:
     d = ImageDraw.Draw(img)
     pad = size // 8
     d.rounded_rectangle([pad, pad, size - pad, size - pad], radius=size // 8, fill=BLACK)
-    # white waveform: 5 vertical bars centered
+    # brand mark: 4 sharp vertical bars, logo proportions [0.46, 1.0, 0.75, 0.39]
     cx, cy = size / 2, size / 2
-    bars = [0.28, 0.52, 0.72, 0.52, 0.28]
-    gap = size / 14
-    w = size / 22
-    for i, h in enumerate(bars):
-        x = cx + (i - 2) * gap
-        bh = size * h / 2
-        d.rounded_rectangle([x - w / 2, cy - bh, x + w / 2, cy + bh], radius=w // 2, fill=WHITE)
+    heights = [0.46, 1.0, 0.75, 0.39]
+    span = size * 0.58
+    w = span * 0.2
+    gap = span * 0.1067
+    max_h = size * 0.5
+    for i, h in enumerate(heights):
+        x = cx + (i - 1.5) * (w + gap)
+        bh = max_h * h / 2
+        d.rectangle([x - w / 2, cy - bh, x + w / 2, cy + bh], fill=WHITE)
     return img
 
 

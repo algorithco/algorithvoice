@@ -1,30 +1,71 @@
+import { Logo } from "@algorith-voice/ui";
 import Link from "next/link";
 
-// Minimal footer: single row, wordmark + links + copyright.
-// No newsletter box, no social icon soup.
+// V5 footer: brand + link columns + bottom meta row.
+const COLS = [
+  {
+    title: "Product",
+    links: [
+      { href: "/download", label: "Download" },
+      { href: "/pricing", label: "Pricing" },
+      { href: "/dashboard", label: "Dashboard" },
+    ],
+  },
+  {
+    title: "Resources",
+    links: [
+      { href: "/docs", label: "Docs" },
+      { href: "/design-system", label: "Design system" },
+    ],
+  },
+] as const;
+
 export function SiteFooter() {
   return (
-    <footer className="border-t border-gray-200 dark:border-gray-800">
-      <div className="mx-auto flex max-w-[1200px] flex-col gap-4 px-6 py-8 sm:flex-row sm:items-center sm:justify-between md:px-16">
-        <span className="av-small font-semibold">Algorith Voice</span>
-        <nav className="flex gap-6" aria-label="Footer">
-          {(
-            [
-              { href: "/docs", label: "Docs" },
-              { href: "/pricing", label: "Pricing" },
-              { href: "/design-system", label: "Design system" },
-            ] as const
-          ).map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className="av-small text-gray-500 transition-colors duration-150 ease-app hover:text-black dark:hover:text-white"
-            >
-              {l.label}
-            </Link>
+    <footer className="overflow-hidden border-t border-line">
+      <div className="mx-auto max-w-[1200px] px-6 py-16 md:px-16">
+        <div className="grid gap-12 md:grid-cols-[1.2fr_1fr_1fr]">
+          <div>
+            <span className="flex items-center gap-2">
+              <Logo className="h-4 w-auto text-ink" />
+              <span className="text-[15px] leading-6 font-semibold">
+                Algorith Voice
+              </span>
+            </span>
+            <p className="t-body mt-4 max-w-[36ch] text-sub">
+              Push-to-talk dictation for people who talk to agents.
+            </p>
+          </div>
+          {COLS.map((c) => (
+            <nav key={c.title} aria-label={c.title}>
+              <p className="t-cap text-faint">{c.title}</p>
+              <ul className="mt-4 flex flex-col gap-3">
+                {c.links.map((l) => (
+                  <li key={l.href}>
+                    <Link
+                      href={l.href}
+                      className="t-body text-sub transition-colors duration-150 ease-app hover:text-ink"
+                    >
+                      {l.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </nav>
           ))}
-        </nav>
-        <span className="av-small text-gray-500">© 2026 Algorith Voice</span>
+        </div>
+        <div className="mt-12 flex items-center justify-between border-t border-line pt-6">
+          <span className="t-body text-faint">© 2026 Algorith Voice</span>
+          <span className="font-mono text-xs leading-4 font-normal text-faint">
+            v1.0.0
+          </span>
+        </div>
+      </div>
+      {/* Oversized watermark signature: cropped at the bottom edge, subtle. */}
+      <div aria-hidden className="pointer-events-none relative select-none">
+        <p className="-mb-[0.18em] text-center text-[13.5vw] leading-[0.8] font-bold tracking-[-0.03em] whitespace-nowrap text-ink uppercase opacity-[0.06]">
+          Algorithco
+        </p>
       </div>
     </footer>
   );
