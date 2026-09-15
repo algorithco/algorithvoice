@@ -1,0 +1,21 @@
+/* Algorith Voice monochrome tokens — black/white/gray ONLY */
+:root {
+  --av-black: #000000;
+  --av-white: #ffffff;
+  --av-0a: #0a0a0a;
+  --av-1a: #1a1a1a;
+  --av-e5: #e5e5e5;
+  --av-f5: #f5f5f5;
+  --av-background: var(--av-white);
+  --av-foreground: var(--av-black);
+  --av-border: var(--av-e5);
+  --av-radius-sm: 2px;
+  --av-radius-md: 6px;
+  --av-transition: 150ms ease;
+  color-scheme: light dark;
+}
+.dark {
+  --av-background: var(--av-black);
+  --av-foreground: var(--av-white);
+  --av-border: rgba(255, 255, 255, 0.1);
+}

@@ -1,0 +1,17 @@
+name: deploy-backend
+on:
+  push:
+    branches: [main]
+    paths: ["apps/backend/**", "infra/prisma/**", "packages/shared-types/**"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --config infra/fly.toml --image ${{ secrets.BACKEND_IMAGE }} --ha=false
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

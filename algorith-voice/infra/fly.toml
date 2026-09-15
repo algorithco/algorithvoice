@@ -1,0 +1,24 @@
+app = "algorith-voice-api"
+primary_region = "fra"
+
+[build]
+  dockerfile = "apps/backend/Dockerfile"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+
+[env]
+  PORT = "3001"
+
+[processes]
+  app = "node apps/backend/dist/server.js"
+  worker = "node apps/backend/dist/queues/worker.js"

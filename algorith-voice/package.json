@@ -1,0 +1,28 @@
+{
+  "name": "algorith-voice",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "description": "Algorith Voice — push-to-talk voice dictation platform (Tauri desktop + Fastify backend + Next.js web)",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "biome check --write .",
+    "db:generate": "pnpm --filter @algorith-voice/backend db:generate",
+    "db:migrate": "pnpm --filter @algorith-voice/backend db:migrate",
+    "dev:backend": "pnpm --filter @algorith-voice/backend dev",
+    "dev:web": "pnpm --filter @algorith-voice/web dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.10.4",
+    "typescript": "catalog:",
+    "@biomejs/biome": "2.2.4"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  }
+}

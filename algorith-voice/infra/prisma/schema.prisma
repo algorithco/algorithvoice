@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+  GITHUB
+}
+
+enum SubStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+}
+
+enum UsageMetric {
+  STT_SECONDS
+  AUDIO_BYTES
+  WS_MINUTES
+  STORAGE_BYTES
+}
+
+enum DeviceType {
+  DESKTOP_MACOS
+  DESKTOP_WINDOWS
+  DESKTOP_LINUX
+}
+
+model User {
+  id               String         @id @default(cuid())
+  email            String         @unique
+  passwordHash     String?
+  name             String?
+  stripeCustomerId String?        @unique
+  planTier         String         @default("free")
+  createdAt        DateTime       @default(now())
+  accounts         Account[]
+  sessions         Session[]
+  devices          Device[]
+  subscriptions    Subscription[]
+  usageRecords     UsageRecord[]
+  audioAssets      AudioAsset[]
+  providerKeys     ProviderKey[]
+  auditLogs        AuditLog[]
+}
+
+model Account {
+  id           String       @id @default(cuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider     AuthProvider
+  providerId   String
+  email        String?
+  accessToken  String?
+  refreshToken String?
+
+  @@unique([provider, providerId])
+}
+
+model Session {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshHash     String
+  familyId        String
+  deviceInfo      String?
+  ip              String?
+  expiresAt       DateTime
+  absoluteLimitAt DateTime
+  revokedAt       DateTime?
+
+  @@index([userId, familyId])
+}
+
+model Device {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  type         DeviceType @default(DESKTOP_MACOS)
+  fingerprint  String?
+  apiKeyHash   String?    @unique
+  lastSeenAt   DateTime?
+  createdAt    DateTime   @default(now())
+
+  @@index([userId])
+}
+
+model Subscription {
+  id                   String     @id @default(cuid())
+  userId               String
+  user                 User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeSubscriptionId String     @unique
+  stripePriceId        String?
+  status               SubStatus
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean    @default(false)
+  usageRecords         UsageRecord[]
+
+  @@index([userId, status])
+}
+
+model UsageRecord {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+  deviceId       String?
+  metric         UsageMetric
+  quantity       Float
+  model          String?
+  latencyMs      Int?
+  stripeEventId  String?
+  reportedToStripe Boolean    @default(false)
+  metadata       Json?
+  recordedAt     DateTime     @default(now())
+
+  @@index([userId, metric, recordedAt])
+  @@index([reportedToStripe])
+}
+
+model AudioAsset {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  r2Key          String   @unique
+  bucket         String
+  mime           String
+  size           Int
+  durationSec    Float?
+  retentionUntil DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model ProviderKey {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wrappedDek  String
+  ciphertext  String
+  nonce       String
+  kekVersion  Int      @default(1)
+  last4       String
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+model StripeEvent {
+  id          String   @id
+  type        String
+  payload     Json
+  processedAt DateTime @default(now())
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorUserId  String?
+  actor        User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  deviceId     String?
+  action       String
+  model        String?
+  recordId     String?
+  ipHash       String?
+  userAgentHash String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([actorUserId, createdAt])
+}

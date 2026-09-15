@@ -1,0 +1,11 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'infra/prisma'
+
+catalog:
+  typescript: 5.9.2
+  zod: ^4.2.0
+  vitest: ^3.2.4
+  react: 19.2.0
+  react-dom: 19.2.0
