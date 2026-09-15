@@ -6,6 +6,6 @@ packages:
 catalog:
   typescript: 5.9.2
   zod: ^4.2.0
-  vitest: ^3.2.4
+  vitest: ^4.1.11
   react: 19.2.0
   react-dom: 19.2.0
