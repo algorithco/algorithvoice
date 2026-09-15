@@ -1,11 +1,14 @@
 name: deploy-backend
+# DISABLED: production deploys are paused (see workflow_dispatch only).
+# Re-enable by restoring the push/release triggers below AND
+# `gh workflow enable deploy-backend`.
 on:
-  push:
-    branches: [main]
-    tags: ["v*.*.*", "v*.*.*-*"]
-    paths: ["apps/backend/**", "infra/prisma/**", "packages/shared-types/**", "infra/fly.toml"]
-  release:
-    types: [published]
+  # push:
+  #   branches: [main]
+  #   tags: ["v*.*.*", "v*.*.*-*"]
+  #   paths: ["apps/backend/**", "infra/prisma/**", "packages/shared-types/**", "infra/fly.toml"]
+  # release:
+  #   types: [published]
   workflow_dispatch:
 
 jobs:
