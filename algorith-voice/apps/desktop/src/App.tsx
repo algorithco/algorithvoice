@@ -1,59 +1,100 @@
-import { Button, Card } from "@algorith-voice/ui";
+import { Sidebar } from "@algorith-voice/ui";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
+import { DictateView } from "./components/DictateView.js";
+import { HistoryView } from "./components/HistoryView.js";
+import { OnboardingView } from "./components/OnboardingView.js";
+import { type Prefs, SettingsView } from "./components/SettingsView.js";
+import {
+  DEFAULT_PREFS,
+  loadOnboarded,
+  loadPrefs,
+  saveOnboarded,
+  savePrefs,
+} from "./lib/prefs.js";
 
-type TrayState = "idle" | "recording" | "processing";
+type View = "dictate" | "history" | "settings";
+
+const ITEMS = [
+  { id: "dictate", label: "Dictate" },
+  { id: "history", label: "History" },
+  { id: "settings", label: "Settings" },
+];
 
 export default function App() {
-  const [tray, setTray] = useState<TrayState>("idle");
-  const [hotkey, setHotkey] = useState("Ctrl+Space");
-  const [mode, setMode] = useState<"local" | "cloud">("local");
+  const [view, setView] = useState<View>("dictate");
+  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
+  const [onboarded, setOnboarded] = useState(true);
+  const [isSettingsWindow, setIsSettingsWindow] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    document.documentElement.classList.add("dark");
+    try {
+      setIsSettingsWindow(getCurrentWindow().label === "settings");
+    } catch {
+      setIsSettingsWindow(false);
+    }
+    void Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
+      setPrefs(p);
+      setOnboarded(o);
+      setReady(true);
+    });
   }, []);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", prefs.theme === "dark");
+  }, [prefs.theme]);
+
+  const updatePrefs = (p: Prefs) => {
+    setPrefs(p);
+    void savePrefs(p);
+  };
+
+  if (!ready) return null;
+
+  const shell =
+    "min-h-screen bg-white text-black dark:bg-black dark:text-white";
+
+  if (isSettingsWindow) {
+    return (
+      <main className={shell}>
+        <SettingsView prefs={prefs} onPrefs={updatePrefs} />
+      </main>
+    );
+  }
+
+  if (!onboarded) {
+    return (
+      <main className={shell}>
+        <OnboardingView
+          prefs={prefs}
+          onPrefs={updatePrefs}
+          onDone={() => {
+            setOnboarded(true);
+            void saveOnboarded();
+          }}
+        />
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-white text-black dark:bg-black dark:text-white">
-      <div className="mx-auto max-w-xl p-6">
-        <h1 className="text-2xl font-semibold">Algorith Voice</h1>
-        <p className="mt-1 text-sm opacity-60">
-          Hold {hotkey} to talk. Release to inject text. Local mode never leaves
-          your device.
-        </p>
-        <Card className="mt-6 p-4">
-          <p className="text-sm opacity-60">Status: {tray}</p>
-          <div className="mt-3 flex gap-2">
-            <Button
-              onClick={() => {
-                setTray("recording");
-                setTimeout(() => setTray("processing"), 800);
-                setTimeout(() => setTray("idle"), 1600);
-              }}
-            >
-              Simulate PTT (Phase 1)
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => setMode(mode === "local" ? "cloud" : "local")}
-            >
-              Mode: {mode}
-            </Button>
-          </div>
-          <div className="mt-4 flex gap-2 text-sm">
-            <label>
-              Hotkey{" "}
-              <input
-                value={hotkey}
-                onChange={(e) => setHotkey(e.target.value)}
-                className="border px-2 py-1 bg-transparent"
-              />
-            </label>
-          </div>
-          <p className="mt-3 text-xs opacity-60">
-            Phase 2 wires cpal → Silero VAD → whisper.cpp / WS proxy → enigo
-            paste.
-          </p>
-        </Card>
+    <main className={shell}>
+      <div className="flex min-h-screen">
+        <div className="border-r border-gray-200 dark:border-gray-800">
+          <Sidebar
+            items={ITEMS}
+            active={view}
+            onSelect={(id) => setView(id as View)}
+          />
+        </div>
+        <div className="min-w-0 flex-1">
+          {view === "dictate" ? <DictateView hotkey={prefs.hotkey} /> : null}
+          {view === "history" ? <HistoryView /> : null}
+          {view === "settings" ? (
+            <SettingsView prefs={prefs} onPrefs={updatePrefs} />
+          ) : null}
+        </div>
       </div>
     </main>
   );

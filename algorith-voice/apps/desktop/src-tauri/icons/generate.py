@@ -31,20 +31,28 @@ def app_icon(size: int) -> Image.Image:
     return img
 
 
+def _bars(d: ImageDraw.ImageDraw, size: int, heights: list[float], fill: tuple) -> None:
+    """Waveform glyph: 3 vertical bars of varying height, monochrome."""
+    cx, cy = size / 2, size / 2
+    gap = size / 5
+    w = max(2, size // 11)
+    for i, h in enumerate(heights):
+        x = cx + (i - 1) * gap
+        bh = (size / 2 - size // 8) * h
+        d.rounded_rectangle([x - w / 2, cy - bh, x + w / 2, cy + bh], radius=w // 2, fill=fill)
+
+
 def tray(state: str, size: int = 32) -> Image.Image:
     img = Image.new("RGBA", (size, size), CLEAR)
     d = ImageDraw.Draw(img)
-    m = size // 8
-    box = [m, m, size - m, size - m]
     if state == "idle":
-        d.ellipse(box, outline=BLACK, width=max(2, size // 12))
+        _bars(d, size, [0.45, 1.0, 0.65], BLACK)
     elif state == "recording":
-        d.ellipse(box, fill=BLACK)
-        r = size // 5
-        d.ellipse([size / 2 - r, size / 2 - r, size / 2 + r, size / 2 + r], fill=WHITE)
+        # Emphasized amplitude frame (Rust swaps frames for the pulse in Phase 2)
+        _bars(d, size, [0.7, 1.0, 0.85], BLACK)
     elif state == "processing":
-        d.ellipse(box, outline=BLACK, width=max(2, size // 12))
-        d.pieslice(box, start=270, end=90, fill=BLACK)
+        # Single bar loader
+        _bars(d, size, [0.0, 1.0, 0.0], BLACK)
     else:
         raise ValueError(state)
     return img

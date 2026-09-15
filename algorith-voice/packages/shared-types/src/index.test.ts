@@ -23,6 +23,16 @@ describe("shared-types", () => {
       }).success,
     ).toBe(true);
   });
+  it("accepts desktop pairing fields on signup", () => {
+    expect(
+      signupSchema.safeParse({
+        email: "a@b.co",
+        password: "long-enough-password",
+        deviceName: "MacBook",
+        deviceType: "desktop-macos",
+      }).success,
+    ).toBe(true);
+  });
   it("rejects login without email", () => {
     expect(loginSchema.safeParse({ password: "x".repeat(12) }).success).toBe(
       false,

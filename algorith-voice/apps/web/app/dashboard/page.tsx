@@ -1,22 +1,32 @@
+import { SiteFooter } from "../../components/SiteFooter";
+import { SiteNav } from "../../components/SiteNav";
+
+const WIDGETS = ["Usage this period", "Devices", "Subscription"];
+
 export default function DashboardPage() {
-  // Server Component: validate session via BFF -> Fastify GET /me (Phase 4 wiring).
+  // Server Component: session validated via BFF -> Fastify GET /me (Phase 4 wiring).
   return (
-    <main className="mx-auto max-w-5xl p-6">
-      <h1 className="text-3xl font-semibold">Dashboard</h1>
-      <p className="mt-2 text-sm opacity-60">
-        Usage, devices, billing portal, BYOK key, history (opt-in). Full wiring
-        in Phase 4.
-      </p>
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        {["Usage this period", "Devices (2 max free)", "Subscription"].map(
-          (t) => (
-            <div key={t} className="border rounded-[6px] p-4">
-              <p className="font-medium">{t}</p>
-              <p className="mt-1 text-sm opacity-60">—</p>
+    <div className="min-h-screen bg-white text-black dark:bg-black dark:text-white">
+      <SiteNav />
+      <main className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
+        <h1 className="av-section-h">Dashboard</h1>
+        <p className="av-body-lg mt-4 text-gray-500">
+          Usage, devices, billing, and history. Full wiring ships with billing
+          in Phase 4.
+        </p>
+        <div className="mt-12 grid gap-6 md:grid-cols-3">
+          {WIDGETS.map((t) => (
+            <div
+              key={t}
+              className="rounded-card border border-gray-200 p-8 dark:border-gray-800"
+            >
+              <p className="av-h2">{t}</p>
+              <p className="av-body-lg mt-2 text-gray-500">No data yet.</p>
             </div>
-          ),
-        )}
-      </div>
-    </main>
+          ))}
+        </div>
+      </main>
+      <SiteFooter />
+    </div>
   );
 }

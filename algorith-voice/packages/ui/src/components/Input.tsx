@@ -1,16 +1,19 @@
 import type { InputHTMLAttributes } from "react";
 import { cn } from "../lib/cn.js";
 
+// Exact spec: 1px border, 4px radius, 8px/12px padding, flat surface background.
+// Focus: 2px solid text color + focus ring. No colored glow.
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {}
 
 export function Input({ className, ...props }: InputProps) {
   return (
     <input
       className={cn(
-        "h-10 w-full px-3 text-sm bg-white text-black border border-black/10 rounded-[4px]",
-        "placeholder:text-black/40 focus:outline-none focus:border-black/40",
-        "dark:bg-black dark:text-white dark:border-white/10 dark:placeholder:text-white/40 dark:focus:border-white/40",
-        "transition-colors duration-150",
+        "av-body w-full rounded-control border border-gray-200 bg-white px-3 py-2 text-black",
+        "placeholder:text-gray-300 transition-colors duration-150 ease-app",
+        "focus:border-black focus:outline-2 focus:outline-offset-2 focus:outline-(--av-focus-ring)",
+        "dark:border-gray-800 dark:bg-black dark:text-white",
+        "dark:focus:border-white",
         className,
       )}
       {...props}

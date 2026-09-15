@@ -9,6 +9,9 @@ export const signupSchema = z
     password: passwordSchema,
     name: z.string().min(1).max(100).optional(),
     deviceName: z.string().min(1).max(100).optional(),
+    deviceType: z
+      .enum(["desktop-macos", "desktop-windows", "desktop-linux"])
+      .optional(),
   })
   .strict();
 export type SignupInput = z.infer<typeof signupSchema>;

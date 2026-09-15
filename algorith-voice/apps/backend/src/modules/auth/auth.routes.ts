@@ -1,12 +1,29 @@
 import { loginSchema, signupSchema } from "@algorith-voice/shared-types";
+import type { DeviceType } from "@prisma/client";
 import * as argon2 from "argon2";
 import type { FastifyInstance } from "fastify";
+
+function toDeviceType(input: unknown): DeviceType {
+  switch (input) {
+    case "desktop-windows":
+      return "DESKTOP_WINDOWS";
+    case "desktop-linux":
+      return "DESKTOP_LINUX";
+    default:
+      return "DESKTOP_MACOS";
+  }
+}
 
 // NOTE: Phase 0 skeleton — full refresh-rotation + OAuth + lockout lands in Phase 3.
 // This keeps API contracts stable while remaining honest about what's implemented.
 export async function authRoutes(app: FastifyInstance) {
   app.post("/signup", { schema: { body: signupSchema } }, async (req) => {
-    const { email, name } = req.body as { email: string; name?: string };
+    const { email, name, deviceName, deviceType } = req.body as {
+      email: string;
+      name?: string;
+      deviceName?: string;
+      deviceType?: string;
+    };
     const passwordHash = await argon2.hash(
       (req.body as { password: string }).password,
       {
@@ -19,6 +36,17 @@ export async function authRoutes(app: FastifyInstance) {
     const user = await app.prisma.user.create({
       data: { email, name, passwordHash, planTier: "free" },
     });
+    // Phase 1 pairing: register the device that signed up (seat counting in Phase 3).
+    if (deviceName) {
+      await app.prisma.device.create({
+        data: {
+          userId: user.id,
+          name: deviceName,
+          type: toDeviceType(deviceType),
+          lastSeenAt: new Date(),
+        },
+      });
+    }
     const accessToken = app.jwt.sign({ sub: user.id, email: user.email });
     return {
       user: {
@@ -54,6 +82,12 @@ export async function authRoutes(app: FastifyInstance) {
       },
       accessToken,
     };
+  });
+
+  app.post("/logout", async () => {
+    // Phase 1: refresh revocation lands with rotation in Phase 3.
+    // Desktop clears its keyring session; web clears httpOnly cookies.
+    return { ok: true };
   });
 
   app.post("/refresh", async (_req, reply) => {

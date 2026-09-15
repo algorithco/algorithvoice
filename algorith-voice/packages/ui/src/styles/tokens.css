@@ -1,21 +1,139 @@
-/* Algorith Voice monochrome tokens — black/white/gray ONLY */
+/* Algorith Voice — exact design tokens. No value outside this file is permitted.
+   Imported by apps AFTER `@import "tailwindcss"` so @theme registers. */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-black: #000000;
+  --color-white: #ffffff;
+  --color-near-black: #0a0a0a;
+  --color-near-white: #f7f7f7;
+  --color-gray-900: #111111;
+  --color-gray-800: #1e1e1e;
+  --color-gray-700: #333333;
+  --color-gray-500: #6e6e6e;
+  --color-gray-300: #b8b8b8;
+  --color-gray-200: #e4e4e4;
+
+  --font-sans:
+    "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Inter Tight", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --radius-control: 4px;
+  --radius-card: 8px;
+
+  --ease-app: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --animate-av-pulse-bar: av-pulse-bar 1.2s var(--ease-app) infinite;
+  --animate-av-spin-bar: av-spin-bar 1s linear infinite;
+}
+
 :root {
-  --av-black: #000000;
-  --av-white: #ffffff;
-  --av-0a: #0a0a0a;
-  --av-1a: #1a1a1a;
-  --av-e5: #e5e5e5;
-  --av-f5: #f5f5f5;
-  --av-background: var(--av-white);
-  --av-foreground: var(--av-black);
-  --av-border: var(--av-e5);
-  --av-radius-sm: 2px;
-  --av-radius-md: 6px;
-  --av-transition: 150ms ease;
+  --av-bg: #ffffff;
+  --av-surface: #f7f7f7;
+  --av-text: #000000;
+  --av-text-secondary: #6e6e6e;
+  --av-border: #e4e4e4;
+  --av-active-fill: #e4e4e4;
+  --av-focus-ring: #000000;
   color-scheme: light dark;
 }
+
 .dark {
-  --av-background: var(--av-black);
-  --av-foreground: var(--av-white);
-  --av-border: rgba(255, 255, 255, 0.1);
+  --av-bg: #000000;
+  --av-surface: #0a0a0a;
+  --av-text: #ffffff;
+  --av-text-secondary: #6e6e6e;
+  --av-border: #1e1e1e;
+  --av-active-fill: #111111;
+  --av-focus-ring: #ffffff;
+}
+
+/* ---- Exact type scale (desktop/dashboard) ---- */
+.av-display {
+  font-size: 32px;
+  line-height: 38px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.av-h1 {
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.av-h2 {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+}
+.av-body {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+.av-small {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+.av-mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+}
+
+/* ---- Marketing scale ---- */
+.av-hero {
+  font-family: var(--font-display);
+  font-size: 64px;
+  line-height: 68px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.av-section-h {
+  font-family: var(--font-display);
+  font-size: 36px;
+  line-height: 42px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.av-subhead {
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 400;
+}
+.av-body-lg {
+  font-size: 16px;
+  line-height: 26px;
+  font-weight: 400;
+}
+.av-prose {
+  max-width: 68ch;
+}
+
+/* ---- Recording overlay motion (single permitted moment per surface) ---- */
+@keyframes av-pulse-bar {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+@keyframes av-spin-bar {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .av-pulse,
+  .av-spinner {
+    animation: none;
+  }
 }
