@@ -33,7 +33,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "macOS": { "minimumSystemVersion": "13.0", "signingIdentity": null },
+    "macOS": { "minimumSystemVersion": "13.0", "signingIdentity": "-" },
     "windows": {},
     "linux": {}
   },
