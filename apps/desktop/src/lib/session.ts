@@ -33,7 +33,11 @@ interface AuthResponse {
 }
 
 export async function sessionStatus(): Promise<SessionInfo> {
-  return tauri<SessionInfo>("session_status", undefined, { loggedIn: false });
+  const stored = await tauri<SessionInfo>("session_status", undefined, {
+    loggedIn: false,
+  });
+  if (stored.loggedIn) return stored;
+  return readDemoSession() ?? { loggedIn: false };
 }
 
 export async function login(
@@ -88,12 +92,61 @@ export async function signup(
 }
 
 export async function logout(): Promise<void> {
+  clearDemoSession();
   try {
     await fetch(`${API}/auth/logout`, { method: "POST" });
   } catch {
     // Backend logout is best-effort in Phase 1; keyring clear is authoritative.
   }
   await tauri("clear_session");
+}
+
+// ---- Local demo account (no backend) ----
+
+export const DEMO_EMAIL = "demo@algorithvoice.local";
+const DEMO_TOKEN = "demo-local-no-backend";
+const DEMO_KEY = "algorith-voice-demo-session";
+
+function readDemoSession(): SessionInfo | null {
+  try {
+    return localStorage.getItem(DEMO_KEY) === DEMO_EMAIL
+      ? { loggedIn: true, email: DEMO_EMAIL }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearDemoSession(): void {
+  try {
+    localStorage.removeItem(DEMO_KEY);
+  } catch {
+    // Storage unavailable.
+  }
+}
+
+/**
+ * Sign in with the built-in demo account. Fully local — never touches the
+ * backend. The session is stored in the OS keyring like a real login (with a
+ * localStorage mirror for browser preview), so it survives restarts and
+ * clears on logout.
+ */
+export async function loginDemo(): Promise<SessionInfo> {
+  const session: SessionInfo = { loggedIn: true, email: DEMO_EMAIL };
+  try {
+    await tauri("store_session", {
+      accessToken: DEMO_TOKEN,
+      email: DEMO_EMAIL,
+    });
+  } catch {
+    // Browser preview or keyring unavailable — mirror below covers it.
+  }
+  try {
+    localStorage.setItem(DEMO_KEY, DEMO_EMAIL);
+  } catch {
+    // Storage unavailable.
+  }
+  return session;
 }
 
 export type TrayState = "idle" | "recording" | "processing";

@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
   login,
+  loginDemo,
   type SessionInfo,
   signInWithOAuth,
   signup,
@@ -67,6 +68,16 @@ export default function LoginCardSection({ onDone }: Props) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleDemo = async () => {
+    setError(null);
+    try {
+      const s = await loginDemo();
+      onDone(s);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Demo sign-in failed.");
     }
   };
 
@@ -326,6 +337,24 @@ export default function LoginCardSection({ onDone }: Props) {
                     </motion.span>
                   </AnimatePresence>
                 </Button>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5, delay: 0.83 }}
+              >
+                <Button
+                  variant="outline"
+                  className="h-10 w-full rounded-lg border-zinc-800 bg-transparent text-zinc-300 hover:bg-zinc-900 hover:text-white"
+                  onClick={handleDemo}
+                  disabled={busy || !!oauthPending}
+                >
+                  Continue as demo — no backend needed
+                </Button>
+                <p className="mt-2 text-center text-[11px] text-zinc-500">
+                  demo@algorithvoice.local · local-only session
+                </p>
               </motion.div>
 
               <motion.div

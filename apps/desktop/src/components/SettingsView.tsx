@@ -2,8 +2,10 @@ import { Button, Input } from "@algorith-voice/ui";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useState } from "react";
 import {
+  DEMO_EMAIL,
   isTauri,
   login,
+  loginDemo,
   logout,
   type SessionInfo,
   sessionStatus,
@@ -73,14 +75,33 @@ function LoginForm({ onDone }: { onDone: (s: SessionInfo) => void }) {
         </label>
       </div>
       {error ? <p className="av-small mt-3 text-gray-500">{error}</p> : null}
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex flex-wrap gap-2">
         <Button onClick={submit} disabled={busy || !email || !password}>
           {busy ? "Please wait" : isSignup ? "Create account" : "Log in"}
         </Button>
         <Button variant="secondary" onClick={() => setIsSignup(!isSignup)}>
           {isSignup ? "Have an account?" : "New here?"}
         </Button>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setError(null);
+            void loginDemo()
+              .then(onDone)
+              .catch((e: unknown) =>
+                setError(
+                  e instanceof Error ? e.message : "Demo sign-in failed.",
+                ),
+              );
+          }}
+          disabled={busy}
+        >
+          Demo
+        </Button>
       </div>
+      <p className="av-small mt-2 text-gray-500">
+        Demo uses {DEMO_EMAIL} locally — no backend required.
+      </p>
     </div>
   );
 }
