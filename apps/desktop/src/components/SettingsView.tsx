@@ -9,6 +9,8 @@ import {
   sessionStatus,
   signup,
 } from "../lib/session.js";
+import BlurText from "./BlurText.js";
+import { OAuthButtons } from "./OAuthButtons.js";
 
 export interface Prefs {
   hotkey: string;
@@ -41,6 +43,12 @@ function LoginForm({ onDone }: { onDone: (s: SessionInfo) => void }) {
 
   return (
     <div>
+      <OAuthButtons onDone={onDone} />
+      <div className="my-4 flex items-center gap-3" aria-hidden="true">
+        <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
+        <span className="av-small text-gray-500">or with email</span>
+        <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
+      </div>
       <div className="flex flex-col gap-3">
         <label className="av-small text-gray-500" htmlFor="av-login-email">
           Email
@@ -115,7 +123,9 @@ export function SettingsView({
 
   return (
     <div className="mx-auto max-w-[640px] p-8">
-      <h1 className="av-display">Settings</h1>
+      <h1 className="av-display">
+        <BlurText text="Settings" />
+      </h1>
 
       <section className="mt-8">
         <h2 className="av-h2">Account</h2>

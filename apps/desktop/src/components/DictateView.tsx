@@ -1,6 +1,7 @@
 import { Button, RecordingOverlay, WaveformGlyph } from "@algorith-voice/ui";
 import { useRef, useState } from "react";
 import { setTrayState, type TrayState } from "../lib/session.js";
+import BlurText from "./BlurText.js";
 
 // Core interaction moment: PTT simulator wired to the real tray command.
 // Phase 2 replaces the timers with cpal → VAD → STT → inject.
@@ -33,7 +34,9 @@ export function DictateView({ hotkey }: { hotkey: string }) {
 
   return (
     <div className="p-8">
-      <h1 className="av-display">Dictate</h1>
+      <h1 className="av-display">
+        <BlurText text="Dictate" />
+      </h1>
       <p className="av-body av-prose mt-2 text-gray-500">
         Hold{" "}
         <span className="av-mono text-black dark:text-white">{hotkey}</span> to

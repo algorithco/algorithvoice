@@ -1,6 +1,7 @@
-import { Sidebar } from "@algorith-voice/ui";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
+import { AppSidebar } from "./components/AppSidebar.js";
+import { AuthView } from "./components/AuthView.js";
 import { DictateView } from "./components/DictateView.js";
 import { HistoryView } from "./components/HistoryView.js";
 import { OnboardingView } from "./components/OnboardingView.js";
@@ -12,14 +13,9 @@ import {
   saveOnboarded,
   savePrefs,
 } from "./lib/prefs.js";
+import { type SessionInfo, sessionStatus } from "./lib/session.js";
 
 type View = "dictate" | "history" | "settings";
-
-const ITEMS = [
-  { id: "dictate", label: "Dictate" },
-  { id: "history", label: "History" },
-  { id: "settings", label: "Settings" },
-];
 
 export default function App() {
   const [view, setView] = useState<View>("dictate");
@@ -27,6 +23,8 @@ export default function App() {
   const [onboarded, setOnboarded] = useState(true);
   const [isSettingsWindow, setIsSettingsWindow] = useState(false);
   const [ready, setReady] = useState(false);
+  const [session, setSession] = useState<SessionInfo | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     try {
@@ -39,6 +37,9 @@ export default function App() {
       setOnboarded(o);
       setReady(true);
     });
+    void sessionStatus()
+      .then(setSession)
+      .catch(() => setSession({ loggedIn: false }));
   }, []);
 
   useEffect(() => {
@@ -50,7 +51,7 @@ export default function App() {
     void savePrefs(p);
   };
 
-  if (!ready) return null;
+  if (!ready || session === null) return null;
 
   const shell =
     "min-h-screen bg-white text-black dark:bg-black dark:text-white";
@@ -59,6 +60,16 @@ export default function App() {
     return (
       <main className={shell}>
         <SettingsView prefs={prefs} onPrefs={updatePrefs} />
+      </main>
+    );
+  }
+
+  // Signed-out users land on the login page first — nothing else renders
+  // before this.
+  if (!session.loggedIn) {
+    return (
+      <main className={shell}>
+        <AuthView onDone={setSession} />
       </main>
     );
   }
@@ -81,13 +92,13 @@ export default function App() {
   return (
     <main className={shell}>
       <div className="flex min-h-screen">
-        <div className="border-r border-gray-200 dark:border-gray-800">
-          <Sidebar
-            items={ITEMS}
-            active={view}
-            onSelect={(id) => setView(id as View)}
-          />
-        </div>
+        <AppSidebar
+          active={view}
+          onSelect={(id) => setView(id as View)}
+          collapsed={collapsed}
+          onCollapsedChange={setCollapsed}
+          email={session?.email ?? null}
+        />
         <div className="min-w-0 flex-1">
           {view === "dictate" ? <DictateView hotkey={prefs.hotkey} /> : null}
           {view === "history" ? <HistoryView /> : null}
