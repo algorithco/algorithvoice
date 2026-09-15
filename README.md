@@ -48,4 +48,4 @@ Local mode = audio never leaves device. Cloud STT + sync are opt-in. No telemetr
 
 ## License
 
-MIT — see `LICENSE`. Hosted API/billing terms apply separately.
+GPL-3.0-or-later — see `LICENSE`. Hosted API/billing terms apply separately.
