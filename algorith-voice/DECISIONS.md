@@ -8,4 +8,4 @@ Best-choice answers to the 7 open questions from the full-stack plan:
 4. **Free tier: 60 min/mo cloud, unlimited local, 2 devices, 1 concurrent stream.** BYOK allowed on free (bypasses metering, still WS rate-limited). Paid: unlimited cloud + 10 devices + priority.
 5. **License: 3 seats/user, 7d offline grace, stable-only updater channel.** macOS split-arch (`aarch64` + `x86_64` separate, no universal for MVP speed).
 6. **Security: env-held 32B `ENCRYPTION_KEK` for beta → Cloud KMS at Phase 5.** Min OS: macOS 13+, Windows 10 1809+ (WebView2), Ubuntu 22.04+.
-7. **Releases: `github.com/algorith-voice/algorith-voice`**, assets `algorith-voice_{version}_{target}_{arch}.{dmg,msi,AppImage,deb}` + `latest.json` + `.sig`. Custody: `TAURI_SIGNING_*` + Apple certs in GitHub Secrets, never in repo.
+7. **Releases: `github.com/algorithco/algorithvoice`**, assets `algorithvoice_{version}_{target}_{arch}.{dmg,msi,AppImage,deb}` + `latest.json` + `.sig`. Custody: `TAURI_SIGNING_*` + Apple certs in GitHub Secrets, never in repo.

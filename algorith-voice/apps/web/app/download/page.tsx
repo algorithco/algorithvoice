@@ -1,7 +1,7 @@
 async function getLatest() {
   try {
     const repo =
-      process.env.NEXT_PUBLIC_GITHUB_REPO ?? "algorith-voice/algorith-voice";
+      process.env.NEXT_PUBLIC_GITHUB_REPO ?? "algorithco/algorithvoice";
     const res = await fetch(
       `https://api.github.com/repos/${repo}/releases/latest`,
       {
