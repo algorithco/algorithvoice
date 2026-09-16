@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import cookie from "@fastify/cookie";
+import compress from "@fastify/compress";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import jwt from "@fastify/jwt";
@@ -18,6 +19,8 @@ import {
 } from "fastify-type-provider-zod";
 import { loadEnv, setAppEnv } from "./config/env.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
+import { oauth2Routes } from "./modules/oauth2/oauth2.routes.js";
+import { adminRoutes } from "./modules/admin/admin.routes.js";
 import { billingRoutes } from "./modules/billing/billing.routes.js";
 import { licenseRoutes } from "./modules/devices/license.routes.js";
 import { sttRoutes } from "./modules/stt/stt.routes.js";
@@ -52,7 +55,16 @@ export function buildApp() {
     allowedHeaders: ["Content-Type", "Authorization"],
   });
   app.register(helmet);
+  app.register(compress, { global: true, threshold: 1024 });
   app.register(cookie);
+  // Simple response-time + structured log: 1.1, 1.6
+  app.addHook("onResponse", (req, reply, done) => {
+    const ms = reply.elapsedTime ?? (Date.now() - (req as unknown as { startTime?: number }).startTime!);
+    if (req.url !== "/health" && req.url !== "/ready") {
+      req.log.info({ reqId: req.id, method: req.method, url: req.url, statusCode: reply.statusCode, responseTime: Math.round(ms) }, "request completed");
+    }
+    done();
+  });
   app.register(jwt, {
     secret: env.JWT_ACCESS_SECRET,
     sign: {
@@ -123,6 +135,8 @@ export function buildApp() {
   });
 
   app.register(authRoutes, { prefix: "/auth" });
+  app.register(oauth2Routes, { prefix: "/oauth2" });
+  app.register(adminRoutes, { prefix: "/admin" });
   app.register(licenseRoutes, { prefix: "/license" });
   app.register(sttRoutes);
   app.register(billingRoutes, { prefix: "/billing" });
