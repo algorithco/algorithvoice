@@ -315,7 +315,7 @@ mod tests {
         let bits: u16 = if format == 1 { 16 } else { 32 };
         let mut data = Vec::new();
         for frame in frames.iter() {
-            for s in frame.iter().take(usize::from(ch)) {
+            for s in frame.iter().take(ch) {
                 let s = s.clamp(-1.0, 1.0);
                 if format == 1 {
                     data.extend_from_slice(&((s * 32767.0) as i16).to_le_bytes());
