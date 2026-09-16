@@ -7,15 +7,7 @@ const DURATION = 200;
 const EXPANDED = "220px";
 const COLLAPSED = "3.3rem";
 
-// Demo data — real history lands here when SQLite wires up.
-const starred = ["Refactor auth middleware"];
-const recents = [
-  "Add a database index on usage_records",
-  "Draft release notes for v0.2.0",
-  "The quick brown fox jumps over the lazy dog",
-];
-
-type View = "dictate" | "history" | "settings";
+type View = "dashboard" | "dictate" | "history" | "settings";
 
 type NavItem = {
   id: View;
@@ -38,6 +30,7 @@ export function AppSidebar({
   email?: string | null;
 }) {
   const navItems: NavItem[] = [
+    { label: "Dashboard", id: "dashboard", icon: <DashboardIcon /> },
     {
       label: "Dictate",
       id: "dictate",
@@ -96,42 +89,16 @@ export function AppSidebar({
           ))}
         </nav>
 
-        {/* Starred / Recents — hidden when collapsed, flat monochrome */}
-        <div
-          className="overflow-x-hidden pt-4"
-          style={{
-            transition: `opacity 150ms ${EASE}`,
-            opacity: collapsed ? 0 : 1,
-            pointerEvents: collapsed ? "none" : "auto",
-          }}
-          aria-hidden={collapsed}
-          // @ts-expect-error — inert is valid but TS lib hasn't caught up for div
-          inert={collapsed ? "" : undefined}
-        >
-          <div className="px-2">
-            <Section title="Starred">
-              {starred.map((t) => (
-                <ChatRow key={t} title={t} />
-              ))}
-            </Section>
-            <Section title="Recents">
-              {recents.map((t) => (
-                <ChatRow key={t} title={t} />
-              ))}
-            </Section>
-          </div>
-        </div>
-
         {/* Footer: user */}
-        <div className="mt-auto border-t border-gray-200 dark:border-gray-800">
+        <div className="mt-auto border-t border-gray-200 dark:border-white/10">
           <button
             type="button"
-            className="group flex h-16 w-full items-center gap-3 overflow-hidden px-2 transition-colors duration-150 hover:bg-gray-200/60 dark:hover:bg-gray-900/60"
+            className="group flex h-16 w-full items-center gap-3 overflow-hidden px-2 transition-colors duration-150 hover:bg-cyan-400/10"
             aria-label="Account"
             onClick={() => onSelect("settings")}
           >
             <div className="flex w-full items-center gap-3">
-              <div className="grid size-9 shrink-0 place-items-center rounded-control bg-black text-sm font-semibold text-white dark:bg-white dark:text-black">
+              <div className="grid size-9 shrink-0 place-items-center rounded-full bg-cyan-400 text-sm font-semibold text-black shadow-[0_0_10px_rgba(34,211,238,0.3)]">
                 {(email?.[0] ?? "G").toUpperCase()}
               </div>
               <div
@@ -183,10 +150,10 @@ function NavRow({
       aria-label={item.label}
       aria-current={active ? "page" : undefined}
       title={collapsed ? item.label : undefined}
-      className={`group relative flex h-10 w-full items-center overflow-hidden rounded-control px-4 text-sm transition-colors duration-150 active:scale-[0.99] ${
+      className={`group relative flex h-10 w-full items-center overflow-hidden rounded-full px-4 text-sm transition-all duration-150 active:scale-[0.99] ${
         active
-          ? "bg-gray-200 text-black dark:bg-gray-900 dark:text-white"
-          : "text-gray-500 hover:bg-gray-200 hover:text-black dark:hover:bg-gray-900 dark:hover:text-white"
+          ? "bg-cyan-400 text-black shadow-[0_0_12px_rgba(34,211,238,0.3)]"
+          : "text-gray-500 hover:bg-cyan-400/10 hover:text-cyan-600 dark:hover:bg-cyan-400/10 dark:hover:text-cyan-400"
       }`}
     >
       <span className="flex w-full -translate-x-2 items-center gap-3">
@@ -212,36 +179,6 @@ function NavRow({
         ) : null}
       </span>
     </button>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mb-4">
-      <h3 className="select-none px-2 pb-1 text-[11px] font-medium tracking-wide text-gray-500">
-        {title}
-      </h3>
-      <ul className="flex flex-col gap-px">{children}</ul>
-    </div>
-  );
-}
-
-function ChatRow({ title }: { title: string }) {
-  return (
-    <li className="list-none">
-      <span className="group relative flex h-8 items-center rounded-control px-3 text-[13px] text-gray-500 transition-colors duration-150 hover:bg-gray-200 hover:text-black dark:hover:bg-gray-900 dark:hover:text-white">
-        <span className="flex-1 truncate">{title}</span>
-        <span className="absolute right-1 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-control text-gray-500 opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:bg-white dark:hover:bg-gray-800">
-          <DotsIcon />
-        </span>
-      </span>
-    </li>
   );
 }
 
@@ -275,6 +212,20 @@ function HistoryIcon() {
   );
 }
 
+function DashboardIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M3 3h6.5v6.5H3a.5.5 0 0 1-.5-.5V3.5A.5.5 0 0 1 3 3Zm8 0H17a.5.5 0 0 1 .5.5v5.5a.5.5 0 0 1-.5.5h-6V3Zm-8.5 8H9V17H3a.5.5 0 0 1-.5-.5V11.5a.5.5 0 0 1 .5-.5Zm8 0h6.5a.5.5 0 0 1 .5.5v5.5a.5.5 0 0 1-.5.5H11V11Z" />
+    </svg>
+  );
+}
+
 function SettingsIcon() {
   return (
     <svg
@@ -299,20 +250,6 @@ function PanelIcon() {
       aria-hidden="true"
     >
       <path d="M16.5 4A1.5 1.5 0 0 1 18 5.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 2 14.5v-9A1.5 1.5 0 0 1 3.5 4zM7 15h9.5a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5H7zM3.5 5a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5H6V5z" />
-    </svg>
-  );
-}
-
-function DotsIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M4.5 8.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3m5.5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3m5.5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3" />
     </svg>
   );
 }
