@@ -311,6 +311,7 @@ pub(crate) async fn transcribe_local(
 ///
 /// `mode` selects the engine (see [`resolve_transcribe_path`]); `model_id`
 /// picks the local model and is required when mode is local.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn transcribe_audio(
     audio_base64: String,
@@ -433,6 +434,7 @@ fn paste_keystroke() -> AppResult<()> {
 /// The blocking clipboard/paste section runs on a `spawn_blocking`
 /// worker so the Tauri async runtime is never stalled.
 /// Returns the transcript for preview / history.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn transcribe_and_paste(
     audio_base64: String,
