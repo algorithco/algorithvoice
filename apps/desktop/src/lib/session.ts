@@ -181,6 +181,177 @@ function oauthStartUrl(provider: OAuthProvider): string {
   return `${API}/auth/oauth/${provider}/start?${params.toString()}`;
 }
 
+// ---- First-party desktop OAuth (authorization_code + PKCE S256) ----
+
+const REDIRECT_URI = "algorithvoice://auth-callback";
+const DESKTOP_CLIENT_ID = "desktop-app";
+
+function randomBase64Url(bytes: number): string {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+  let s = "";
+  for (const b of buf) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function pkceChallenge(verifier: string): Promise<string> {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  const bytes = new Uint8Array(digest);
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function parseOAuthCodeCallback(raw: string): {
+  code?: string;
+  state?: string;
+  error?: string;
+} | null {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "algorithvoice:") return null;
+  const query = new URLSearchParams(url.search);
+  if (url.hash.length > 1) {
+    const hash = new URLSearchParams(url.hash.slice(1));
+    hash.forEach((value, key) => {
+      if (!query.has(key)) query.set(key, value);
+    });
+  }
+  const error = query.get("error");
+  if (error) return { error };
+  const code = query.get("code") ?? undefined;
+  const state = query.get("state") ?? undefined;
+  if (!code) return null;
+  return { code, state };
+}
+
+async function exchangeOAuthCode(
+  code: string,
+  codeVerifier: string,
+  redirectUri: string,
+): Promise<{ accessToken: string; refreshToken?: string }> {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: DESKTOP_CLIENT_ID,
+    code,
+    redirect_uri: redirectUri,
+    code_verifier: codeVerifier,
+  });
+  const res = await fetch(`${API}/oauth2/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    access_token?: string;
+    refresh_token?: string;
+    error?: string;
+    error_description?: string;
+  };
+  if (!res.ok || !data.access_token) {
+    throw new Error(
+      data.error_description ?? data.error ?? "OAuth exchange failed.",
+    );
+  }
+  return { accessToken: data.access_token, refreshToken: data.refresh_token };
+}
+
+async function fetchEmailForAccessToken(
+  accessToken: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(`${API}/auth/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { email?: string };
+    return data.email ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * First-party desktop sign-in. Generates a PKCE pair, opens the system
+ * browser to the web consent page, and completes when the backend redirects
+ * to `algorithvoice://auth-callback?code=&state=`. The code is exchanged
+ * server-side via `/oauth2/token`; rotating refresh tokens are stored in
+ * the OS keyring alongside the access token.
+ */
+export async function signInDesktop(): Promise<SessionInfo> {
+  if (!isTauri()) {
+    window.open(`${API}/oauth2/authorize`, "_blank", "noopener");
+    throw new Error("Desktop sign-in needs the desktop app shell.");
+  }
+  const verifier = randomBase64Url(32);
+  const challenge = await pkceChallenge(verifier);
+  const state = randomBase64Url(16);
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: DESKTOP_CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    state,
+    scope: "email offline_access",
+  });
+  const authorizeUrl = `${API}/oauth2/authorize?${params.toString()}`;
+
+  let resolveSession!: (s: SessionInfo) => void;
+  let rejectSession!: (e: Error) => void;
+  const completed = new Promise<SessionInfo>((resolve, reject) => {
+    resolveSession = resolve;
+    rejectSession = reject;
+  });
+  const unlisten = await listen<string[]>("auth-callback", (event) => {
+    for (const raw of event.payload ?? []) {
+      const parsed = parseOAuthCodeCallback(raw);
+      if (!parsed) continue;
+      if (parsed.error) {
+        rejectSession(new Error(parsed.error));
+        return;
+      }
+      if (parsed.state !== state) {
+        rejectSession(new Error("State mismatch — please try again."));
+        return;
+      }
+      if (!parsed.code) continue;
+      void exchangeOAuthCode(parsed.code, verifier, REDIRECT_URI)
+        .then(async ({ accessToken, refreshToken }) => {
+          const email = (await fetchEmailForAccessToken(accessToken)) ?? "";
+          if (!email)
+            throw new Error("Signed in, but could not fetch profile.");
+          await tauri("store_session", {
+            accessToken,
+            email,
+            refreshToken: refreshToken ?? null,
+          });
+          resolveSession({ loggedIn: true, email });
+        })
+        .catch((e: unknown) => {
+          rejectSession(e instanceof Error ? e : new Error(String(e)));
+        });
+      return;
+    }
+  });
+  try {
+    await openUrl(authorizeUrl);
+  } catch {
+    unlisten();
+    throw new Error("Could not open the system browser.");
+  }
+  try {
+    return await completed;
+  } finally {
+    unlisten();
+  }
+}
+
 function parseOAuthCallbackUrl(raw: string): {
   accessToken: string;
   email: string;

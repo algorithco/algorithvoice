@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { AppSidebar } from "./components/AppSidebar.js";
 import { AuthView } from "./components/AuthView.js";
 import { DictateView } from "./components/DictateView.js";
+import { FloatingPill } from "./components/FloatingPill.js";
 import { HistoryView } from "./components/HistoryView.js";
 import { OnboardingView } from "./components/OnboardingView.js";
 import { type Prefs, SettingsView } from "./components/SettingsView.js";
@@ -22,15 +23,19 @@ export default function App() {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [onboarded, setOnboarded] = useState(true);
   const [isSettingsWindow, setIsSettingsWindow] = useState(false);
+  const [isFloatingPill, setIsFloatingPill] = useState(false);
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     try {
-      setIsSettingsWindow(getCurrentWindow().label === "settings");
+      const label = getCurrentWindow().label;
+      setIsSettingsWindow(label === "settings");
+      setIsFloatingPill(label === "floating-pill");
     } catch {
       setIsSettingsWindow(false);
+      setIsFloatingPill(false);
     }
     void Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
       setPrefs(p);
@@ -61,6 +66,10 @@ export default function App() {
 
   const shell =
     "min-h-screen bg-white text-black dark:bg-black dark:text-white";
+
+  if (isFloatingPill) {
+    return <FloatingPill />;
+  }
 
   if (isSettingsWindow) {
     return (

@@ -1,4 +1,5 @@
 mod error;
+mod push_to_talk;
 mod state;
 
 use error::{AppError, AppResult};
@@ -164,14 +165,24 @@ fn store_session(
     email: String,
     accessToken: Option<String>,
     access_token: Option<String>,
+    refreshToken: Option<String>,
+    refresh_token: Option<String>,
 ) -> AppResult<()> {
     // Frontend sends `{ accessToken, email }` (camelCase). Accept snake_case
     // too so older/newer callers keep working; never break the UI contract.
+    // refreshToken is optional (OAuth flow); never stored raw in logs.
     let token = accessToken
         .or(access_token)
         .ok_or_else(|| AppError::session("missing access token"))?;
     let (token, email) = validate_session_input(&token, &email)?;
-    let payload = serde_json::json!({ "access_token": token, "email": email });
+    let refresh = refreshToken
+        .or(refresh_token)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let mut payload = serde_json::json!({ "access_token": token, "email": email });
+    if let Some(value) = refresh {
+        payload["refresh_token"] = serde_json::Value::String(value);
+    }
     keyring_entry()?
         .set_password(&payload.to_string())
         .map_err(|e| AppError::session(e.to_string()))?;
@@ -431,14 +442,21 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
-                    // Phase 2: Pressed -> start_ptt, Released -> stop_ptt.
+                    // Pressed -> start_ptt, Released -> stop_ptt.
                     // Emit stable events; the frontend can subscribe without
-                    // any Rust change later.
+                    // any Rust change later. OS key-repeat can deliver
+                    // several `Pressed` for one physical hold — dedupe so a
+                    // held hotkey never restarts the recording pipeline.
+                    static PTT_HELD: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
                     match event.state() {
                         ShortcutState::Pressed => {
-                            let _ = app.emit("ptt-pressed", ());
+                            if !PTT_HELD.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                                let _ = app.emit("ptt-pressed", ());
+                            }
                         }
                         ShortcutState::Released => {
+                            PTT_HELD.store(false, std::sync::atomic::Ordering::SeqCst);
                             let _ = app.emit("ptt-released", ());
                         }
                     }
@@ -490,8 +508,13 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             // Dictation apps live in the tray: close hides, Quit exits.
+            // The floating pill follows the same rule so its close button
+            // never kills the process (reopen via Dictate view / tray).
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" || window.label() == "settings" {
+                if window.label() == "main"
+                    || window.label() == "settings"
+                    || window.label() == "floating-pill"
+                {
                     let _ = window.hide();
                     api.prevent_close();
                 }
@@ -508,7 +531,18 @@ pub fn run() {
             clear_session,
             get_hotkey,
             register_hotkey,
-            unregister_hotkey
+            unregister_hotkey,
+            // Push-to-talk floating pill (additive; existing commands untouched).
+            push_to_talk::transcribe_audio,
+            push_to_talk::transcribe_and_paste,
+            push_to_talk::paste_text,
+            push_to_talk::set_groq_api_key,
+            push_to_talk::has_groq_key,
+            push_to_talk::clear_groq_key,
+            push_to_talk::get_foreground_info,
+            push_to_talk::ensure_floating_pill,
+            push_to_talk::set_floating_pill_visible,
+            push_to_talk::floating_pill_visible
         ])
         .run(tauri::generate_context!())
         .expect("error while running Algorith Voice");

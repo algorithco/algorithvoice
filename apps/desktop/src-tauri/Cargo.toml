@@ -31,6 +31,15 @@ tokio = { version = "1", features = ["full"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 keyring = "3"
 dirs = "6"
+# Push-to-talk floating pill (additive only, versions pinned to avoid drift):
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "multipart",
+  "json",
+] }
+base64 = "0.22"
+arboard = "3"
+enigo = "0.6"
 
 [features]
 default = ["custom-protocol"]

@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-capability",
-  "description": "Least-privilege capability for Algorith Voice main + settings windows",
-  "windows": ["main", "settings"],
+  "description": "Least-privilege capability for Algorith Voice main + settings + floating-pill windows",
+  "windows": ["main", "settings", "floating-pill"],
   "permissions": [
     "core:tray:default",
     "core:window:default",
