@@ -226,7 +226,7 @@ fn audio_mime_and_filename(mime_type: Option<&str>) -> (&'static str, &'static s
     let mime = mime_type.unwrap_or("").trim().to_ascii_lowercase();
     if mime.contains("mp4") || mime.contains("m4a") || mime.contains("aac") {
         ("audio/mp4", "audio.m4a")
-    } else if mime.contains("ogg") || mime.contains("opus") && mime.contains("ogg") {
+    } else if mime.contains("ogg") {
         ("audio/ogg", "audio.ogg")
     } else if mime.contains("wav") || mime.contains("wave") {
         ("audio/wav", "audio.wav")

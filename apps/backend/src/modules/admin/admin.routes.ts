@@ -10,8 +10,9 @@ async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
     return reply.code(401).send({ error: "unauthorized" });
   }
   const { sub } = req.user as { sub: string };
-  // @ts-ignore — prisma injected
-  const user = await (req.server as unknown as { prisma: import("@prisma/client").PrismaClient }).prisma.user.findUnique({
+  const user = await (
+    req.server as unknown as { prisma: import("@prisma/client").PrismaClient }
+  ).prisma.user.findUnique({
     where: { id: sub },
     select: { role: true },
   });
@@ -46,16 +47,28 @@ export async function adminRoutes(app: FastifyInstance) {
   // GET /admin/stats/overview
   app.get("/stats/overview", async (req) => {
     const q = paginationSchema.partial().parse(req.query);
-    const from = q.from ? new Date(q.from) : new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    const from = q.from
+      ? new Date(q.from)
+      : new Date(Date.now() - 7 * 24 * 3600 * 1000);
     const to = q.to ? new Date(q.to) : new Date();
-    const prisma = (app as unknown as { prisma: import("@prisma/client").PrismaClient }).prisma;
+    const prisma = (
+      app as unknown as { prisma: import("@prisma/client").PrismaClient }
+    ).prisma;
     const cacheKey = `admin:overview:${from.toISOString()}:${to.toISOString()}`;
     const cached = await redis.get(cacheKey);
     if (cached) return JSON.parse(cached);
     const [total, failed, costAgg] = await Promise.all([
-      prisma.aiRequestLog.count({ where: { createdAt: { gte: from, lte: to } } }),
-      prisma.aiRequestLog.count({ where: { createdAt: { gte: from, lte: to }, success: false } }),
-      prisma.aiRequestLog.aggregate({ where: { createdAt: { gte: from, lte: to } }, _sum: { costUsd: true }, _avg: { latencyMs: true } }),
+      prisma.aiRequestLog.count({
+        where: { createdAt: { gte: from, lte: to } },
+      }),
+      prisma.aiRequestLog.count({
+        where: { createdAt: { gte: from, lte: to }, success: false },
+      }),
+      prisma.aiRequestLog.aggregate({
+        where: { createdAt: { gte: from, lte: to } },
+        _sum: { costUsd: true },
+        _avg: { latencyMs: true },
+      }),
     ]);
     const successRate = total ? ((total - failed) / total) * 100 : 0;
     const result = {
@@ -63,8 +76,11 @@ export async function adminRoutes(app: FastifyInstance) {
       totalRequests: total,
       failedRequests: failed,
       successRate: Math.round(successRate * 100) / 100,
-      avgLatencyMs: costAgg._avg.latencyMs ? Math.round(costAgg._avg.latencyMs) : 0,
-      totalCostUsd: costAgg._sum.costUsd?.toNumber?.() ?? Number(costAgg._sum.costUsd ?? 0),
+      avgLatencyMs: costAgg._avg.latencyMs
+        ? Math.round(costAgg._avg.latencyMs)
+        : 0,
+      totalCostUsd:
+        costAgg._sum.costUsd?.toNumber?.() ?? Number(costAgg._sum.costUsd ?? 0),
     };
     await redis.set(cacheKey, JSON.stringify(result), "EX", 60);
     return result;
@@ -73,9 +89,13 @@ export async function adminRoutes(app: FastifyInstance) {
   // GET /admin/stats/models
   app.get("/stats/models", async (req) => {
     const q = paginationSchema.partial().parse(req.query);
-    const from = q.from ? new Date(q.from) : new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    const from = q.from
+      ? new Date(q.from)
+      : new Date(Date.now() - 7 * 24 * 3600 * 1000);
     const to = q.to ? new Date(q.to) : new Date();
-    const prisma = (app as unknown as { prisma: import("@prisma/client").PrismaClient }).prisma;
+    const prisma = (
+      app as unknown as { prisma: import("@prisma/client").PrismaClient }
+    ).prisma;
     const groups = await prisma.aiRequestLog.groupBy({
       by: ["model"],
       where: { createdAt: { gte: from, lte: to } },
@@ -85,7 +105,13 @@ export async function adminRoutes(app: FastifyInstance) {
     });
     const withErrors = await Promise.all(
       groups.map(async (g) => {
-        const errCount = await prisma.aiRequestLog.count({ where: { model: g.model, success: false, createdAt: { gte: from, lte: to } } });
+        const errCount = await prisma.aiRequestLog.count({
+          where: {
+            model: g.model,
+            success: false,
+            createdAt: { gte: from, lte: to },
+          },
+        });
         return {
           model: g.model,
           requests: g._count._all,
@@ -93,19 +119,28 @@ export async function adminRoutes(app: FastifyInstance) {
           costUsd: g._sum.costUsd?.toNumber?.() ?? Number(g._sum.costUsd ?? 0),
           tokens: (g._sum.promptTokens ?? 0) + (g._sum.completionTokens ?? 0),
           errorCount: errCount,
-          errorRate: g._count._all ? Math.round((errCount / g._count._all) * 10000) / 100 : 0,
+          errorRate: g._count._all
+            ? Math.round((errCount / g._count._all) * 10000) / 100
+            : 0,
         };
       }),
     );
-    return { period: { from: from.toISOString(), to: to.toISOString() }, data: withErrors };
+    return {
+      period: { from: from.toISOString(), to: to.toISOString() },
+      data: withErrors,
+    };
   });
 
   // GET /admin/config/ai-model
   app.get("/config/ai-model", async () => {
-    const prisma = (app as unknown as { prisma: import("@prisma/client").PrismaClient }).prisma;
+    const prisma = (
+      app as unknown as { prisma: import("@prisma/client").PrismaClient }
+    ).prisma;
     const cached = await redis.get("admin:ai-config");
     if (cached) return JSON.parse(cached);
-    const configs = await prisma.aiModelConfig.findMany({ orderBy: { createdAt: "desc" } });
+    const configs = await prisma.aiModelConfig.findMany({
+      orderBy: { createdAt: "desc" },
+    });
     const active = configs.find((c) => c.isActive) ?? null;
     const fallback = configs.find((c) => c.isFallback) ?? null;
     const result = { active, fallback, all: configs };
@@ -122,14 +157,21 @@ export async function adminRoutes(app: FastifyInstance) {
       })
       .strict();
     const body = bodySchema.parse(req.body);
-    const prisma = (app as unknown as { prisma: import("@prisma/client").PrismaClient }).prisma;
+    const prisma = (
+      app as unknown as { prisma: import("@prisma/client").PrismaClient }
+    ).prisma;
     const { sub } = req.user as { sub: string };
     if (body.activeModelId) {
-      const exists = await prisma.aiModelConfig.findUnique({ where: { modelId: body.activeModelId } });
+      const exists = await prisma.aiModelConfig.findUnique({
+        where: { modelId: body.activeModelId },
+      });
       if (!exists) return reply.code(404).send({ error: "model_not_found" });
       await prisma.$transaction([
         prisma.aiModelConfig.updateMany({ data: { isActive: false } }),
-        prisma.aiModelConfig.update({ where: { modelId: body.activeModelId }, data: { isActive: true, updatedBy: sub } }),
+        prisma.aiModelConfig.update({
+          where: { modelId: body.activeModelId },
+          data: { isActive: true, updatedBy: sub },
+        }),
         prisma.auditLog.create({
           data: {
             actorUserId: sub,
@@ -140,11 +182,16 @@ export async function adminRoutes(app: FastifyInstance) {
       ]);
     }
     if (body.fallbackModelId) {
-      const exists = await prisma.aiModelConfig.findUnique({ where: { modelId: body.fallbackModelId } });
+      const exists = await prisma.aiModelConfig.findUnique({
+        where: { modelId: body.fallbackModelId },
+      });
       if (!exists) return reply.code(404).send({ error: "model_not_found" });
       await prisma.$transaction([
         prisma.aiModelConfig.updateMany({ data: { isFallback: false } }),
-        prisma.aiModelConfig.update({ where: { modelId: body.fallbackModelId }, data: { isFallback: true, updatedBy: sub } }),
+        prisma.aiModelConfig.update({
+          where: { modelId: body.fallbackModelId },
+          data: { isFallback: true, updatedBy: sub },
+        }),
         prisma.auditLog.create({
           data: {
             actorUserId: sub,
@@ -162,7 +209,9 @@ export async function adminRoutes(app: FastifyInstance) {
   // GET /admin/logs/errors
   app.get("/logs/errors", async (req) => {
     const q = paginationSchema.parse(req.query);
-    const prisma = (app as unknown as { prisma: import("@prisma/client").PrismaClient }).prisma;
+    const prisma = (
+      app as unknown as { prisma: import("@prisma/client").PrismaClient }
+    ).prisma;
     const where: Record<string, unknown> = { success: false };
     if (q.from || q.to) {
       where.createdAt = {
@@ -181,13 +230,23 @@ export async function adminRoutes(app: FastifyInstance) {
       }),
       prisma.aiRequestLog.count({ where: where as never }),
     ]);
-    return { data, meta: { page: q.page, limit: q.limit, total, totalPages: Math.ceil(total / q.limit) } };
+    return {
+      data,
+      meta: {
+        page: q.page,
+        limit: q.limit,
+        total,
+        totalPages: Math.ceil(total / q.limit),
+      },
+    };
   });
 
   // GET /admin/essays (maps to AudioAsset + AiRequestLog union for demo)
   app.get("/essays", async (req) => {
     const q = paginationSchema.parse(req.query);
-    const prisma = (app as unknown as { prisma: import("@prisma/client").PrismaClient }).prisma;
+    const prisma = (
+      app as unknown as { prisma: import("@prisma/client").PrismaClient }
+    ).prisma;
     const where: Record<string, unknown> = {};
     if (q.search) where.r2Key = { contains: q.search, mode: "insensitive" };
     const [data, total] = await Promise.all([
@@ -200,13 +259,23 @@ export async function adminRoutes(app: FastifyInstance) {
       }),
       prisma.audioAsset.count({ where: where as never }),
     ]);
-    return { data, meta: { page: q.page, limit: q.limit, total, totalPages: Math.ceil(total / q.limit) } };
+    return {
+      data,
+      meta: {
+        page: q.page,
+        limit: q.limit,
+        total,
+        totalPages: Math.ceil(total / q.limit),
+      },
+    };
   });
 
   // GET /admin/users
   app.get("/users", async (req) => {
     const q = paginationSchema.parse(req.query);
-    const prisma = (app as unknown as { prisma: import("@prisma/client").PrismaClient }).prisma;
+    const prisma = (
+      app as unknown as { prisma: import("@prisma/client").PrismaClient }
+    ).prisma;
     const where: Record<string, unknown> = {};
     if (q.search) {
       where.OR = [
@@ -220,21 +289,43 @@ export async function adminRoutes(app: FastifyInstance) {
         orderBy: { createdAt: "desc" },
         skip: (q.page - 1) * q.limit,
         take: q.limit,
-        select: { id: true, email: true, name: true, planTier: true, role: true, createdAt: true },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          planTier: true,
+          role: true,
+          createdAt: true,
+        },
       }),
       prisma.user.count({ where: where as never }),
     ]);
-    return { data, meta: { page: q.page, limit: q.limit, total, totalPages: Math.ceil(total / q.limit) } };
+    return {
+      data,
+      meta: {
+        page: q.page,
+        limit: q.limit,
+        total,
+        totalPages: Math.ceil(total / q.limit),
+      },
+    };
   });
 
   // POST /admin/users/:id/block (optional per spec)
-  app.post("/users/:id/block", async (req, reply) => {
+  app.post("/users/:id/block", async (req, _reply) => {
     const { id } = req.params as { id: string };
-    const prisma = (app as unknown as { prisma: import("@prisma/client").PrismaClient }).prisma;
+    const prisma = (
+      app as unknown as { prisma: import("@prisma/client").PrismaClient }
+    ).prisma;
     const { sub } = req.user as { sub: string };
     // For demo: we use audit log as block record; real would set User.status
     await prisma.auditLog.create({
-      data: { actorUserId: sub, action: "admin.user.block", recordId: id, metadata: { targetUserId: id } },
+      data: {
+        actorUserId: sub,
+        action: "admin.user.block",
+        recordId: id,
+        metadata: { targetUserId: id },
+      },
     });
     return { ok: true };
   });

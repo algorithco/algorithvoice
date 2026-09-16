@@ -97,8 +97,12 @@ export async function sttRoutes(app: FastifyInstance) {
         chunks.push(c);
       }
       const merged = Buffer.concat(chunks);
-      const format = resolveAudioFormat(file.filename, merged as unknown as Uint8Array);
-      if (!format) return reply.code(400).send({ error: "unsupported_audio_format" });
+      const format = resolveAudioFormat(
+        file.filename,
+        merged as unknown as Uint8Array,
+      );
+      if (!format)
+        return reply.code(400).send({ error: "unsupported_audio_format" });
       const jobId = `stt-${randomUUID()}`;
       const audioKey = `stt:audio:${jobId}`;
       await redis.set(audioKey, merged.toString("base64"), "EX", 3600);
@@ -124,12 +128,16 @@ export async function sttRoutes(app: FastifyInstance) {
     },
     async (req, reply) => {
       const { id } = req.params as { id: string };
-      if (!id || id.length > 128) return reply.code(400).send({ error: "invalid_job_id" });
+      if (!id || id.length > 128)
+        return reply.code(400).send({ error: "invalid_job_id" });
       const { redis } = await import("../../queues/connection.js");
       const { QUEUES } = await import("../../queues/connection.js");
       const cached = await redis.get(`stt:result:${id}`);
       if (cached) {
-        const result = JSON.parse(cached) as { text: string; latencyMs: number };
+        const result = JSON.parse(cached) as {
+          text: string;
+          latencyMs: number;
+        };
         return { id, status: "completed" as const, result };
       }
       const job = await QUEUES.stt.getJob(id);
@@ -143,7 +151,10 @@ export async function sttRoutes(app: FastifyInstance) {
         const ret = job.returnvalue as { text?: string } | undefined;
         return { id, status: "completed" as const, result: ret };
       }
-      return { id, status: state === "active" ? ("active" as const) : ("queued" as const) };
+      return {
+        id,
+        status: state === "active" ? ("active" as const) : ("queued" as const),
+      };
     },
   );
 

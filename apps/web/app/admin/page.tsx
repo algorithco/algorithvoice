@@ -1,6 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 interface Overview {
   totalRequests: number;
@@ -21,7 +29,10 @@ export default function AdminOverviewPage() {
       .catch((e) => setErr(String(e)));
   }, []);
 
-  if (err) return <p className="text-red-400 text-sm">Failed: {err} (need admin login)</p>;
+  if (err)
+    return (
+      <p className="text-red-400 text-sm">Failed: {err} (need admin login)</p>
+    );
   if (!data) return <p className="text-sm text-faint">Loading…</p>;
 
   const chartData = [
