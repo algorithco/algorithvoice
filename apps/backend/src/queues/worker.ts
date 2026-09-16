@@ -4,7 +4,7 @@ import { Redis } from "ioredis";
 import pino from "pino";
 import { loadEnv } from "../config/env.js";
 import { getStripe } from "../modules/billing/stripe.js";
-import { QUEUES } from "./connection.js";
+import { QUEUES, redis } from "./connection.js";
 import { processStripeEvent } from "./stripe-events.js";
 
 // Separate process: `pnpm worker`. Same image, different CMD on Fly.
@@ -78,6 +78,67 @@ const workers = [
         return { ok: true, id: job.id, processed: false };
       },
       { connection: makeWorkerRedis(), concurrency: 1, lockDuration: 60_000 },
+    ),
+  ),
+  observe(
+    "stt.transcribe",
+    new Worker(
+      "stt.transcribe",
+      async (job) => {
+        const { jobId, userId, format, model, language, audioKey, filename } = job.data as {
+          jobId: string;
+          userId: string;
+          format: string;
+          model: string;
+          language?: string;
+          audioKey: string;
+          filename?: string;
+        };
+        const b64 = await redis.getBuffer(audioKey);
+        if (!b64) throw Object.assign(new Error("audio expired, re-upload"), { statusCode: 410 });
+        const audio = Buffer.from(b64.toString(), "base64");
+        const { getAppEnv } = await import("../config/env.js");
+        const env = getAppEnv();
+        const apiKey = env.OPENROUTER_API_KEY;
+        if (!apiKey) throw Object.assign(new Error("stt_unavailable"), { statusCode: 503 });
+        // 30s timeout inside worker (not the HTTP handler), retry via BullMQ backoff
+        const started = Date.now();
+        let text = "";
+        try {
+          const { mimeForFormat } = await import("../modules/stt/stt.utils.js");
+          const form = new FormData();
+          form.set("file", new Blob([new Uint8Array(audio)], { type: mimeForFormat(format) }), filename ?? "audio.wav");
+          form.set("model", model);
+          if (language && language !== "auto") form.set("language", language);
+          const res = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${apiKey}`, "HTTP-Referer": env.APP_URL, "X-Title": "Algorith Voice" },
+            body: form,
+            signal: AbortSignal.timeout(30_000),
+          });
+          if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            const err = new Error(body.slice(0, 500)) as Error & { statusCode?: number; retryable?: boolean };
+            err.statusCode = res.status;
+            err.retryable = res.status === 429 || res.status >= 500;
+            if (res.status === 429) {
+              const ra = res.headers.get("retry-after");
+              const delay = ra ? Number.parseInt(ra, 10) * 1000 : 5000;
+              await (job as unknown as { rateLimit: (ms: number) => Promise<void> }).rateLimit?.(delay);
+            }
+            throw err;
+          }
+          const out = (await res.json()) as { text: string };
+          text = out.text;
+        } finally {
+          await redis.del(audioKey).catch(() => {});
+        }
+        const latencyMs = Date.now() - started;
+        // Persist result for polling (TTL 1h)
+        await redis.set(`stt:result:${jobId}`, JSON.stringify({ text, latencyMs }), "EX", 3600);
+        return { text, latencyMs };
+      },
+      { connection: makeWorkerRedis(), concurrency: 5, limiter: { max: 10, duration: 1000 }, lockDuration: 60_000 },
     ),
   ),
 ];

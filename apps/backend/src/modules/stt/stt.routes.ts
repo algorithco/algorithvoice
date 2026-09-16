@@ -54,7 +54,7 @@ async function transcribeViaOpenRouter(
         "X-Title": "Algorith Voice",
       },
       body: form,
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(30_000),
     });
   } catch (e: unknown) {
     if (isAbortError(e)) throw new ProviderError(504, "provider timeout");
@@ -71,6 +71,82 @@ async function transcribeViaOpenRouter(
 }
 
 export async function sttRoutes(app: FastifyInstance) {
+  // ---- Async queue: POST /stt/jobs → 202 { jobId } ----
+  app.post(
+    "/stt/jobs",
+    {
+      onRequest: [app.authenticate],
+      config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+    },
+    async (req, reply) => {
+      const { sub } = req.user as { sub: string };
+      const file = await req.file();
+      if (!file) return reply.code(400).send({ error: "audio_required" });
+      const { randomUUID } = await import("node:crypto");
+      const { redis } = await import("../../queues/connection.js");
+      const { enqueueStt } = await import("../../queues/connection.js");
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      for await (const chunk of file.file) {
+        const c = chunk as Uint8Array;
+        total += c.byteLength;
+        if (total > MAX_SYNC_BYTES) {
+          file.file.destroy();
+          return reply.code(413).send({ error: "audio_too_large", maxMb: 25 });
+        }
+        chunks.push(c);
+      }
+      const merged = Buffer.concat(chunks);
+      const format = resolveAudioFormat(file.filename, merged as unknown as Uint8Array);
+      if (!format) return reply.code(400).send({ error: "unsupported_audio_format" });
+      const jobId = `stt-${randomUUID()}`;
+      const audioKey = `stt:audio:${jobId}`;
+      await redis.set(audioKey, merged.toString("base64"), "EX", 3600);
+      const q = req.query as { language?: string; model?: string };
+      await enqueueStt({
+        jobId,
+        userId: sub,
+        format,
+        model: q.model ?? getAppEnv().STT_PRIMARY,
+        language: q.language,
+        audioKey,
+        filename: file.filename,
+      });
+      return reply.code(202).send({ jobId, statusUrl: `/stt/jobs/${jobId}` });
+    },
+  );
+
+  app.get(
+    "/stt/jobs/:id",
+    {
+      onRequest: [app.authenticate],
+      config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      if (!id || id.length > 128) return reply.code(400).send({ error: "invalid_job_id" });
+      const { redis } = await import("../../queues/connection.js");
+      const { QUEUES } = await import("../../queues/connection.js");
+      const cached = await redis.get(`stt:result:${id}`);
+      if (cached) {
+        const result = JSON.parse(cached) as { text: string; latencyMs: number };
+        return { id, status: "completed" as const, result };
+      }
+      const job = await QUEUES.stt.getJob(id);
+      if (!job) return reply.code(404).send({ error: "not_found" });
+      const state = await job.getState();
+      if (state === "failed") {
+        const reason = job.failedReason ?? "failed";
+        return { id, status: "failed" as const, error: reason };
+      }
+      if (state === "completed") {
+        const ret = job.returnvalue as { text?: string } | undefined;
+        return { id, status: "completed" as const, result: ret };
+      }
+      return { id, status: state === "active" ? ("active" as const) : ("queued" as const) };
+    },
+  );
+
   app.post(
     "/stt/transcribe",
     {

@@ -39,6 +39,11 @@ enum PlanTier {
   pro
 }
 
+enum UserRole {
+  user
+  admin
+}
+
 model User {
   id               String         @id @default(cuid())
   email            String         @unique
@@ -46,6 +51,7 @@ model User {
   name             String?
   stripeCustomerId String?        @unique
   planTier         PlanTier       @default(free)
+  role             UserRole       @default(user)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   accounts         Account[]
@@ -214,4 +220,41 @@ model AuditLog {
   @@index([model, recordId, createdAt])
   @@index([action, createdAt])
   @@index([createdAt])
+}
+
+model AiModelConfig {
+  id              String   @id @default(cuid())
+  modelId         String   @unique
+  displayName     String
+  provider        String
+  isActive        Boolean  @default(false)
+  isFallback      Boolean  @default(false)
+  isEnabled       Boolean  @default(true)
+  inputPricePer1k Decimal  @db.Decimal(10, 6) @default(0)
+  outputPricePer1k Decimal @db.Decimal(10, 6) @default(0)
+  maxTokens       Int      @default(4096)
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([provider])
+}
+
+model AiRequestLog {
+  id               String   @id @default(cuid())
+  model            String
+  latencyMs        Int
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  costUsd          Decimal  @db.Decimal(10, 6) @default(0)
+  success          Boolean
+  errorCode        String?
+  errorMessage     String?
+  userId           String?
+  createdAt        DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([model, createdAt])
+  @@index([success, createdAt])
 }

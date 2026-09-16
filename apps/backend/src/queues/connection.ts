@@ -42,6 +42,15 @@ export const QUEUES = {
     connection: makeRedis(),
     defaultJobOptions: queueDefaults,
   }),
+  stt: new Queue("stt.transcribe", {
+    connection: makeRedis(),
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 2000 },
+      removeOnComplete: { age: 3600, count: 2000 },
+      removeOnFail: { age: 24 * 3600, count: 5000 },
+    },
+  }),
 } as const;
 
 export function closeQueues() {
@@ -71,4 +80,22 @@ export function enqueueMetering(data: unknown, opts?: JobsOptions) {
     ...queueDefaults,
     jobId,
   });
+}
+
+export const SttJob = z
+  .object({
+    jobId: z.string().min(1).max(128),
+    userId: z.string().min(1),
+    format: z.string().min(1).max(32),
+    model: z.string().min(1).max(128),
+    language: z.string().max(16).optional(),
+    audioKey: z.string().min(1).max(256),
+    filename: z.string().max(256).optional(),
+  })
+  .strict();
+export type SttJob = z.infer<typeof SttJob>;
+
+export async function enqueueStt(data: SttJob) {
+  const job = SttJob.parse(data);
+  return QUEUES.stt.add("transcribe", job, { jobId: job.jobId });
 }
