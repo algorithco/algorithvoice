@@ -1,0 +1,89 @@
+# Verification vehicle for local-STT Phase 1+2 (no linker on dev machines).
+#
+# Runs the exact gate sequence on Windows with the real Parakeet INT8
+# fixture: fmt -> check -> clippy -D warnings -> full test suite including
+# the real-model smoke test (spike + worker gated tests).
+#
+# The fixture (~671 MB) is cached between runs; it is public and contains
+# only model weights + a sample wav (no secrets, no audio fixtures of ours).
+# This workflow is intentionally separate from ci.yml so the heavyweight
+# fixture download never slows the normal matrix. Revisit at Phase 5
+# (either fold the gated tests into ci.yml or keep this file).
+name: local-stt-verify
+
+on:
+  push:
+    branches: [ci/local-stt-verify]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MANIFEST_DIR: apps/desktop/src-tauri
+  FIXTURE_DIR: parakeet-fixture
+  FIXTURE_REPO: csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8
+
+jobs:
+  rust-gates:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      # Tauri's build script checks frontendDist exists — create a stub
+      # (same as ci.yml rust-check; the Rust gates don't need a real bundle).
+      - name: Stub frontendDist for tauri-build
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/dist
+          echo '<!doctype html><title>stub</title>' > apps/desktop/dist/index.html
+
+      - name: Restore Parakeet fixture
+        id: fixture-cache
+        uses: actions/cache@v4
+        with:
+          path: parakeet-fixture
+          # Fixed key on purpose: the spike pins no bundle revision, and any
+          # valid bundle revision keeps the test meaningful. Bump the suffix
+          # if the upstream layout ever changes.
+          key: parakeet-v3-int8-csukuangfj-v1
+
+      - name: Download Parakeet fixture
+        if: steps.fixture-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://huggingface.co/${FIXTURE_REPO}/resolve/main"
+          mkdir -p "${FIXTURE_DIR}/test_wavs"
+          for f in encoder.int8.onnx decoder.int8.onnx joiner.int8.onnx tokens.txt; do
+            curl -fSL --retry 3 --retry-all-errors -o "${FIXTURE_DIR}/${f}" "${base}/${f}"
+          done
+          curl -fSL --retry 3 --retry-all-errors -o "${FIXTURE_DIR}/test_wavs/en.wav" "${base}/test_wavs/en.wav"
+          ls -la "${FIXTURE_DIR}" "${FIXTURE_DIR}/test_wavs"
+
+      - name: Export fixture env
+        shell: bash
+        run: |
+          {
+            echo "SHERPA_PARAKEET_MODEL_DIR=${GITHUB_WORKSPACE}/parakeet-fixture"
+            echo "SHERPA_TEST_WAV=${GITHUB_WORKSPACE}/parakeet-fixture/test_wavs/en.wav"
+          } >> "$GITHUB_ENV"
+
+      - name: "1. cargo fmt --check"
+        run: cargo fmt --check --manifest-path ${{ env.MANIFEST_DIR }}/Cargo.toml
+
+      - name: "2. cargo check --all-targets"
+        run: cargo check --all-targets --manifest-path ${{ env.MANIFEST_DIR }}/Cargo.toml
+
+      - name: "3. cargo clippy --all-targets -- -D warnings"
+        run: cargo clippy --all-targets --all-features --manifest-path ${{ env.MANIFEST_DIR }}/Cargo.toml -- -D warnings
+
+      - name: "4+5. cargo test --all-targets (incl. real-model smoke)"
+        run: cargo test --all-targets --manifest-path ${{ env.MANIFEST_DIR }}/Cargo.toml -- --nocapture

@@ -62,6 +62,25 @@ export default function App() {
     void savePrefs(p);
   };
 
+  const shell =
+    "min-h-screen bg-white text-black dark:bg-black dark:text-white";
+
+  if (isFloatingPill) {
+    return <FloatingPill />;
+  }
+
+  // Settings runs in its own window: render instantly with defaults and let
+  // prefs/session upgrade in place. Never gate it behind the main splash or
+  // session flow — the window must show UI even if those stall in a second
+  // webview.
+  if (isSettingsWindow) {
+    return (
+      <main className={shell}>
+        <SettingsView prefs={prefs} onPrefs={updatePrefs} />
+      </main>
+    );
+  }
+
   if (!ready || !splashDone || session === null) {
     return (
       <main className="fixed inset-0 bg-black">
@@ -116,23 +135,8 @@ export default function App() {
     );
   }
 
-  const shell =
-    "min-h-screen bg-white text-black dark:bg-black dark:text-white";
-
-  if (isFloatingPill) {
-    return <FloatingPill />;
-  }
-
-  if (isSettingsWindow) {
-    return (
-      <main className={shell}>
-        <SettingsView prefs={prefs} onPrefs={updatePrefs} />
-      </main>
-    );
-  }
-
   // Signed-out users land on the login page first — nothing else renders
-  // before this.
+  // before this. (Settings/floating-pill windows return earlier above.)
   if (!session.loggedIn) {
     return (
       <main className="min-h-screen bg-transparent text-white">

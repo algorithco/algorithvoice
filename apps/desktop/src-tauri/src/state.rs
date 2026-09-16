@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use std::sync::{Mutex, RwLock};
+use std::sync::{atomic::AtomicBool, Mutex, RwLock};
 
 /// Tray icon state. Deserializes from the same lowercase strings the
 /// frontend already sends (`"idle" | "recording" | "processing"`), so
@@ -65,6 +65,10 @@ impl std::fmt::Display for TrayState {
 pub struct AppState {
     pub tray_state: Mutex<TrayState>,
     pub hotkey: RwLock<String>,
+    /// Set when the tray `Quit` item is used. While set, window-close
+    /// requests are allowed through so the runtime can exit fully instead
+    /// of hiding windows back into the tray.
+    pub exiting: AtomicBool,
 }
 
 impl AppState {
@@ -72,6 +76,7 @@ impl AppState {
         Self {
             tray_state: Mutex::new(TrayState::Idle),
             hotkey: RwLock::new(hotkey.into()),
+            exiting: AtomicBool::new(false),
         }
     }
 }
