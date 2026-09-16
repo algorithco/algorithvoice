@@ -167,6 +167,16 @@ pub struct SherpaTranscriber {
     recognizer: sherpa_onnx::OfflineRecognizer,
 }
 
+impl std::fmt::Debug for SherpaTranscriber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The recognizer holds native engine state without a Debug impl;
+        // identify by model only (also keeps weights out of logs).
+        f.debug_struct("SherpaTranscriber")
+            .field("model_id", &self.model_id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl SherpaTranscriber {
     /// Load and validate a model directory. Blocking for seconds (hundreds
     /// of MB of weights) — callers must offload (see `TranscriptionWorker`).
@@ -510,24 +520,30 @@ impl TranscriptionWorker {
                 .inner
                 .lock()
                 .map_err(|_| AppError::engine_init_failed("worker state is unavailable"))?;
-            match (&inner.lifecycle, &inner.engine) {
-                (WorkerLifecycle::Ready, Some(engine)) => {
-                    inner.lifecycle = WorkerLifecycle::Transcribing;
-                    engine.clone()
-                }
-                (WorkerLifecycle::Failed, _) => {
-                    let message = inner
-                        .failure
-                        .clone()
-                        .unwrap_or_else(|| "worker is in a failed state".to_string());
-                    return Err(AppError::engine_init_failed(message));
-                }
-                _ => {
-                    return Err(AppError::model_not_loaded(
-                        "no local model is loaded; download and load one first",
-                    ))
-                }
+            // Copy the (Copy) lifecycle out first so no borrow is held
+            // across the mutation below.
+            let lifecycle = inner.lifecycle;
+            if lifecycle == WorkerLifecycle::Failed {
+                let message = inner
+                    .failure
+                    .clone()
+                    .unwrap_or_else(|| "worker is in a failed state".to_string());
+                return Err(AppError::engine_init_failed(message));
             }
+            let Some(engine) = inner.engine.clone() else {
+                return Err(AppError::model_not_loaded(
+                    "no local model is loaded; download and load one first",
+                ));
+            };
+            if lifecycle != WorkerLifecycle::Ready && lifecycle != WorkerLifecycle::Transcribing {
+                // Loading/Unloaded with a stale engine slot: refuse rather
+                // than decode against a half-loaded model.
+                return Err(AppError::model_not_loaded(
+                    "no local model is loaded; download and load one first",
+                ));
+            }
+            inner.lifecycle = WorkerLifecycle::Transcribing;
+            engine
         };
         let language = normalize_language(language);
         let outcome = self.decode_with_retry(&engine, samples, &language).await;
@@ -749,7 +765,10 @@ mod tests {
 
         fn transcribe(&self, samples: &[f32], language: &str) -> Result<Transcript, AppError> {
             let mut behavior = self.behavior.lock().expect("fake lock");
-            let language = normalize_language(language);
+            let language = match normalize_language(language).as_str() {
+                "" => None,
+                other => Some(other.to_string()),
+            };
             let done = |text: String| Transcript {
                 segments: vec![TranscriptSegment {
                     start_secs: 0.0,
@@ -757,7 +776,7 @@ mod tests {
                     text: text.clone(),
                 }],
                 text,
-                language,
+                language: language.clone(),
             };
             match behavior.clone() {
                 FakeBehavior::Text(text) => Ok(done(text)),
@@ -889,32 +908,34 @@ mod tests {
 
     #[test]
     fn concurrent_loads_cannot_double_load() {
-        use std::sync::{Arc, Barrier};
+        use std::sync::Arc;
         let worker = Arc::new(TranscriptionWorker::new());
-        let barrier = Arc::new(Barrier::new(2));
         let (entered_tx, entered_rx) = std::sync::mpsc::channel::<()>();
         let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
-        let run = |worker: Arc<TranscriptionWorker>, barrier: Arc<Barrier>| {
-            barrier.wait();
-            let mut model = parakeet_model();
-            model.id = "fake-model".to_string();
-            worker.load_with(
-                &model,
-                Path::new("."),
-                |_| {},
-                |_, _| {
-                    let _ = entered_tx.send(());
-                    release_rx.recv().expect("release");
-                    Ok(
-                        Box::new(FakeTranscriber::new(FakeBehavior::Text("x".to_string())))
-                            as Box<dyn LocalTranscriber>,
-                    )
-                },
-            )
-        };
-        let w2 = worker.clone();
-        let b2 = barrier.clone();
-        let handle = std::thread::spawn(move || run(w2, b2));
+        // Each channel half is owned by exactly one thread (the std mpsc
+        // Receiver is Send but not Sync, so nothing is shared by reference).
+        // entered/release pair already synchronizes both sides; no barrier
+        // needed (a 2-party barrier with one waiter would deadlock).
+        let handle = std::thread::spawn({
+            let worker = worker.clone();
+            move || {
+                let mut model = parakeet_model();
+                model.id = "fake-model".to_string();
+                worker.load_with(
+                    &model,
+                    Path::new("."),
+                    |_| {},
+                    |_, _| {
+                        let _ = entered_tx.send(());
+                        release_rx.recv().expect("release");
+                        Ok(
+                            Box::new(FakeTranscriber::new(FakeBehavior::Text("x".to_string())))
+                                as Box<dyn LocalTranscriber>,
+                        )
+                    },
+                )
+            }
+        });
         // Wait until the first load is inside its loader, then attempt a
         // second load: it must be refused as busy, not deadlock.
         entered_rx.recv().expect("first loader entered");

@@ -144,7 +144,7 @@ pub fn disk_status(app_data: &Path, model: &LocalModel) -> AppResult<DiskStatus>
     }
     for file in &record.files {
         let len = std::fs::metadata(dir.join(&file.filename)).map(|m| m.len());
-        if len != Ok(file.size_bytes) {
+        if len.ok() != Some(file.size_bytes) {
             return Ok(DiskStatus::Broken {
                 message: "installed files changed or are missing; re-download or verify"
                     .to_string(),
@@ -396,7 +396,10 @@ pub fn installed_models(app_data: &Path, manifest: &ModelManifest) -> Vec<Instal
             continue;
         }
         let complete = record.files.iter().all(|f| {
-            std::fs::metadata(dir.join(&file.filename)).map(|m| m.len()) == Ok(f.size_bytes)
+            std::fs::metadata(dir.join(&f.filename))
+                .map(|m| m.len())
+                .ok()
+                == Some(f.size_bytes)
         });
         if !complete {
             continue;

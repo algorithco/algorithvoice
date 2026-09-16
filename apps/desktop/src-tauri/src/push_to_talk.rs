@@ -487,6 +487,7 @@ pub fn floating_pill_visible(app: AppHandle) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine as _;
 
     #[test]
     fn strips_data_url_prefix() {
