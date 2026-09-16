@@ -71,9 +71,9 @@ pub struct LocalModel {
     pub quantization: String,
     pub files: Vec<ModelFile>,
     pub languages: Vec<String>,
-    pub minimum_ram_gb: f64,
+    pub min_ram_gb: f64,
     pub recommended_ram_gb: f64,
-    pub minimum_vram_gb: f64,
+    pub min_vram_gb: f64,
     pub recommended_vram_gb: f64,
     pub license: String,
     pub attribution: String,
@@ -231,10 +231,10 @@ fn validate_model(model: &LocalModel) -> AppResult<()> {
             model.id
         )));
     }
-    if model.recommended_ram_gb < model.minimum_ram_gb
-        || model.recommended_vram_gb < model.minimum_vram_gb
-        || model.minimum_ram_gb < 0.0
-        || model.minimum_vram_gb < 0.0
+    if model.recommended_ram_gb < model.min_ram_gb
+        || model.recommended_vram_gb < model.min_vram_gb
+        || model.min_ram_gb < 0.0
+        || model.min_vram_gb < 0.0
     {
         return Err(AppError::internal(format!(
             "model {} has inconsistent memory requirements",
@@ -338,9 +338,9 @@ mod tests {
             quantization: "int8".to_string(),
             files: vec![example_file("encoder.onnx")],
             languages: vec!["en".to_string()],
-            minimum_ram_gb: 4.0,
+            min_ram_gb: 4.0,
             recommended_ram_gb: 8.0,
-            minimum_vram_gb: 0.0,
+            min_vram_gb: 0.0,
             recommended_vram_gb: 0.0,
             license: "CC-BY-4.0".to_string(),
             attribution: "Example attribution".to_string(),

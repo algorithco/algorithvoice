@@ -467,14 +467,14 @@ impl TranscriptionWorker {
             }
         }
         // Refuse to even try when RAM provably cannot fit the weights.
-        if model.minimum_ram_gb > 0.0 {
+        if model.min_ram_gb > 0.0 {
             let available = sysinfo::System::new_all().available_memory();
-            let need = (model.minimum_ram_gb * 1_000_000_000.0) as u64;
+            let need = (model.min_ram_gb * 1_000_000_000.0) as u64;
             if available < need {
                 let message = format!(
                     "not enough free memory to load {} (need ~{:.0} GB, have ~{:.1} GB)",
                     model.id,
-                    model.minimum_ram_gb,
+                    model.min_ram_gb,
                     available as f64 / 1_000_000_000.0
                 );
                 self.fail(&message);
@@ -972,7 +972,7 @@ mod tests {
         let worker = TranscriptionWorker::new();
         let mut model = parakeet_model();
         model.id = "fake-model".to_string();
-        model.minimum_ram_gb = 1e12;
+        model.min_ram_gb = 1e12;
         let err = worker
             .load_with(
                 &model,
