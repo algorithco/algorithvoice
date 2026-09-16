@@ -66,7 +66,7 @@ export default function App() {
     "min-h-screen bg-white text-black dark:bg-black dark:text-white";
 
   if (isFloatingPill) {
-    return <FloatingPill />;
+    return <FloatingPill prefs={prefs} />;
   }
 
   // Settings runs in its own window: render instantly with defaults and let

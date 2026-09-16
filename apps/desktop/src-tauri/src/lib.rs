@@ -489,6 +489,11 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::with_hotkey(DEFAULT_HOTKEY))
+        // Local transcription worker (shared, lazily loaded; Arc so blocking
+        // loaders can own a handle across spawn_blocking).
+        .manage(std::sync::Arc::new(
+            local_asr::worker::TranscriptionWorker::new(),
+        ))
         .manage(local_asr::downloader::DownloadManager::new())
         .setup(|app| {
             match init_db(app.handle()) {
@@ -591,7 +596,13 @@ pub fn run() {
             local_asr::commands::download_model,
             local_asr::commands::cancel_download,
             local_asr::commands::delete_model,
-            local_asr::commands::verify_model
+            local_asr::commands::verify_model,
+            // Local inference worker + hardware (Phase 3; cloud path untouched).
+            local_asr::commands::select_active_model,
+            local_asr::commands::start_inference_worker,
+            local_asr::commands::stop_inference_worker,
+            local_asr::commands::get_transcription_status,
+            local_asr::commands::get_hardware_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running Algorith Voice");

@@ -60,30 +60,30 @@ pub fn evaluate(input: &CompatInput<'_>) -> CompatibilityReport {
     }
 
     let total_ram = gb(hw.total_ram_bytes);
-    if model.minimum_ram_gb > 0.0 && total_ram < model.minimum_ram_gb {
+    if model.min_ram_gb > 0.0 && total_ram < model.min_ram_gb {
         return CompatibilityReport {
             level: Compatibility::Unsupported,
             reasons: vec![format!(
                 "{} needs at least {:.0} GB RAM to load (this machine: {:.1} GB)",
-                model.name, model.minimum_ram_gb, total_ram
+                model.name, model.min_ram_gb, total_ram
             )],
         };
     }
 
-    if model.minimum_vram_gb > 0.0 {
+    if model.min_vram_gb > 0.0 {
         let vram = hw
             .gpu
             .as_ref()
             .and_then(|g| g.total_vram_bytes)
             .map(gb)
             .unwrap_or(0.0);
-        if vram < model.minimum_vram_gb {
+        if vram < model.min_vram_gb {
             return CompatibilityReport {
                 level: Compatibility::Unsupported,
                 reasons: vec![format!(
                     "{} needs at least {:.0} GB VRAM (detected: {})",
                     model.name,
-                    model.minimum_vram_gb,
+                    model.min_vram_gb,
                     hw.gpu
                         .as_ref()
                         .and_then(|g| g.name.clone())
@@ -129,7 +129,7 @@ pub fn evaluate(input: &CompatInput<'_>) -> CompatibilityReport {
     reasons.push(format!(
         "{:.1} GB RAM (recommended {:.0} GB), CPU inference",
         total_ram,
-        model.recommended_ram_gb.max(model.minimum_ram_gb)
+        model.recommended_ram_gb.max(model.min_ram_gb)
     ));
     let level = if model.recommended_ram_gb > 0.0 && total_ram >= 2.0 * model.recommended_ram_gb {
         Compatibility::Recommended
@@ -263,7 +263,7 @@ mod tests {
     fn gpu_requirement_without_gpu_is_unsupported() {
         let hw = hardware();
         let mut model = parakeet();
-        model.minimum_vram_gb = 8.0;
+        model.min_vram_gb = 8.0;
         model.recommended_vram_gb = 12.0;
         let report = evaluate(&input(&hw, &model));
         assert_eq!(report.level, Compatibility::Unsupported);

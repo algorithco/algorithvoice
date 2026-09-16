@@ -48,7 +48,11 @@ pub enum ModelArch {
 
 /// One downloadable file. `size_bytes == 0` means "unknown until download"
 /// (progress then reports bytes + speed without a percentage).
+///
+/// Wire format is camelCase to match `packages/shared-types` exactly —
+/// the embedded template below uses the same keys.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelFile {
     pub filename: String,
     pub url: String,
@@ -58,6 +62,7 @@ pub struct ModelFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalModel {
     pub id: String,
     pub name: String,
@@ -66,9 +71,9 @@ pub struct LocalModel {
     pub quantization: String,
     pub files: Vec<ModelFile>,
     pub languages: Vec<String>,
-    pub minimum_ram_gb: f64,
+    pub min_ram_gb: f64,
     pub recommended_ram_gb: f64,
-    pub minimum_vram_gb: f64,
+    pub min_vram_gb: f64,
     pub recommended_vram_gb: f64,
     pub license: String,
     pub attribution: String,
@@ -77,6 +82,7 @@ pub struct LocalModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelManifest {
     pub manifest_version: u32,
     pub models: Vec<LocalModel>,
@@ -225,10 +231,10 @@ fn validate_model(model: &LocalModel) -> AppResult<()> {
             model.id
         )));
     }
-    if model.recommended_ram_gb < model.minimum_ram_gb
-        || model.recommended_vram_gb < model.minimum_vram_gb
-        || model.minimum_ram_gb < 0.0
-        || model.minimum_vram_gb < 0.0
+    if model.recommended_ram_gb < model.min_ram_gb
+        || model.recommended_vram_gb < model.min_vram_gb
+        || model.min_ram_gb < 0.0
+        || model.min_vram_gb < 0.0
     {
         return Err(AppError::internal(format!(
             "model {} has inconsistent memory requirements",
@@ -332,9 +338,9 @@ mod tests {
             quantization: "int8".to_string(),
             files: vec![example_file("encoder.onnx")],
             languages: vec!["en".to_string()],
-            minimum_ram_gb: 4.0,
+            min_ram_gb: 4.0,
             recommended_ram_gb: 8.0,
-            minimum_vram_gb: 0.0,
+            min_vram_gb: 0.0,
             recommended_vram_gb: 0.0,
             license: "CC-BY-4.0".to_string(),
             attribution: "Example attribution".to_string(),
@@ -489,5 +495,41 @@ mod tests {
             ..example_file("other.onnx")
         });
         assert_eq!(model.known_total_bytes(), 1024);
+    }
+
+    #[test]
+    fn wire_format_is_camel_case_like_shared_types() {
+        // The TypeScript `localModels` schemas are the other side of this
+        // contract: any rename here breaks `list_available_models` parsing.
+        let manifest = default_manifest().expect("bundled manifest parses");
+        let value = serde_json::to_value(&manifest).expect("serializes");
+        for key in [
+            "manifestVersion",
+            "minRamGb",
+            "recommendedRamGb",
+            "minVramGb",
+            "recommendedVramGb",
+            "supportedOs",
+            "supportedArch",
+            "fallbackUrl",
+            "sizeBytes",
+        ] {
+            assert!(
+                value.to_string().contains(&format!("\"{key}\"")),
+                "wire JSON must contain camelCase key {key}"
+            );
+        }
+        for snake in [
+            "manifest_version",
+            "min_ram_gb",
+            "supported_os",
+            "size_bytes",
+            "fallback_url",
+        ] {
+            assert!(
+                !value.to_string().contains(&format!("\"{snake}\"")),
+                "wire JSON must not contain snake_case key {snake}"
+            );
+        }
     }
 }

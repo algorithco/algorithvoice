@@ -16,8 +16,10 @@
 //! explicit arg → `GROQ_API_KEY` env → OS keyring (`set_groq_api_key`).
 
 use crate::error::{AppError, AppResult};
+use crate::local_asr::worker::TranscriptionWorker;
 use serde::Serialize;
-use tauri::{AppHandle, Manager, WebviewUrl};
+use std::sync::Arc;
+use tauri::{AppHandle, Manager, State, WebviewUrl};
 
 const FLOATING_LABEL: &str = "floating-pill";
 const SERVICE: &str = "com.algorithvoice.app";
@@ -241,24 +243,115 @@ fn audio_mime_and_filename(mime_type: Option<&str>) -> (&'static str, &'static s
 
 /// Transcribe base64 (or data-URL) audio via Groq Whisper.
 ///
+/// Engine routing for transcription commands.
+///
+/// - `None` (default), `"cloud"` and `"byok"` use Groq with the user's own
+///   key (the desktop key has always been user-supplied, so `byok` needs
+///   no separate path).
+/// - `"local"` uses the on-device worker (never touches the network).
+/// - Anything else is a caller-version-skew bug and fails loudly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TranscribePath {
+    Local,
+    Cloud,
+}
+
+fn resolve_transcribe_path(mode: Option<&str>) -> Result<TranscribePath, AppError> {
+    match mode {
+        None | Some("cloud") | Some("byok") => Ok(TranscribePath::Cloud),
+        Some("local") => Ok(TranscribePath::Local),
+        Some(other) => Err(AppError::internal(format!(
+            "unknown transcription mode: {other}"
+        ))),
+    }
+}
+
+/// Local transcription path: base64 WAV bytes → normalized samples → worker
+/// (lazy model switch) → transcript. Never touches the network and never
+/// falls back to cloud — failures surface as typed errors for the caller
+/// to route (the pill shows them, history stays untouched).
+pub(crate) async fn transcribe_local(
+    worker: &Arc<TranscriptionWorker>,
+    app_data: &std::path::Path,
+    model: &crate::local_asr::manifest::LocalModel,
+    audio_base64: &str,
+    language: Option<&str>,
+) -> AppResult<TranscribeResult> {
+    let audio = decode_audio_payload(audio_base64)?;
+    let decoded = crate::local_asr::audio::decode_wav(&audio)?;
+    if decoded.samples.is_empty() {
+        return Err(AppError::audio_unsupported_format(
+            "audio contains no samples",
+        ));
+    }
+    // Lazy model switch: load only when the worker doesn't already hold
+    // this exact model ready. Loading blocks for seconds (hundreds of MB
+    // of weights), so it runs on a blocking thread, never the executor.
+    if !worker.is_ready_for(&model.id) {
+        let dir = crate::local_asr::models::model_dir(app_data, &model.id)?;
+        let w = Arc::clone(worker);
+        let m = model.clone();
+        tokio::task::spawn_blocking(move || w.load(&m, &dir, |_| {}))
+            .await
+            .map_err(|e| AppError::engine_init_failed(format!("local load task failed: {e}")))??;
+    }
+    let transcript = worker
+        .transcribe(&decoded.samples, language.unwrap_or("auto"))
+        .await?;
+    Ok(TranscribeResult {
+        text: transcript.text,
+        pasted: false,
+    })
+}
+
 /// `language` is optional (`"uz"`, `"en"` …). `mime_type` should be the
 /// probed `MediaRecorder.mimeType` so the multipart filename matches the
 /// actual bytes. Key resolution:
-/// explicit `api_key` → `GROQ_API_KEY` env → OS keyring.
+/// explicit `api_key` → `GROQ_API_KEY` env → OS keyring (`set_groq_api_key`).
+///
+/// `mode` selects the engine (see [`resolve_transcribe_path`]); `model_id`
+/// picks the local model and is required when mode is local.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn transcribe_audio(
     audio_base64: String,
     language: Option<String>,
     api_key: Option<String>,
     mime_type: Option<String>,
+    mode: Option<String>,
+    model_id: Option<String>,
+    app: AppHandle,
+    worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
-    let key = resolve_groq_key(api_key)?;
-    let audio = decode_audio_payload(&audio_base64)?;
-    let text = transcribe_bytes(audio, language, mime_type, key).await?;
-    Ok(TranscribeResult {
-        text,
-        pasted: false,
-    })
+    match resolve_transcribe_path(mode.as_deref())? {
+        TranscribePath::Cloud => {
+            let key = resolve_groq_key(api_key)?;
+            let audio = decode_audio_payload(&audio_base64)?;
+            let text = transcribe_bytes(audio, language, mime_type, key).await?;
+            Ok(TranscribeResult {
+                text,
+                pasted: false,
+            })
+        }
+        TranscribePath::Local => {
+            let mid = model_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    AppError::model_not_loaded(
+                        "no local model selected; download and select one in Settings",
+                    )
+                })?;
+            let manifest = crate::local_asr::manifest::default_manifest()?;
+            crate::local_asr::manifest::validate_manifest(&manifest)?;
+            let model = crate::local_asr::commands::find_model(&manifest, mid)?;
+            let data = app.path().app_data_dir().map_err(|e| {
+                AppError::model_not_loaded(format!("cannot resolve app data dir: {e}"))
+            })?;
+            transcribe_local(&worker, &data, &model, &audio_base64, language.as_deref()).await
+        }
+    }
 }
 
 // ---- Transcript → focused app (clipboard + paste keystroke) ----
@@ -341,6 +434,7 @@ fn paste_keystroke() -> AppResult<()> {
 /// The blocking clipboard/paste section runs on a `spawn_blocking`
 /// worker so the Tauri async runtime is never stalled.
 /// Returns the transcript for preview / history.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn transcribe_and_paste(
     audio_base64: String,
@@ -348,8 +442,22 @@ pub async fn transcribe_and_paste(
     api_key: Option<String>,
     mime_type: Option<String>,
     restore_clipboard: Option<bool>,
+    mode: Option<String>,
+    model_id: Option<String>,
+    app: AppHandle,
+    worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
-    let result = transcribe_audio(audio_base64, language, api_key, mime_type).await?;
+    let result = transcribe_audio(
+        audio_base64,
+        language,
+        api_key,
+        mime_type,
+        mode,
+        model_id,
+        app,
+        worker,
+    )
+    .await?;
     let text = result.text.clone();
     let paste_outcome =
         tokio::task::spawn_blocking(move || paste_text_blocking(text, restore_clipboard))
@@ -530,5 +638,155 @@ mod tests {
             ("audio/webm", "audio.webm")
         );
         assert_eq!(audio_mime_and_filename(None), ("audio/webm", "audio.webm"));
+    }
+
+    #[test]
+    fn routing_selects_engine_by_mode() {
+        use TranscribePath::*;
+        assert_eq!(resolve_transcribe_path(None).unwrap(), Cloud);
+        assert_eq!(resolve_transcribe_path(Some("cloud")).unwrap(), Cloud);
+        // BYOK rides the user-keyed Groq path; no separate engine.
+        assert_eq!(resolve_transcribe_path(Some("byok")).unwrap(), Cloud);
+        assert_eq!(resolve_transcribe_path(Some("local")).unwrap(), Local);
+        let err = resolve_transcribe_path(Some("quantum")).unwrap_err();
+        assert_eq!(err.code, "internal");
+    }
+
+    // ---- Local-path tests (stub engine, real audio pipeline) ----
+
+    use crate::local_asr::manifest::{LocalModel, ModelEngine};
+    use crate::local_asr::worker::{LocalTranscriber, Transcript, TranscriptionWorker};
+
+    fn fixture_model() -> LocalModel {
+        LocalModel {
+            id: "test-model".to_string(),
+            name: "Test Model".to_string(),
+            version: "1.0.0".to_string(),
+            engine: ModelEngine::SherpaOnnx,
+            quantization: "int8".to_string(),
+            files: Vec::new(),
+            languages: vec!["en".to_string()],
+            min_ram_gb: 0.0,
+            recommended_ram_gb: 0.0,
+            min_vram_gb: 0.0,
+            recommended_vram_gb: 0.0,
+            license: "test".to_string(),
+            attribution: "test".to_string(),
+            supported_os: Vec::new(),
+            supported_arch: Vec::new(),
+        }
+    }
+
+    fn fixture_dir(name: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::env::temp_dir().join(format!(
+            "algorith-voice-ptttest-{}-{}-{}",
+            std::process::id(),
+            n,
+            name
+        ))
+    }
+
+    /// Minimal PCM-16 mono 16 kHz WAV: 44-byte header + raw samples.
+    fn wav_base64(samples: &[i16]) -> String {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&((36 + samples.len() * 2) as u32).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&16000u32.to_le_bytes());
+        wav.extend_from_slice(&32000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&(samples.len() as u32 * 2).to_le_bytes());
+        for s in samples {
+            wav.extend_from_slice(&s.to_le_bytes());
+        }
+        base64::engine::general_purpose::STANDARD.encode(wav)
+    }
+
+    struct StubTranscriber {
+        text: Option<String>,
+    }
+
+    impl LocalTranscriber for StubTranscriber {
+        fn model_id(&self) -> &str {
+            "test-model"
+        }
+
+        fn transcribe(&self, _samples: &[f32], _language: &str) -> Result<Transcript, AppError> {
+            match &self.text {
+                Some(text) => Ok(Transcript {
+                    text: text.clone(),
+                    segments: Vec::new(),
+                    language: None,
+                }),
+                None => Err(AppError::engine_init_failed("stub boom")),
+            }
+        }
+    }
+
+    fn load_stub(worker: &TranscriptionWorker, text: Option<&str>) -> LocalModel {
+        // The stub loader ignores model and dir entirely; no filesystem
+        // state is needed, so nothing is created (and nothing leaks).
+        let model = fixture_model();
+        let dir = fixture_dir("load");
+        let text = text.map(str::to_owned);
+        worker
+            .load_with(
+                &model,
+                &dir,
+                |_| {},
+                |_, _| {
+                    Ok(Box::new(StubTranscriber { text: text.clone() })
+                        as Box<dyn LocalTranscriber>)
+                },
+            )
+            .unwrap();
+        model
+    }
+
+    #[tokio::test]
+    async fn local_path_returns_transcript_without_paste() {
+        let worker = TranscriptionWorker::new();
+        let model = load_stub(&worker, Some("hello local"));
+        let worker = Arc::new(worker);
+        let dir = fixture_dir("x");
+        let audio = wav_base64(&[1000i16; 1600]);
+        let result = transcribe_local(&worker, &dir, &model, &audio, Some("en"))
+            .await
+            .unwrap();
+        assert_eq!(result.text, "hello local");
+        assert!(!result.pasted);
+    }
+
+    #[tokio::test]
+    async fn local_path_rejects_garbage_audio() {
+        let worker = TranscriptionWorker::new();
+        let model = load_stub(&worker, Some("unused"));
+        let worker = Arc::new(worker);
+        let dir = fixture_dir("x");
+        // Valid base64, not a WAV file.
+        let err = transcribe_local(&worker, &dir, &model, "bm90LWEtd2F2", None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "audio-unsupported-format");
+    }
+
+    #[tokio::test]
+    async fn local_path_propagates_engine_errors() {
+        let worker = TranscriptionWorker::new();
+        let model = load_stub(&worker, None);
+        let worker = Arc::new(worker);
+        let dir = fixture_dir("x");
+        let audio = wav_base64(&[1000i16; 1600]);
+        let err = transcribe_local(&worker, &dir, &model, &audio, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "engine-init-failed");
     }
 }

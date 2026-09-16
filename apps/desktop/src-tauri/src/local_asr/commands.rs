@@ -5,19 +5,24 @@
 //! hashed before activation). Cancellation is a status, never an error.
 
 use crate::error::{AppError, AppResult};
+use crate::local_asr::compat;
 use crate::local_asr::downloader::{
     verify_file, DownloadManager, DownloadRequest, ModelFileRequest,
 };
 use crate::local_asr::events::{
-    DownloadProgressEvent, MODEL_DOWNLOAD_PROGRESS, MODEL_STATUS_CHANGED,
+    DownloadProgressEvent, LoadProgressEvent, MODEL_DOWNLOAD_PROGRESS, MODEL_LOAD_PROGRESS,
+    MODEL_STATUS_CHANGED,
 };
+use crate::local_asr::hardware::{self, HardwareInfo};
 use crate::local_asr::manifest::{
     default_manifest, is_configured, validate_manifest, LocalModel, ModelManifest,
 };
 use crate::local_asr::models::{
     self, InstalledFile, InstalledModel, InstalledRecord, ModelStatus, ModelStatusInfo,
 };
+use crate::local_asr::worker::{TranscriptionWorker, WorkerStatus};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -40,7 +45,7 @@ fn load_manifest() -> AppResult<ModelManifest> {
 
 /// Manifest lookup with an untrusted id: slug-checked first so a hostile id
 /// can never become a path, even before the lookup fails.
-fn find_model(manifest: &ModelManifest, id: &str) -> AppResult<LocalModel> {
+pub(crate) fn find_model(manifest: &ModelManifest, id: &str) -> AppResult<LocalModel> {
     if !crate::local_asr::manifest::is_safe_slug(id) {
         return Err(AppError::model_not_found(format!("unknown model: {id}")));
     }
@@ -358,4 +363,129 @@ pub async fn verify_model(app: AppHandle, id: String) -> AppResult<ModelStatusIn
     };
     emit_status(&app, &info);
     Ok(info)
+}
+
+// ---- Worker lifecycle (Phase 3: mode switching) ----
+
+/// Load `model` into the worker unless it is already ready, emitting
+/// load-progress milestones. Shared by select/start and (silently) by the
+/// lazy path in `transcribe_local`, which passes a no-op stage handler.
+async fn ensure_loaded(
+    app: &AppHandle,
+    worker: &Arc<TranscriptionWorker>,
+    model: &LocalModel,
+    emit_progress: bool,
+) -> AppResult<()> {
+    if worker.is_ready_for(&model.id) {
+        return Ok(());
+    }
+    let data = app_data_dir(app)?;
+    let w = Arc::clone(worker);
+    let m = model.clone();
+    let d = models::model_dir(&data, &model.id)?;
+    let app_emit = app.clone();
+    let progress_id = model.id.clone();
+    tokio::task::spawn_blocking(move || {
+        w.load(&m, &d, |stage| {
+            if emit_progress {
+                let _ = app_emit.emit(
+                    MODEL_LOAD_PROGRESS,
+                    LoadProgressEvent {
+                        id: progress_id.clone(),
+                        stage,
+                    },
+                );
+            }
+        })
+    })
+    .await
+    .map_err(|e| AppError::engine_init_failed(format!("local load task failed: {e}")))??;
+    Ok(())
+}
+
+/// Validate a model for activation and load it: the Settings "use this
+/// model" entry point. Requires a verified install (never auto-downloads),
+/// refuses incompatible hardware, and records nothing itself — selection
+/// persistence lives in frontend prefs (single source of truth).
+#[tauri::command]
+pub async fn select_active_model(
+    app: AppHandle,
+    worker: State<'_, Arc<TranscriptionWorker>>,
+    id: String,
+) -> AppResult<ModelStatusInfo> {
+    let manifest = load_manifest()?;
+    let model = find_model(&manifest, &id)?;
+    let data = app_data_dir(&app)?;
+    match models::disk_status(&data, &model)? {
+        models::DiskStatus::Ready(_) => {}
+        _ => {
+            return Err(AppError::model_not_found(format!(
+                "model {} is not downloaded yet; download it first",
+                model.id
+            )))
+        }
+    }
+    let hardware = hardware::detect();
+    let dir = models::model_dir(&data, &model.id)?;
+    let report = compat::evaluate(&compat::CompatInput {
+        hardware: &hardware,
+        free_disk_bytes: models::free_space_bytes(&dir),
+        model: &model,
+    });
+    if report.level == compat::Compatibility::Unsupported {
+        return Err(AppError::model_incompatible(report.reasons.join("; ")));
+    }
+    ensure_loaded(&app, &worker, &model, true).await?;
+    let info = models::status_info(&data, &model, false)?;
+    emit_status(&app, &info);
+    Ok(info)
+}
+
+/// Ensure a downloaded model is loaded (startup restore, tests). Skips the
+/// compatibility gate — that belongs to explicit user selection.
+#[tauri::command]
+pub async fn start_inference_worker(
+    app: AppHandle,
+    worker: State<'_, Arc<TranscriptionWorker>>,
+    id: String,
+) -> AppResult<ModelStatusInfo> {
+    let manifest = load_manifest()?;
+    let model = find_model(&manifest, &id)?;
+    let data = app_data_dir(&app)?;
+    match models::disk_status(&data, &model)? {
+        models::DiskStatus::Ready(_) => {}
+        _ => {
+            return Err(AppError::model_not_found(format!(
+                "model {} is not downloaded yet",
+                model.id
+            )))
+        }
+    }
+    ensure_loaded(&app, &worker, &model, true).await?;
+    let info = models::status_info(&data, &model, false)?;
+    emit_status(&app, &info);
+    Ok(info)
+}
+
+/// Unload the engine and free its memory. Always succeeds.
+#[tauri::command]
+pub async fn stop_inference_worker(
+    worker: State<'_, Arc<TranscriptionWorker>>,
+) -> AppResult<WorkerStatus> {
+    worker.unload();
+    Ok(worker.status())
+}
+
+/// Worker lifecycle snapshot for status UI and diagnostics.
+#[tauri::command]
+pub async fn get_transcription_status(
+    worker: State<'_, Arc<TranscriptionWorker>>,
+) -> AppResult<WorkerStatus> {
+    Ok(worker.status())
+}
+
+/// Hardware snapshot for compatibility display and diagnostics.
+#[tauri::command]
+pub async fn get_hardware_info() -> AppResult<HardwareInfo> {
+    Ok(hardware::detect())
 }
