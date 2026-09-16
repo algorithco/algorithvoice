@@ -418,6 +418,18 @@ impl TranscriptionWorker {
         }
     }
 
+    /// True when exactly `model_id` is loaded and ready to decode.
+    /// Cheap lock read for lazy-switch checks; never blocks on inference.
+    pub fn is_ready_for(&self, model_id: &str) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| {
+                inner.lifecycle == WorkerLifecycle::Ready
+                    && inner.model_id.as_deref() == Some(model_id)
+            })
+            .unwrap_or(false)
+    }
+
     /// Load a model with the production Sherpa loader. Blocking — callers
     /// must move it off the async executor (spawn_blocking at the command
     /// layer, as with clipboard paste).

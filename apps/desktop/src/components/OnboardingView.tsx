@@ -175,17 +175,22 @@ export function OnboardingView({
                 </button>
                 <button
                   type="button"
-                  disabled
-                  title="Local offline transcription is coming soon"
-                  className="flex h-16 w-full cursor-not-allowed items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-[14px] font-medium text-white/30"
+                  onClick={() => setCloudOnly(false)}
+                  title="On-device transcription — audio never leaves this computer"
+                  className={`flex h-16 w-full items-center justify-center rounded-lg border text-[14px] font-medium transition-all ${
+                    !cloudOnly
+                      ? "border-white bg-white text-black"
+                      : "border-white/15 bg-transparent text-white hover:bg-white/[0.04]"
+                  }`}
                 >
-                  Download speech model (142 MB, offline) — Coming soon
+                  Local (on-device) — audio never leaves this PC
                 </button>
               </div>
 
               <p className="mt-4 max-w-[560px] text-sm leading-relaxed text-white/40">
-                Cloud uses Groq Whisper securely. Audio is sent only while you
-                hold the hotkey and transcripts are stored only locally.
+                {cloudOnly
+                  ? "Cloud uses Groq Whisper securely. Audio is sent only while you hold the hotkey and transcripts are stored only locally."
+                  : "Local mode transcribes fully on-device. Pick and download a model in Settings to start dictating offline."}
               </p>
 
               <div className="h-7" />

@@ -48,7 +48,11 @@ pub enum ModelArch {
 
 /// One downloadable file. `size_bytes == 0` means "unknown until download"
 /// (progress then reports bytes + speed without a percentage).
+///
+/// Wire format is camelCase to match `packages/shared-types` exactly —
+/// the embedded template below uses the same keys.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelFile {
     pub filename: String,
     pub url: String,
@@ -58,6 +62,7 @@ pub struct ModelFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalModel {
     pub id: String,
     pub name: String,
@@ -77,6 +82,7 @@ pub struct LocalModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelManifest {
     pub manifest_version: u32,
     pub models: Vec<LocalModel>,
@@ -489,5 +495,41 @@ mod tests {
             ..example_file("other.onnx")
         });
         assert_eq!(model.known_total_bytes(), 1024);
+    }
+
+    #[test]
+    fn wire_format_is_camel_case_like_shared_types() {
+        // The TypeScript `localModels` schemas are the other side of this
+        // contract: any rename here breaks `list_available_models` parsing.
+        let manifest = default_manifest().expect("bundled manifest parses");
+        let value = serde_json::to_value(&manifest).expect("serializes");
+        for key in [
+            "manifestVersion",
+            "minRamGb",
+            "recommendedRamGb",
+            "minVramGb",
+            "recommendedVramGb",
+            "supportedOs",
+            "supportedArch",
+            "fallbackUrl",
+            "sizeBytes",
+        ] {
+            assert!(
+                value.to_string().contains(&format!("\"{key}\"")),
+                "wire JSON must contain camelCase key {key}"
+            );
+        }
+        for snake in [
+            "manifest_version",
+            "min_ram_gb",
+            "supported_os",
+            "size_bytes",
+            "fallback_url",
+        ] {
+            assert!(
+                !value.to_string().contains(&format!("\"{snake}\"")),
+                "wire JSON must not contain snake_case key {snake}"
+            );
+        }
     }
 }

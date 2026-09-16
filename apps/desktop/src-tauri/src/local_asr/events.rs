@@ -6,11 +6,16 @@
 
 use serde::Serialize;
 
+use serde::Serialize;
+
 /// Emitted roughly 4x/second per active download and once at completion.
 pub const MODEL_DOWNLOAD_PROGRESS: &str = "model-download-progress";
 /// Emitted when a model's lifecycle state settles: download finished,
 /// failed, cancelled, deleted, verified, or installed.
 pub const MODEL_STATUS_CHANGED: &str = "model-status-changed";
+/// Emitted as a model loads into the worker (staged milestones, not
+/// percentages — engine creation is monolithic inside sherpa).
+pub const MODEL_LOAD_PROGRESS: &str = "model-load-progress";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,4 +38,11 @@ impl DownloadProgressEvent {
             eta_seconds: progress.eta_seconds,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadProgressEvent {
+    pub id: String,
+    pub stage: super::worker::LoadStage,
 }

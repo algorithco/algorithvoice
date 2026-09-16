@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifestVersion": 1,
   "models": [
     {
       "id": "parakeet-tdt-0.6b-v3",
@@ -12,25 +12,25 @@
           "filename": "encoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/parakeet-tdt-0.6b-v3/resolve/main/encoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "decoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/parakeet-tdt-0.6b-v3/resolve/main/decoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "joiner.int8.onnx",
           "url": "https://huggingface.co/algorithco/parakeet-tdt-0.6b-v3/resolve/main/joiner.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "tokens.txt",
           "url": "https://huggingface.co/algorithco/parakeet-tdt-0.6b-v3/resolve/main/tokens.txt",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         }
       ],
       "languages": [
@@ -60,14 +60,14 @@
         "ru",
         "uk"
       ],
-      "minimum_ram_gb": 4.0,
-      "recommended_ram_gb": 8.0,
-      "minimum_vram_gb": 0.0,
-      "recommended_vram_gb": 0.0,
+      "minRamGb": 4.0,
+      "recommendedRamGb": 8.0,
+      "minVramGb": 0.0,
+      "recommendedVramGb": 0.0,
       "license": "CC-BY-4.0",
       "attribution": "Parakeet TDT 0.6B v3 by NVIDIA Corporation, licensed under CC-BY-4.0.",
-      "supported_os": ["windows", "macos", "linux"],
-      "supported_arch": ["x64", "arm64"]
+      "supportedOs": ["windows", "macos", "linux"],
+      "supportedArch": ["x64", "arm64"]
     },
     {
       "id": "whisper-small",
@@ -80,19 +80,19 @@
           "filename": "small-encoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/whisper-small/resolve/main/small-encoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "small-decoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/whisper-small/resolve/main/small-decoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "small-tokens.txt",
           "url": "https://huggingface.co/algorithco/whisper-small/resolve/main/small-tokens.txt",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         }
       ],
       "languages": [
@@ -196,14 +196,14 @@
         "jw",
         "su"
       ],
-      "minimum_ram_gb": 2.0,
-      "recommended_ram_gb": 4.0,
-      "minimum_vram_gb": 0.0,
-      "recommended_vram_gb": 0.0,
+      "minRamGb": 2.0,
+      "recommendedRamGb": 4.0,
+      "minVramGb": 0.0,
+      "recommendedVramGb": 0.0,
       "license": "Apache-2.0",
       "attribution": "Whisper small by OpenAI, licensed under Apache-2.0.",
-      "supported_os": ["windows", "macos", "linux"],
-      "supported_arch": ["x64", "arm64"]
+      "supportedOs": ["windows", "macos", "linux"],
+      "supportedArch": ["x64", "arm64"]
     },
     {
       "id": "whisper-large-v3-turbo",
@@ -216,19 +216,19 @@
           "filename": "turbo-encoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/whisper-large-v3-turbo/resolve/main/turbo-encoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "turbo-decoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/whisper-large-v3-turbo/resolve/main/turbo-decoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "turbo-tokens.txt",
           "url": "https://huggingface.co/algorithco/whisper-large-v3-turbo/resolve/main/turbo-tokens.txt",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         }
       ],
       "languages": [
@@ -332,14 +332,14 @@
         "jw",
         "su"
       ],
-      "minimum_ram_gb": 4.0,
-      "recommended_ram_gb": 8.0,
-      "minimum_vram_gb": 0.0,
-      "recommended_vram_gb": 0.0,
+      "minRamGb": 4.0,
+      "recommendedRamGb": 8.0,
+      "minVramGb": 0.0,
+      "recommendedVramGb": 0.0,
       "license": "MIT",
       "attribution": "Based on OpenAI Whisper Large v3, licensed under MIT.",
-      "supported_os": ["windows", "macos", "linux"],
-      "supported_arch": ["x64", "arm64"]
+      "supportedOs": ["windows", "macos", "linux"],
+      "supportedArch": ["x64", "arm64"]
     },
     {
       "id": "whisper-large-v3",
@@ -352,19 +352,19 @@
           "filename": "large-v3-encoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/whisper-large-v3/resolve/main/large-v3-encoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "large-v3-decoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/whisper-large-v3/resolve/main/large-v3-decoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "large-v3-tokens.txt",
           "url": "https://huggingface.co/algorithco/whisper-large-v3/resolve/main/large-v3-tokens.txt",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         }
       ],
       "languages": [
@@ -468,14 +468,14 @@
         "jw",
         "su"
       ],
-      "minimum_ram_gb": 8.0,
-      "recommended_ram_gb": 16.0,
-      "minimum_vram_gb": 0.0,
-      "recommended_vram_gb": 0.0,
+      "minRamGb": 8.0,
+      "recommendedRamGb": 16.0,
+      "minVramGb": 0.0,
+      "recommendedVramGb": 0.0,
       "license": "Apache-2.0",
       "attribution": "Whisper Large v3 by OpenAI, licensed under Apache-2.0.",
-      "supported_os": ["windows", "macos", "linux"],
-      "supported_arch": ["x64", "arm64"]
+      "supportedOs": ["windows", "macos", "linux"],
+      "supportedArch": ["x64", "arm64"]
     },
     {
       "id": "qwen3-asr-1.7b",
@@ -488,48 +488,48 @@
           "filename": "conv_frontend.onnx",
           "url": "https://huggingface.co/algorithco/Qwen3-ASR-1.7B/resolve/main/conv_frontend.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "encoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/Qwen3-ASR-1.7B/resolve/main/encoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "decoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/Qwen3-ASR-1.7B/resolve/main/decoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "tokenizer/vocab.json",
           "url": "https://huggingface.co/algorithco/Qwen3-ASR-1.7B/resolve/main/tokenizer/vocab.json",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "tokenizer/merges.txt",
           "url": "https://huggingface.co/algorithco/Qwen3-ASR-1.7B/resolve/main/tokenizer/merges.txt",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "tokenizer/tokenizer_config.json",
           "url": "https://huggingface.co/algorithco/Qwen3-ASR-1.7B/resolve/main/tokenizer/tokenizer_config.json",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         }
       ],
       "languages": ["en", "zh", "ja", "ko", "vi"],
-      "minimum_ram_gb": 8.0,
-      "recommended_ram_gb": 16.0,
-      "minimum_vram_gb": 0.0,
-      "recommended_vram_gb": 0.0,
+      "minRamGb": 8.0,
+      "recommendedRamGb": 16.0,
+      "minVramGb": 0.0,
+      "recommendedVramGb": 0.0,
       "license": "Apache-2.0",
       "attribution": "Qwen3-ASR by Alibaba Cloud (Qwen team), licensed under Apache-2.0.",
-      "supported_os": ["windows", "macos", "linux"],
-      "supported_arch": ["x64", "arm64"]
+      "supportedOs": ["windows", "macos", "linux"],
+      "supportedArch": ["x64", "arm64"]
     },
     {
       "id": "distil-large-v3.5",
@@ -542,30 +542,30 @@
           "filename": "distil-large-v3.5-encoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/distil-large-v3.5/resolve/main/distil-large-v3.5-encoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "distil-large-v3.5-decoder.int8.onnx",
           "url": "https://huggingface.co/algorithco/distil-large-v3.5/resolve/main/distil-large-v3.5-decoder.int8.onnx",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         },
         {
           "filename": "distil-large-v3.5-tokens.txt",
           "url": "https://huggingface.co/algorithco/distil-large-v3.5/resolve/main/distil-large-v3.5-tokens.txt",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "size_bytes": 0
+          "sizeBytes": 0
         }
       ],
       "languages": ["en"],
-      "minimum_ram_gb": 4.0,
-      "recommended_ram_gb": 8.0,
-      "minimum_vram_gb": 0.0,
-      "recommended_vram_gb": 0.0,
+      "minRamGb": 4.0,
+      "recommendedRamGb": 8.0,
+      "minVramGb": 0.0,
+      "recommendedVramGb": 0.0,
       "license": "MIT",
       "attribution": "Distil Large v3.5 (Distil-Whisper family), licensed under MIT.",
-      "supported_os": ["windows", "macos", "linux"],
-      "supported_arch": ["x64", "arm64"]
+      "supportedOs": ["windows", "macos", "linux"],
+      "supportedArch": ["x64", "arm64"]
     }
   ]
 }

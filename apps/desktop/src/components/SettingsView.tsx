@@ -1,7 +1,9 @@
+import type { SttMode } from "@algorith-voice/shared-types";
 import { Button, Input } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useState } from "react";
+import { getModelStatus } from "../lib/localModels.js";
 import {
   DEMO_EMAIL,
   isTauri,
@@ -16,8 +18,10 @@ import { OAuthButtons } from "./OAuthButtons.js";
 
 export interface Prefs {
   hotkey: string;
-  mode: "local" | "cloud";
+  mode: SttMode;
   theme: "dark" | "light";
+  /** Manifest id of the local model to transcribe with (null = none). */
+  activeModelId: string | null;
 }
 
 function LoginForm({ onDone }: { onDone: (s: SessionInfo) => void }) {
@@ -119,10 +123,47 @@ export function SettingsView({
   const [autostart, setAutostart] = useState(false);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [hotkeyInput, setHotkeyInput] = useState(prefs.hotkey);
+  const [localModelLine, setLocalModelLine] = useState<string | null>(null);
 
   useEffect(() => {
     setHotkeyInput(prefs.hotkey);
   }, [prefs.hotkey]);
+
+  useEffect(() => {
+    if (prefs.mode !== "local") {
+      setLocalModelLine(null);
+      return;
+    }
+    if (!prefs.activeModelId) {
+      setLocalModelLine("No local model selected yet.");
+      return;
+    }
+    let cancelled = false;
+    setLocalModelLine("Checking local model…");
+    void getModelStatus(prefs.activeModelId)
+      .then((status) => {
+        if (cancelled) return;
+        if (status.status === "ready") {
+          setLocalModelLine(
+            `Ready: ${status.id}${status.version ? ` v${status.version}` : ""} (on-device)`,
+          );
+        } else if (status.status === "downloading") {
+          setLocalModelLine(`Downloading ${status.id}…`);
+        } else if (status.status === "error") {
+          setLocalModelLine(
+            `Model issue: ${status.errorMessage ?? status.errorCode ?? "unknown"}`,
+          );
+        } else {
+          setLocalModelLine(`Model ${status.id} is not downloaded yet.`);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLocalModelLine("Could not reach the model manager.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [prefs.mode, prefs.activeModelId]);
 
   useEffect(() => {
     void sessionStatus()
@@ -271,16 +312,26 @@ export function SettingsView({
                 Cloud
               </Button>
               <Button
-                variant="secondary"
-                disabled
-                title="Local offline transcription is coming soon"
+                variant={prefs.mode === "local" ? "primary" : "secondary"}
+                onClick={() => onPrefs({ ...prefs, mode: "local" })}
+                title="On-device transcription — audio never leaves this computer"
               >
-                Local (offline) — Coming soon
+                Local (offline)
               </Button>
             </div>
+            {prefs.mode === "local" ? (
+              <p className="mt-2 text-xs text-gray-500">
+                {localModelLine ?? "Checking local model…"}
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500">
+                Cloud uses Groq Whisper (whisper-large-v3-turbo). Audio is sent
+                securely; transcripts are stored only locally.
+              </p>
+            )}
             <p className="mt-2 text-xs text-gray-500">
-              Cloud uses Groq Whisper (whisper-large-v3-turbo). Audio is sent
-              securely; transcripts are stored only locally.
+              Audio is processed locally on this computer in local mode — no
+              audio or transcripts are uploaded.
             </p>
           </div>
         </div>

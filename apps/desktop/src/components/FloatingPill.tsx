@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { saveHistory } from "../lib/history.js";
 import {
   blobToBase64,
+  blobToWav16kMono,
   MIN_PRESS_MS,
   PTT_ERROR_EVENT,
   PTT_TRANSCRIPT_EVENT,
@@ -11,6 +12,7 @@ import {
   transcribeAndPaste,
 } from "../lib/ptt.js";
 import { isTauri, setTrayState } from "../lib/session.js";
+import type { Prefs } from "./SettingsView.js";
 
 type PillState = "idle" | "recording" | "processing";
 
@@ -33,7 +35,7 @@ const NOTICE_MS = 5000;
  * - The padded frame is the drag region (`deep`); the round button opts
  *   out so press never starts a window move.
  */
-export function FloatingPill() {
+export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const [state, setState] = useState<PillState>("idle");
   const [notice, setNotice] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -108,9 +110,23 @@ export function FloatingPill() {
       if (!mountedRef.current) return;
       setPill("processing");
       try {
-        const base64 = await blobToBase64(blob);
+        // Local mode re-encodes through Web Audio (decode + 16 kHz mono
+        // WAV) because MediaRecorder cannot emit WAV anywhere; the Rust
+        // side validates it with the same parser the worker tests cover.
+        // Cloud mode keeps sending the original blob untouched.
+        const useLocal = prefs.mode === "local";
+        const base64 = useLocal
+          ? await blobToWav16kMono(blob)
+          : await blobToBase64(blob);
         if (!mountedRef.current) return;
-        const result = await transcribeAndPaste(base64, mimeType);
+        const result = await transcribeAndPaste(
+          base64,
+          useLocal ? "audio/wav" : mimeType,
+          undefined,
+          useLocal
+            ? { mode: "local", modelId: prefs.activeModelId }
+            : undefined,
+        );
         if (!mountedRef.current) return;
         saveLastTranscript(result.text);
         void saveHistory(result.text);
@@ -137,7 +153,7 @@ export function FloatingPill() {
         setPill("idle");
       }
     },
-    [clearTimers, setPill, showNotice],
+    [clearTimers, setPill, showNotice, prefs],
   );
 
   const stopPress = useCallback(() => {
