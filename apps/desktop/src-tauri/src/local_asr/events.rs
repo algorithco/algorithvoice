@@ -6,8 +6,6 @@
 
 use serde::Serialize;
 
-use serde::Serialize;
-
 /// Emitted roughly 4x/second per active download and once at completion.
 pub const MODEL_DOWNLOAD_PROGRESS: &str = "model-download-progress";
 /// Emitted when a model's lifecycle state settles: download finished,

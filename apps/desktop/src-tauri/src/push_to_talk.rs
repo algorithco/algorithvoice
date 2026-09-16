@@ -752,6 +752,7 @@ mod tests {
     async fn local_path_returns_transcript_without_paste() {
         let worker = TranscriptionWorker::new();
         let model = load_stub(&worker, Some("hello local"));
+        let worker = Arc::new(worker);
         let dir = fixture_dir("x");
         let audio = wav_base64(&[1000i16; 1600]);
         let result = transcribe_local(&worker, &dir, &model, &audio, Some("en"))
@@ -765,6 +766,7 @@ mod tests {
     async fn local_path_rejects_garbage_audio() {
         let worker = TranscriptionWorker::new();
         let model = load_stub(&worker, Some("unused"));
+        let worker = Arc::new(worker);
         let dir = fixture_dir("x");
         // Valid base64, not a WAV file.
         let err = transcribe_local(&worker, &dir, &model, "bm90LWEtd2F2", None)
@@ -777,6 +779,7 @@ mod tests {
     async fn local_path_propagates_engine_errors() {
         let worker = TranscriptionWorker::new();
         let model = load_stub(&worker, None);
+        let worker = Arc::new(worker);
         let dir = fixture_dir("x");
         let audio = wav_base64(&[1000i16; 1600]);
         let err = transcribe_local(&worker, &dir, &model, &audio, None)
