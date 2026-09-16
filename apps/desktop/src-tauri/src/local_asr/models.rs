@@ -279,7 +279,7 @@ pub fn free_space_bytes(path: &Path) -> Option<u64> {
         let mount = disk.mount_point();
         if path.starts_with(mount) {
             let len = mount.as_os_str().len();
-            if best.map_or(true, |(best_len, _)| len > best_len) {
+            if best.is_none_or(|(best_len, _)| len > best_len) {
                 best = Some((len, disk.available_space()));
             }
         }

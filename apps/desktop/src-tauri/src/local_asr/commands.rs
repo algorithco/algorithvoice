@@ -70,11 +70,7 @@ pub async fn get_model_status(
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
     let data = app_data_dir(&app)?;
-    Ok(models::status_info(
-        &data,
-        &model,
-        downloads.is_running(&model.id),
-    )?)
+    models::status_info(&data, &model, downloads.is_running(&model.id))
 }
 
 #[tauri::command]

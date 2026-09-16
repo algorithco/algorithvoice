@@ -115,7 +115,7 @@ fn parse_wav(bytes: &[u8]) -> AppResult<RawAudio> {
     if channels == 0 || channels > 8 {
         return Err(bad_wav(format!("unsupported channel count: {channels}")));
     }
-    if sample_rate < 8000 || sample_rate > 192_000 {
+    if !(8000..=192_000).contains(&sample_rate) {
         return Err(bad_wav(format!("unsupported sample rate: {sample_rate}")));
     }
     let (start, end) = data_range.ok_or_else(|| bad_wav("WAV has no data chunk"))?;
@@ -140,33 +140,32 @@ fn parse_wav(bytes: &[u8]) -> AppResult<RawAudio> {
 /// Interleaved i16 LE → planar-agnostic f32 in [-1, 1]. The file is
 /// de-interleaved by the caller via channel stride.
 fn decode_pcm16(data: &[u8], channels: u16) -> AppResult<Vec<f32>> {
-    if data.len() % 2 != 0 {
+    if !data.len().is_multiple_of(2) {
         return Err(bad_wav("PCM-16 data has an odd byte count"));
     }
     let frames = data.len() / 2;
-    if frames % usize::from(channels) != 0 {
+    if !frames.is_multiple_of(usize::from(channels)) {
         return Err(bad_wav("PCM-16 data is not a whole number of frames"));
     }
     let mut out = Vec::with_capacity(frames);
-    for chunk in data.chunks_exact(2) {
-        let sample = i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0;
+    for chunk in data.array_chunks::<2>() {
+        let sample = i16::from_le_bytes(*chunk) as f32 / 32768.0;
         out.push(sample);
     }
     Ok(out)
 }
 
 fn decode_f32(data: &[u8], channels: u16) -> AppResult<Vec<f32>> {
-    if data.len() % 4 != 0 {
+    if !data.len().is_multiple_of(4) {
         return Err(bad_wav("float-32 data is not a whole number of samples"));
     }
     let frames = data.len() / 4;
-    if frames % usize::from(channels) != 0 {
+    if !frames.is_multiple_of(usize::from(channels)) {
         return Err(bad_wav("float-32 data is not a whole number of frames"));
     }
     let mut out = Vec::with_capacity(frames);
-    for chunk in data.chunks_exact(4) {
-        let bytes = [chunk[0], chunk[1], chunk[2], chunk[3]];
-        let sample = f32::from_le_bytes(bytes);
+    for chunk in data.array_chunks::<4>() {
+        let sample = f32::from_le_bytes(*chunk);
         if !sample.is_finite() {
             return Err(bad_wav("float-32 data contains non-finite samples"));
         }
@@ -308,8 +307,8 @@ mod tests {
         let bits: u16 = if format == 1 { 16 } else { 32 };
         let mut data = Vec::new();
         for frame in frames.iter() {
-            for c in 0..ch {
-                let s = frame[c].clamp(-1.0, 1.0);
+            for s in frame.iter().take(usize::from(ch)) {
+                let s = s.clamp(-1.0, 1.0);
                 if format == 1 {
                     data.extend_from_slice(&((s * 32767.0) as i16).to_le_bytes());
                 } else {

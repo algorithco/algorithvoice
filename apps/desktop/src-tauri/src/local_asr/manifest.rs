@@ -102,7 +102,7 @@ pub fn is_configured(model: &LocalModel) -> bool {
         !f.url.contains(PLACEHOLDER_HOST)
             && f.fallback_url
                 .as_deref()
-                .map_or(true, |u| !u.contains(PLACEHOLDER_HOST))
+                .is_none_or(|u| !u.contains(PLACEHOLDER_HOST))
             && f.sha256 != PLACEHOLDER_SHA
     })
 }

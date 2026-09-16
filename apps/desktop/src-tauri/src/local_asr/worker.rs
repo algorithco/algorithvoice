@@ -85,7 +85,7 @@ pub(crate) enum SherpaFamily {
     },
 }
 
-fn find_file<'m>(model: &'m LocalModel, mut matches: impl FnMut(&str) -> bool) -> Option<&'m str> {
+fn find_file(model: &LocalModel, mut matches: impl FnMut(&str) -> bool) -> Option<&str> {
     model
         .files
         .iter()
