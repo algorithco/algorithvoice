@@ -62,7 +62,7 @@ pub trait LocalTranscriber: Send + Sync {
 /// listed filenames (encoder/decoder/joiner vs whisper pair vs Qwen3
 /// frontend). Pure function of the manifest — no disk access.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum SherpaFamily {
+pub(crate) enum SherpaFamily {
     /// Parakeet-style transducer: encoder + decoder + joiner + tokens.
     Transducer {
         encoder: String,

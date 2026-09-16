@@ -1,5 +1,10 @@
 mod error;
 mod history;
+// Phase 3 wires the worker/audio/hardware/protocol surface into Tauri
+// commands; until then those items are library-shaped scaffolding and
+// would trip `-D warnings`. Remove this allow when Phase 3 lands — CI
+// will then enforce full liveness again.
+#[allow(dead_code)]
 mod local_asr;
 mod push_to_talk;
 mod state;
