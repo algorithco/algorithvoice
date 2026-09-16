@@ -981,11 +981,15 @@ mod tests {
             resolve_sherpa_family(&model),
             Ok(SherpaFamily::Transducer { .. })
         ));
-        // Drop the joiner: falls back to whisper dispatch, which then
-        // reports the missing decoder/tokens for this fixture.
+        // Drop the joiner from the manifest: the set is now whisper-shaped
+        // (encoder + decoder + tokens), so dispatch falls back to Whisper by
+        // design. A joiner file missing *on disk* is a different case and is
+        // still reported by name (see the missing-files test below).
         model.files.retain(|f| !f.filename.contains("joiner"));
-        let err = resolve_sherpa_family(&model).expect_err("joiner-less parakeet is incomplete");
-        assert_eq!(err.code, "engine-init-failed");
+        assert!(matches!(
+            resolve_sherpa_family(&model),
+            Ok(SherpaFamily::Whisper { .. })
+        ));
 
         // Whisper layout from the manifest template.
         let manifest = default_manifest().expect("manifest");

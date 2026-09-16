@@ -427,10 +427,11 @@ mod tests {
         let all_quiet = trim_silence(&samples[..sr as usize], 0.01, 5.0, sr);
         assert_eq!(all_quiet.len(), 1);
         // Sub-threshold rumble counts as silence; loud edges survive.
+        // 1000 quiet + 100 loud -> [1000..1100], exactly 100 samples.
         let mut rumble = vec![0.005f32; 1000];
         rumble.extend(vec![0.9f32; 100]);
         let kept = trim_silence(&rumble, 0.01, 5.0, sr);
-        assert_eq!(kept.len(), 101);
+        assert_eq!(kept.len(), 100);
     }
 
     #[test]
@@ -438,11 +439,11 @@ mod tests {
         let sr = 16_000u32;
         let samples = vec![0.1f32; sr as usize * 5]; // 5 s
         let chunks = chunk_samples(&samples, sr, 2.0, 0.5).expect("chunks");
-        assert_eq!(chunks.len(), 4); // starts at 0, 1.5, 3.0, 4.5
+        assert_eq!(chunks.len(), 3); // starts at 0, 1.5, 3.0 s; last hits exact end
         assert_eq!(chunks[0].start_secs, 0.0);
         assert!((chunks[1].start_secs - 1.5).abs() < 1e-9);
-        assert!((chunks[3].start_secs - 4.5).abs() < 1e-9);
-        assert_eq!(chunks[3].samples.len(), (0.5 * sr as f64) as usize);
+        assert!((chunks[2].start_secs - 3.0).abs() < 1e-9);
+        assert_eq!(chunks[2].samples.len(), 2 * sr as usize);
         // Union spans everything with no gaps: last end == input end.
         let total: usize = chunks.iter().map(|c| c.samples.len()).sum();
         assert!(total >= samples.len());
