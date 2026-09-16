@@ -1,5 +1,17 @@
 """Generate strictly-monochrome Algorith Voice icons (black/white/gray only).
 
+WARNING: the shipped bundle icons (32x32.png, 64x64.png, 128x128.png,
+128x128@2x.png, icon.png, icon.ico, icon.icns) are generated from the real
+product artwork via `tauri icon`, NOT by this script:
+  source : assets/transparent_logo_1024x1024.png (1024x1024, alpha)
+  master : assets/app-icon-tile-1024.png (black rounded tile + alpha
+           corners, composited for light-taskbar contrast)
+  command: pnpm exec tauri icon ../../assets/app-icon-tile-1024.png
+Re-running this script OVERWRITES the bundle icons with the monochrome
+placeholder — only re-run it if you intend to revert to that design.
+Safe use: `python icons/generate.py` solely to refresh tray-*.png glyphs
+(then `git checkout` the bundle icons if they were clobbered).
+
 Run:  python icons/generate.py   (from apps/desktop/src-tauri/)
 Outputs the Tauri-expected set: 32x32.png, 128x128.png, 128x128@2x.png,
 icon.png (512), icon.ico (multi-size), icon.icns, plus tray states.
