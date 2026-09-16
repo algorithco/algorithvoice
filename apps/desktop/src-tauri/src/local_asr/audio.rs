@@ -148,8 +148,13 @@ fn decode_pcm16(data: &[u8], channels: u16) -> AppResult<Vec<f32>> {
         return Err(bad_wav("PCM-16 data is not a whole number of frames"));
     }
     let mut out = Vec::with_capacity(frames);
-    for chunk in data.array_chunks::<2>() {
-        let sample = i16::from_le_bytes(*chunk) as f32 / 32768.0;
+    for pair in data.chunks(2) {
+        // Length was validated even above; the conversion below keeps this
+        // panic-free even if that ever changes.
+        let [a, b]: [u8; 2] = pair
+            .try_into()
+            .map_err(|_| bad_wav("PCM-16 data has an odd byte count"))?;
+        let sample = i16::from_le_bytes([a, b]) as f32 / 32768.0;
         out.push(sample);
     }
     Ok(out)
@@ -164,8 +169,11 @@ fn decode_f32(data: &[u8], channels: u16) -> AppResult<Vec<f32>> {
         return Err(bad_wav("float-32 data is not a whole number of frames"));
     }
     let mut out = Vec::with_capacity(frames);
-    for chunk in data.array_chunks::<4>() {
-        let sample = f32::from_le_bytes(*chunk);
+    for quad in data.chunks(4) {
+        let [a, b, c, d]: [u8; 4] = quad
+            .try_into()
+            .map_err(|_| bad_wav("float-32 data is not a whole number of samples"))?;
+        let sample = f32::from_le_bytes([a, b, c, d]);
         if !sample.is_finite() {
             return Err(bad_wav("float-32 data contains non-finite samples"));
         }
@@ -303,7 +311,7 @@ mod tests {
         frames: &[[f32; 2]],
         stereo: bool,
     ) -> Vec<u8> {
-        let ch = if stereo { 2 } else { 1 };
+        let ch: usize = if stereo { 2 } else { 1 };
         let bits: u16 = if format == 1 { 16 } else { 32 };
         let mut data = Vec::new();
         for frame in frames.iter() {
