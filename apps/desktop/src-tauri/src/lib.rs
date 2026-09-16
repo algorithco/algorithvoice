@@ -1,10 +1,12 @@
 mod error;
 mod history;
+mod local_asr;
 mod push_to_talk;
 mod state;
 
 use error::{AppError, AppResult};
 use state::{AppState, Db, LicenseStatus, SessionStatus, TrayState};
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use tauri::{
     image::Image,
@@ -357,7 +359,25 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "settings" => {
                 let _ = open_settings(app.clone());
             }
-            "quit" => app.exit(0),
+            "quit" => {
+                // 1) Remember the intent so CloseRequested below lets the
+                //    windows die instead of hiding them back into the tray.
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.exiting.store(true, Ordering::SeqCst);
+                }
+                // 2) Drop the tray icon right away so no ghost lingers in
+                //    the notification area while the runtime shuts down.
+                if let Some(tray) = app.tray_by_id("main") {
+                    let _ = tray.set_visible(false);
+                }
+                // 3) Graceful runtime shutdown (ExitRequested -> Exit).
+                app.exit(0);
+                // 4) Guarantee: the process must be gone from Task Manager.
+                //    Safe to be unconditional here — the app keeps no unsaved
+                //    state, the tray icon is already hidden, and the exit
+                //    code stays 0.
+                std::process::exit(0);
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -465,6 +485,7 @@ pub fn run() {
                 .build(),
         )
         .manage(AppState::with_hotkey(DEFAULT_HOTKEY))
+        .manage(local_asr::downloader::DownloadManager::new())
         .setup(|app| {
             match init_db(app.handle()) {
                 Ok(db) => {
@@ -512,6 +533,16 @@ pub fn run() {
             // The floating pill follows the same rule so its close button
             // never kills the process (reopen via Dictate view / tray).
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // During Quit, let every window close for real so the
+                // runtime can finish tearing down and the process ends.
+                let exiting = window
+                    .app_handle()
+                    .try_state::<AppState>()
+                    .map(|s| s.exiting.load(Ordering::SeqCst))
+                    .unwrap_or(false);
+                if exiting {
+                    return;
+                }
                 if window.label() == "main"
                     || window.label() == "settings"
                     || window.label() == "floating-pill"
@@ -548,7 +579,15 @@ pub fn run() {
             history::history_list,
             history::history_stats,
             history::history_delete,
-            history::history_clear
+            history::history_clear,
+            // Local model manager (additive; cloud path untouched).
+            local_asr::commands::list_available_models,
+            local_asr::commands::get_model_status,
+            local_asr::commands::get_installed_models,
+            local_asr::commands::download_model,
+            local_asr::commands::cancel_download,
+            local_asr::commands::delete_model,
+            local_asr::commands::verify_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running Algorith Voice");

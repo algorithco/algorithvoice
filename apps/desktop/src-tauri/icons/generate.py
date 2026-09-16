@@ -45,28 +45,39 @@ def app_icon(size: int) -> Image.Image:
     return img
 
 
-def _bars(d: ImageDraw.ImageDraw, size: int, heights: list[float], fill: tuple) -> None:
-    """Waveform glyph: 3 vertical bars of varying height, monochrome."""
+def _white_bars(d: ImageDraw.ImageDraw, size: int, heights: list[float]) -> None:
+    """White waveform bars on the black tile (sharp rects stay crisp at 16px)."""
     cx, cy = size / 2, size / 2
-    gap = size / 5
-    w = max(2, size // 11)
+    span = size * 0.58
+    w = span * 0.2
+    gap = span * 0.1067
+    max_h = size * 0.62
+    n = len(heights)
     for i, h in enumerate(heights):
-        x = cx + (i - 1) * gap
-        bh = (size / 2 - size // 8) * h
-        d.rounded_rectangle([x - w / 2, cy - bh, x + w / 2, cy + bh], radius=w // 2, fill=fill)
+        if h <= 0:
+            continue
+        x = cx + (i - (n - 1) / 2) * (w + gap)
+        bh = max_h * h / 2
+        d.rectangle(
+            [round(x - w / 2), round(cy - bh), round(x + w / 2), round(cy + bh)],
+            fill=WHITE,
+        )
 
 
 def tray(state: str, size: int = 32) -> Image.Image:
-    img = Image.new("RGBA", (size, size), CLEAR)
+    # Full-bleed black tile: transparent glyphs vanish on dark Windows
+    # taskbars, so every state carries its own black background.
+    img = Image.new("RGBA", (size, size), BLACK)
     d = ImageDraw.Draw(img)
     if state == "idle":
-        _bars(d, size, [0.45, 1.0, 0.65], BLACK)
+        # Product mark proportions, cf. assets/logo.png
+        _white_bars(d, size, [0.46, 1.0, 0.75, 0.39])
     elif state == "recording":
         # Emphasized amplitude frame (Rust swaps frames for the pulse in Phase 2)
-        _bars(d, size, [0.7, 1.0, 0.85], BLACK)
+        _white_bars(d, size, [0.7, 1.0, 0.85, 0.6])
     elif state == "processing":
         # Single bar loader
-        _bars(d, size, [0.0, 1.0, 0.0], BLACK)
+        _white_bars(d, size, [1.0])
     else:
         raise ValueError(state)
     return img

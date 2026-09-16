@@ -42,6 +42,15 @@ arboard = "3"
 enigo = "0.6"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+# Local speech recognition (Spike 0: sherpa-onnx static build + Parakeet TDT).
+# The crate links its bundled ONNX Runtime statically; no Python needed.
+sherpa-onnx = "1.13.6"
+# Local model manager: checksums (reuse locked 0.10.x) + disk-space probes.
+sha2 = "0.10"
+sysinfo = "0.39"
+# Dynamic NVML probe for NVIDIA GPUs (no link-time dep: machines without a
+# driver behave identically minus GPU fields). Reuses the locked 0.7.x.
+libloading = "0.7"
 
 [features]
 default = ["custom-protocol"]
