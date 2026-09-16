@@ -102,15 +102,11 @@ pub fn history_stats(db: tauri::State<'_, Db>) -> AppResult<HistoryStats> {
     let today_rows = today_stmt
         .query_map([today_start], |r| r.get::<_, String>(0))
         .map_err(|e| AppError::store(e.to_string()))?;
-    for r in rows {
-        if let Ok(t) = r {
-            total_words += t.split_whitespace().count() as i64;
-        }
+    for t in rows.flatten() {
+        total_words += t.split_whitespace().count() as i64;
     }
-    for r in today_rows {
-        if let Ok(t) = r {
-            today_words += t.split_whitespace().count() as i64;
-        }
+    for t in today_rows.flatten() {
+        today_words += t.split_whitespace().count() as i64;
     }
 
     Ok(HistoryStats {
