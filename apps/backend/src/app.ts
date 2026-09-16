@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import cookie from "@fastify/cookie";
 import compress from "@fastify/compress";
+import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import jwt from "@fastify/jwt";
@@ -18,11 +18,11 @@ import {
   type ZodTypeProvider,
 } from "fastify-type-provider-zod";
 import { loadEnv, setAppEnv } from "./config/env.js";
-import { authRoutes } from "./modules/auth/auth.routes.js";
-import { oauth2Routes } from "./modules/oauth2/oauth2.routes.js";
 import { adminRoutes } from "./modules/admin/admin.routes.js";
+import { authRoutes } from "./modules/auth/auth.routes.js";
 import { billingRoutes } from "./modules/billing/billing.routes.js";
 import { licenseRoutes } from "./modules/devices/license.routes.js";
+import { oauth2Routes } from "./modules/oauth2/oauth2.routes.js";
 import { sttRoutes } from "./modules/stt/stt.routes.js";
 import { usageRoutes } from "./modules/usage/usage.routes.js";
 import jwtPlugin from "./plugins/jwt.js";
@@ -59,9 +59,21 @@ export function buildApp() {
   app.register(cookie);
   // Simple response-time + structured log: 1.1, 1.6
   app.addHook("onResponse", (req, reply, done) => {
-    const ms = reply.elapsedTime ?? (Date.now() - (req as unknown as { startTime?: number }).startTime!);
+    const startTime = (req as unknown as { startTime?: number }).startTime;
+    const ms =
+      reply.elapsedTime ??
+      (startTime !== undefined ? Date.now() - startTime : 0);
     if (req.url !== "/health" && req.url !== "/ready") {
-      req.log.info({ reqId: req.id, method: req.method, url: req.url, statusCode: reply.statusCode, responseTime: Math.round(ms) }, "request completed");
+      req.log.info(
+        {
+          reqId: req.id,
+          method: req.method,
+          url: req.url,
+          statusCode: reply.statusCode,
+          responseTime: Math.round(ms),
+        },
+        "request completed",
+      );
     }
     done();
   });

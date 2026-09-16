@@ -114,17 +114,18 @@ export async function oauth2Routes(
           action: action as (typeof OAuth2Audit)[keyof typeof OAuth2Audit],
           ip,
           userAgent: ua,
-          metadata: auditMeta({ client_id: String(q.client_id ?? "") }),
+          metadata: auditMeta({
+            client_id: String(q.client_id ?? ""),
+            error: description,
+          }),
         });
 
       if (!isRegisteredClient(q.client_id)) {
         await fail(OAuth2Audit.AUTHORIZE_ERROR, "unknown client");
-        return reply
-          .code(400)
-          .send({
-            error: "invalid_client",
-            error_description: "Unknown client.",
-          });
+        return reply.code(400).send({
+          error: "invalid_client",
+          error_description: "Unknown client.",
+        });
       }
       const redirect = validateRedirectUri(q.redirect_uri);
       if (!redirect.ok) {

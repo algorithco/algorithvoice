@@ -8,22 +8,28 @@ const env = loadEnv();
 
 // 1.5 — multi-core: in production with >1 CPU, fork via cluster.
 // Fly single-cpu still runs single process; PM2 not needed in container.
-if (cluster.isPrimary && env.NODE_ENV === "production" && availableParallelism() > 1) {
+if (
+  cluster.isPrimary &&
+  env.NODE_ENV === "production" &&
+  availableParallelism() > 1
+) {
   const workers = Math.min(availableParallelism(), 4);
   for (let i = 0; i < workers; i++) cluster.fork();
   cluster.on("exit", (w, code) => {
-    console.error(`worker ${w.process.pid} died (${code}), forking replacement`);
+    console.error(
+      `worker ${w.process.pid} died (${code}), forking replacement`,
+    );
     cluster.fork();
   });
 } else {
   const app = buildApp();
 
-async function shutdown(signal: string) {
-  app.log.info({ signal }, "shutting down");
-  await app.close();
-  await closeRedis().catch(() => {});
-  process.exit(0);
-}
+  async function shutdown(signal: string) {
+    app.log.info({ signal }, "shutting down");
+    await app.close();
+    await closeRedis().catch(() => {});
+    process.exit(0);
+  }
 
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));

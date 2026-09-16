@@ -1,9 +1,25 @@
 "use client";
 import { useEffect, useState } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 export default function AdminModelsPage() {
-  const [rows, setRows] = useState<Array<{ model: string; requests: number; avgLatencyMs: number; costUsd: number; errorRate: number }>>([]);
+  const [rows, setRows] = useState<
+    Array<{
+      model: string;
+      requests: number;
+      avgLatencyMs: number;
+      costUsd: number;
+      errorRate: number;
+    }>
+  >([]);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     fetch("/api/admin/stats/models")
@@ -29,12 +45,22 @@ export default function AdminModelsPage() {
       <div className="overflow-auto rounded-lg border border-line">
         <table className="w-full text-sm">
           <thead className="bg-surface">
-            <tr><th className="p-2 text-left">Model</th><th className="p-2 text-right">Req</th><th className="p-2 text-right">Avg ms</th><th className="p-2 text-right">Cost $</th><th className="p-2 text-right">Err %</th></tr>
+            <tr>
+              <th className="p-2 text-left">Model</th>
+              <th className="p-2 text-right">Req</th>
+              <th className="p-2 text-right">Avg ms</th>
+              <th className="p-2 text-right">Cost $</th>
+              <th className="p-2 text-right">Err %</th>
+            </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.model} className="border-t border-line">
-                <td className="p-2">{r.model}</td><td className="p-2 text-right">{r.requests}</td><td className="p-2 text-right">{r.avgLatencyMs}</td><td className="p-2 text-right">{r.costUsd.toFixed(4)}</td><td className="p-2 text-right">{r.errorRate}%</td>
+                <td className="p-2">{r.model}</td>
+                <td className="p-2 text-right">{r.requests}</td>
+                <td className="p-2 text-right">{r.avgLatencyMs}</td>
+                <td className="p-2 text-right">{r.costUsd.toFixed(4)}</td>
+                <td className="p-2 text-right">{r.errorRate}%</td>
               </tr>
             ))}
           </tbody>

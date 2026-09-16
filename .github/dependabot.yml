@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # pnpm workspace (npm ecosystem covers pnpm-lock.yaml)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+    # Keep major bumps (e.g. vitest 3 -> 4/5) as separate manual decisions;
+    # PR #1 showed catalog still pins vitest ^3.2.4 while Dependabot
+    # proposed 4.1.11/5.0.0 on a stale base.
+    ignore:
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
