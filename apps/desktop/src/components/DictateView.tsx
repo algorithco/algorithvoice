@@ -97,61 +97,68 @@ export function DictateView({ hotkey }: { hotkey: string }) {
       .catch(() => setGroqReady(false));
   }, []);
 
-  const simulate = () => {
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
-    setTray("recording");
-    void setTrayState("recording");
-    setPreview("Listening…");
-    timers.current.push(
-      window.setTimeout(() => {
-        setTray("processing");
-        void setTrayState("processing");
-        setPreview("Transcribing…");
-      }, 900),
-      window.setTimeout(() => {
-        setTray("idle");
-        void setTrayState("idle");
-        setPreview("The quick brown fox jumps over the lazy dog.");
-      }, 1800),
-    );
-  };
-
   return (
-    <div className="p-8">
-      <h1 className="av-display">Dictate</h1>
-      <p className="av-body av-prose mt-2 text-gray-500">
+    <div className="mx-auto w-full max-w-[900px] p-8">
+      <h1 className="text-2xl font-semibold tracking-tight text-black dark:text-white">
+        Dictate
+      </h1>
+      <p className="mt-2 text-sm text-gray-500">
         Hold{" "}
-        <span className="av-mono text-black dark:text-white">{hotkey}</span> to
-        talk. Release to inject text into the focused app.
+        <span className="font-mono text-black dark:text-white">{hotkey}</span>{" "}
+        to talk. Release to inject text into the focused app.
       </p>
 
-      <output className="mt-6 flex items-center gap-4" aria-live="polite">
-        <WaveformGlyph className="text-black dark:text-white" />
-        <span className="av-small text-gray-500">
-          {tray === "idle"
-            ? "Idle"
-            : tray === "recording"
-              ? "Recording"
-              : "Processing"}
-        </span>
-      </output>
-
-      <div className="mt-6 border border-gray-200 p-4 dark:border-gray-800">
-        <p className="av-small mb-2 text-gray-500">Preview</p>
-        <p className="av-mono">{preview}</p>
-      </div>
-
-      {tray !== "idle" ? (
-        <div className="mt-6">
-          <RecordingOverlay
-            state={tray === "recording" ? "listening" : "transcribing"}
-          />
+      <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-black">
+        <div className="flex flex-col items-center text-center">
+          <div
+            className={`grid size-20 place-items-center rounded-full border transition-colors ${
+              tray === "recording"
+                ? "border-black bg-black dark:border-white dark:bg-white"
+                : tray === "processing"
+                  ? "border-gray-300 bg-gray-50 dark:border-gray-700 dark:bg-white/5"
+                  : "border-gray-200 bg-white dark:border-gray-800 dark:bg-black"
+            }`}
+          >
+            <WaveformGlyph
+              className={
+                tray === "recording"
+                  ? "text-white dark:text-black"
+                  : "text-black dark:text-white"
+              }
+            />
+          </div>
+          <p className="mt-4 text-sm font-medium text-black dark:text-white">
+            {tray === "idle"
+              ? "Ready to listen"
+              : tray === "recording"
+                ? "Listening…"
+                : "Transcribing…"}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            {tray === "idle"
+              ? `Hold ${hotkey}`
+              : tray === "recording"
+                ? "Release to process"
+                : "Please wait"}
+          </p>
         </div>
-      ) : null}
 
-      <div className="mt-6">
-        <Button onClick={simulate}>Simulate push-to-talk</Button>
+        <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+          <p className="text-xs uppercase tracking-wide text-gray-500">
+            Preview
+          </p>
+          <p className="mt-2 font-mono text-sm leading-relaxed text-black dark:text-white">
+            {preview}
+          </p>
+        </div>
+
+        {tray !== "idle" ? (
+          <div className="mt-6">
+            <RecordingOverlay
+              state={tray === "recording" ? "listening" : "transcribing"}
+            />
+          </div>
+        ) : null}
       </div>
 
       {lastTranscript ? (

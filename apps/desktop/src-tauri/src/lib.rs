@@ -1,4 +1,5 @@
 mod error;
+mod history;
 mod push_to_talk;
 mod state;
 
@@ -542,7 +543,12 @@ pub fn run() {
             push_to_talk::get_foreground_info,
             push_to_talk::ensure_floating_pill,
             push_to_talk::set_floating_pill_visible,
-            push_to_talk::floating_pill_visible
+            push_to_talk::floating_pill_visible,
+            history::history_save,
+            history::history_list,
+            history::history_stats,
+            history::history_delete,
+            history::history_clear
         ])
         .run(tauri::generate_context!())
         .expect("error while running Algorith Voice");

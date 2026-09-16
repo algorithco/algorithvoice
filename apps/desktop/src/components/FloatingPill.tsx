@@ -1,5 +1,6 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { saveHistory } from "../lib/history.js";
 import {
   blobToBase64,
   MIN_PRESS_MS,
@@ -112,6 +113,7 @@ export function FloatingPill() {
         const result = await transcribeAndPaste(base64, mimeType);
         if (!mountedRef.current) return;
         saveLastTranscript(result.text);
+        void saveHistory(result.text);
         void emit(PTT_TRANSCRIPT_EVENT, {
           text: result.text,
           pasted: result.pasted,

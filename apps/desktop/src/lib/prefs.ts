@@ -6,8 +6,7 @@ const KEY = "prefs.json";
 
 export const DEFAULT_PREFS: Prefs = {
   hotkey: "Ctrl+Space",
-  mode: "local",
-  vadThreshold: 0.5,
+  mode: "cloud",
   theme: "dark",
 };
 
@@ -16,14 +15,24 @@ export async function loadPrefs(): Promise<Prefs> {
     try {
       const store = await load(KEY);
       const saved = await store.get<Prefs>("prefs");
-      if (saved) return { ...DEFAULT_PREFS, ...saved };
+      if (saved) {
+        const merged = { ...DEFAULT_PREFS, ...saved };
+        // Local offline transcription isn't available yet — migrate old
+        // prefs forward instead of stranding users on a dead mode.
+        if (merged.mode !== "cloud") merged.mode = "cloud";
+        return merged;
+      }
     } catch {
       // Fall through to localStorage.
     }
   }
   try {
     const raw = localStorage.getItem("algorith-voice-prefs");
-    if (raw) return { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+    if (raw) {
+      const merged = { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+      if (merged.mode !== "cloud") merged.mode = "cloud";
+      return merged;
+    }
   } catch {
     // Ignore corrupt prefs.
   }
