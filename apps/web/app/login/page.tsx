@@ -2,14 +2,27 @@
 
 import { loginSchema } from "@algorith-voice/shared-types";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { AuthShell, Field, Input } from "../../components/AuthShell";
 import { MorphButton } from "../../components/MorphButton";
 import { Reveal } from "../../components/Reveal";
 
-export default function LoginPage() {
+function safeReturnTo(raw: string | null): string | null {
+  if (!raw || !raw.startsWith("/")) return null;
+  try {
+    const u = new URL(raw, "http://x");
+    if (u.host !== "x") return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function LoginInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = safeReturnTo(searchParams.get("returnTo"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -40,7 +53,11 @@ export default function LoginPage() {
         );
         return;
       }
-      router.push("/dashboard");
+      router.push(
+        (returnTo ?? "/dashboard") as unknown as Parameters<
+          typeof router.push
+        >[0],
+      );
       router.refresh();
     } catch {
       setErr("Network error.");
@@ -98,5 +115,13 @@ export default function LoginPage() {
         </form>
       </AuthShell>
     </Reveal>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginInner />
+    </Suspense>
   );
 }
