@@ -425,6 +425,10 @@ pub fn get_foreground_info() -> AppResult<ForegroundInfo> {
 /// Properties per spec: decorations=false, transparent, always_on_top,
 /// skip_taskbar, non-resizable 72x72, `focused(false)` + `focusable(false)`
 /// so it never steals focus, `visible_on_all_workspaces` where supported.
+///
+/// NOTE: `.transparent()` on macOS requires the `macos-private-api`
+/// Cargo feature on `tauri` (see Cargo.toml) — without it the method
+/// does not exist on that target and the release build fails (E0599).
 #[tauri::command]
 pub fn ensure_floating_pill(app: AppHandle) -> AppResult<()> {
     if let Some(win) = app.get_webview_window(FLOATING_LABEL) {
