@@ -82,46 +82,34 @@ impl AppError {
     }
 
     /// Inference requested but no model is loaded.
-    /// (Wired in Phase 3; allow until then — codes are frozen API.)
-    #[allow(dead_code)]
     pub fn model_not_loaded(msg: impl Into<String>) -> Self {
         Self::new("model-not-loaded", msg)
     }
 
     /// The inference engine failed to initialise (missing files, bad
     /// weights, unsupported hardware for the runtime).
-    /// (Wired in Phase 3; allow until then — codes are frozen API.)
-    #[allow(dead_code)]
     pub fn engine_init_failed(msg: impl Into<String>) -> Self {
         Self::new("engine-init-failed", msg)
     }
 
     /// Inference exceeded its deadline.
-    /// (Wired in Phase 3; allow until then — codes are frozen API.)
-    #[allow(dead_code)]
     pub fn inference_timeout(msg: impl Into<String>) -> Self {
         Self::new("inference-timeout", msg)
     }
 
     /// The engine returned no text. Never silently accepted: callers must
     /// surface this (retry with diagnostics or a clear user error).
-    /// (Wired in Phase 3; allow until then — codes are frozen API.)
-    #[allow(dead_code)]
     pub fn inference_empty_result(msg: impl Into<String>) -> Self {
         Self::new("inference-empty-result", msg)
     }
 
     /// Not enough memory to load or run the model.
-    /// (Wired in Phase 3; allow until then — codes are frozen API.)
-    #[allow(dead_code)]
     pub fn out_of_memory(msg: impl Into<String>) -> Self {
         Self::new("out-of-memory", msg)
     }
 
     /// Audio input could not be decoded or normalized (corrupt/truncated
     /// WAV, unsupported sample format, pathological size).
-    /// (Wired in Phase 3; allow until then — codes are frozen API.)
-    #[allow(dead_code)]
     pub fn audio_unsupported_format(msg: impl Into<String>) -> Self {
         Self::new("audio-unsupported-format", msg)
     }

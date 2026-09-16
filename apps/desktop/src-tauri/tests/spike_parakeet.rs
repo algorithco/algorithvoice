@@ -19,7 +19,8 @@
 //! cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --test spike_parakeet -- --nocapture
 //! ```
 
-use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig, Wave};
+use algorith_voice_desktop_lib::local_asr::audio::decode_wav;
+use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -56,19 +57,16 @@ fn spike_parakeet_tdt_v3_offline_transcription() {
         .unwrap_or_else(|_| dir.join("test_wavs").join("en.wav"));
     assert!(
         wav_path.is_file(),
-        "spike audio missing: {} (set SHERPA_TEST_WAV to a 16 kHz mono WAV)",
+        "spike audio missing: {} (set SHERPA_TEST_WAV to a WAV file)",
         wav_path.display()
     );
 
-    let wave = Wave::read(wav_path.to_str().expect("wav path must be UTF-8"))
-        .expect("Wave::read must parse the fixture WAV");
-    assert_eq!(
-        wave.sample_rate(),
-        16000,
-        "Parakeet expects 16 kHz mono input"
-    );
+    // The production audio pipeline normalizes any rate/channels to the
+    // 16 kHz mono the engine consumes — the spike exercises that path too.
+    let raw = std::fs::read(&wav_path).expect("read fixture wav");
+    let decoded = decode_wav(&raw).expect("decode fixture wav");
     assert!(
-        !wave.samples().is_empty(),
+        !decoded.samples.is_empty(),
         "fixture WAV contains no samples"
     );
 
@@ -86,14 +84,14 @@ fn spike_parakeet_tdt_v3_offline_transcription() {
     let recognizer =
         OfflineRecognizer::create(&config).expect("OfflineRecognizer::create must succeed");
     let stream = recognizer.create_stream();
-    stream.accept_waveform(wave.sample_rate(), wave.samples());
+    stream.accept_waveform(16000, &decoded.samples);
 
     let started = Instant::now();
     recognizer.decode(&stream);
     let elapsed = started.elapsed();
 
     let result = stream.get_result().expect("decode must produce a result");
-    let audio_secs = wave.samples().len() as f64 / wave.sample_rate() as f64;
+    let audio_secs = decoded.duration_secs();
     eprintln!("spike transcript : {:?}", result.text);
     eprintln!(
         "spike timing     : {:.2}s audio in {:.2}s ({:.1}x realtime)",
