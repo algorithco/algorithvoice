@@ -3,7 +3,6 @@ import { Button, Input } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useState } from "react";
-import { getModelStatus } from "../lib/localModels.js";
 import {
   DEMO_EMAIL,
   isTauri,
@@ -14,6 +13,7 @@ import {
   sessionStatus,
   signup,
 } from "../lib/session.js";
+import { ModelManager } from "./ModelManager.js";
 import { OAuthButtons } from "./OAuthButtons.js";
 
 export interface Prefs {
@@ -123,47 +123,10 @@ export function SettingsView({
   const [autostart, setAutostart] = useState(false);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [hotkeyInput, setHotkeyInput] = useState(prefs.hotkey);
-  const [localModelLine, setLocalModelLine] = useState<string | null>(null);
 
   useEffect(() => {
     setHotkeyInput(prefs.hotkey);
   }, [prefs.hotkey]);
-
-  useEffect(() => {
-    if (prefs.mode !== "local") {
-      setLocalModelLine(null);
-      return;
-    }
-    if (!prefs.activeModelId) {
-      setLocalModelLine("No local model selected yet.");
-      return;
-    }
-    let cancelled = false;
-    setLocalModelLine("Checking local model…");
-    void getModelStatus(prefs.activeModelId)
-      .then((status) => {
-        if (cancelled) return;
-        if (status.status === "ready") {
-          setLocalModelLine(
-            `Ready: ${status.id}${status.version ? ` v${status.version}` : ""} (on-device)`,
-          );
-        } else if (status.status === "downloading") {
-          setLocalModelLine(`Downloading ${status.id}…`);
-        } else if (status.status === "error") {
-          setLocalModelLine(
-            `Model issue: ${status.errorMessage ?? status.errorCode ?? "unknown"}`,
-          );
-        } else {
-          setLocalModelLine(`Model ${status.id} is not downloaded yet.`);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLocalModelLine("Could not reach the model manager.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [prefs.mode, prefs.activeModelId]);
 
   useEffect(() => {
     void sessionStatus()
@@ -320,9 +283,9 @@ export function SettingsView({
               </Button>
             </div>
             {prefs.mode === "local" ? (
-              <p className="mt-2 text-xs text-gray-500">
-                {localModelLine ?? "Checking local model…"}
-              </p>
+              <div className="mt-4">
+                <ModelManager prefs={prefs} onPrefs={onPrefs} />
+              </div>
             ) : (
               <p className="mt-2 text-xs text-gray-500">
                 Cloud uses Groq Whisper (whisper-large-v3-turbo). Audio is sent
