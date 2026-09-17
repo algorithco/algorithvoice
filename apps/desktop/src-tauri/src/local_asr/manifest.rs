@@ -360,8 +360,7 @@ mod tests {
     fn embedded_default_manifest_parses_and_validates_shape() {
         let manifest = default_manifest().expect("bundled manifest parses");
         assert_eq!(manifest.manifest_version, MANIFEST_VERSION);
-        // Placeholders are intentional: shape-valid, but never configured
-        // until converted runtime files land on the model repos.
+        // Models are now configured (real HF URLs + SHA-256 + sizes).
         validate_manifest(&manifest).expect("template shape is valid");
         let ids: Vec<&str> = manifest.models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(
@@ -377,8 +376,8 @@ mod tests {
         );
         for model in &manifest.models {
             assert!(
-                !is_configured(model),
-                "model {} must stay unconfigured until upload",
+                is_configured(model),
+                "model {} must be configured (real SHA + HTTPS URL)",
                 model.id
             );
             assert!(model.supports_current_platform(), "{}", model.id);
