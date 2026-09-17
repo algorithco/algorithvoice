@@ -1,10 +1,29 @@
+import type { LocalModel } from "@algorith-voice/shared-types";
 import { Button, Logo } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  getHardwareInfo,
+  type HardwareInfo,
+  listAvailableModels,
+} from "../lib/localModels.js";
+import { isTauri } from "../lib/session.js";
 import Particles from "./Particles.js";
 import type { Prefs } from "./SettingsView.js";
 
-const STEPS = ["Hotkey", "Model", "Ready"] as const;
+const STEPS = ["Hotkey", "Mode", "Model", "Ready"] as const;
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = bytes;
+  let u = 0;
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024;
+    u += 1;
+  }
+  return `${v.toFixed(u === 0 ? 0 : u === 3 ? 2 : 1)} ${units[u]}`;
+}
 
 export function OnboardingView({
   prefs,
@@ -18,13 +37,63 @@ export function OnboardingView({
   initialStep?: number;
 }) {
   const [step, setStep] = useState(initialStep);
-  const [cloudOnly, setCloudOnly] = useState(true);
+  const [cloudOnly, setCloudOnly] = useState(() => prefs.mode !== "local");
   const [hotkeyInput, setHotkeyInput] = useState(prefs.hotkey);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
+  const [hardware, setHardware] = useState<HardwareInfo | null>(null);
+  const [models, setModels] = useState<LocalModel[] | null>(null);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [pickedModelId, setPickedModelId] = useState<string | null>(
+    () => prefs.activeModelId,
+  );
 
   useEffect(() => {
     setHotkeyInput(prefs.hotkey);
   }, [prefs.hotkey]);
+
+  useEffect(() => {
+    setPickedModelId(prefs.activeModelId);
+  }, [prefs.activeModelId]);
+
+  // Fetch hardware + catalog when user reaches Model step in local mode
+  useEffect(() => {
+    if (step !== 2 || cloudOnly) return;
+    if (!isTauri()) {
+      setModelError(
+        "Model manager needs the desktop app shell — you can pick a model later in Settings.",
+      );
+      return;
+    }
+    let cancelled = false;
+    setModelError(null);
+    void (async () => {
+      try {
+        const [hw, list] = await Promise.all([
+          getHardwareInfo().catch(() => null),
+          listAvailableModels(),
+        ]);
+        if (cancelled) return;
+        if (hw) setHardware(hw);
+        setModels(list);
+        // Auto-pick recommended if nothing selected yet
+        if (!pickedModelId && list.length > 0) {
+          const ramGb = hw ? hw.totalRamBytes / 1_000_000_000 : 8;
+          let rec = "parakeet-tdt-0.6b-v3";
+          if (ramGb < 4) rec = "whisper-small";
+          else if (ramGb >= 16) rec = "qwen3-asr-1.7b";
+          else if (ramGb >= 12) rec = "whisper-large-v3-turbo";
+          const exists = list.some((m) => m.id === rec) ? rec : list[0].id;
+          setPickedModelId(exists);
+        }
+      } catch (e) {
+        if (!cancelled)
+          setModelError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, cloudOnly, pickedModelId]);
 
   const saveHotkey = async (raw: string): Promise<boolean> => {
     const next = raw.trim();
@@ -148,7 +217,7 @@ export function OnboardingView({
 
               <div className="h-12" />
 
-              <StepProgress current={0} />
+              <StepProgress current={0} total={4} />
             </>
           ) : null}
 
@@ -197,8 +266,10 @@ export function OnboardingView({
 
               <Button
                 onClick={() => {
-                  onPrefs({ ...prefs, mode: cloudOnly ? "cloud" : "local" });
-                  setStep(2);
+                  const mode = cloudOnly ? "cloud" : "local";
+                  onPrefs({ ...prefs, mode });
+                  // Cloud skips model picker, local shows it
+                  setStep(cloudOnly ? 3 : 2);
                 }}
                 className="h-[54px] w-[200px] rounded-xl bg-white text-[15px] font-medium text-black hover:bg-white/90"
               >
@@ -207,11 +278,35 @@ export function OnboardingView({
 
               <div className="h-12" />
 
-              <StepProgress current={1} />
+              <StepProgress current={1} total={4} />
             </>
           ) : null}
 
           {step === 2 ? (
+            <ModelPickerStep
+              hardware={hardware}
+              models={models}
+              error={modelError}
+              pickedId={pickedModelId}
+              onPick={setPickedModelId}
+              onContinue={() => {
+                if (pickedModelId)
+                  onPrefs({
+                    ...prefs,
+                    mode: "local",
+                    activeModelId: pickedModelId,
+                  });
+                else onPrefs({ ...prefs, mode: "local" });
+                setStep(3);
+              }}
+              onSkip={() => {
+                onPrefs({ ...prefs, mode: "local", activeModelId: null });
+                setStep(3);
+              }}
+            />
+          ) : null}
+
+          {step === 3 ? (
             <>
               <p className="max-w-[560px] text-[16px] leading-relaxed text-white/50 md:text-[17px]">
                 Everything is set. Focus any text field, hold{" "}
@@ -230,7 +325,7 @@ export function OnboardingView({
 
               <div className="h-12" />
 
-              <StepProgress current={2} />
+              <StepProgress current={3} total={4} />
             </>
           ) : null}
         </div>
@@ -239,10 +334,177 @@ export function OnboardingView({
   );
 }
 
-function StepProgress({ current }: { current: number }) {
+function ModelPickerStep({
+  hardware,
+  models,
+  error,
+  pickedId,
+  onPick,
+  onContinue,
+  onSkip,
+}: {
+  hardware: HardwareInfo | null;
+  models: LocalModel[] | null;
+  error: string | null;
+  pickedId: string | null;
+  onPick: (id: string) => void;
+  onContinue: () => void;
+  onSkip: () => void;
+}) {
+  const recommendedId = useMemo(() => {
+    if (!models || models.length === 0) return null;
+    const ramGb = hardware ? hardware.totalRamBytes / 1_000_000_000 : 8;
+    let rec = "parakeet-tdt-0.6b-v3";
+    if (ramGb < 4) rec = "whisper-small";
+    else if (ramGb >= 16) rec = "qwen3-asr-1.7b";
+    else if (ramGb >= 12) rec = "whisper-large-v3-turbo";
+    return models.some((m) => m.id === rec) ? rec : models[0].id;
+  }, [hardware, models]);
+
+  const hardwareLine = useMemo(() => {
+    if (!hardware) return "Detecting system…";
+    const ram = (hardware.totalRamBytes / 1_000_000_000).toFixed(1);
+    const avail = (hardware.availableRamBytes / 1_000_000_000).toFixed(1);
+    const gpu = hardware.gpu?.name ?? hardware.gpu?.vendor ?? "no GPU";
+    const vram = hardware.gpu?.totalVramBytes
+      ? ` • ${formatBytes(hardware.gpu.totalVramBytes)} VRAM`
+      : "";
+    return `${hardware.os} ${hardware.arch} • ${hardware.cpuModel ?? "CPU"} • ${ram} GB RAM (${avail} avail) • ${gpu}${vram}`;
+  }, [hardware]);
+
+  if (error) {
+    return (
+      <>
+        <p className="max-w-[560px] text-sm text-amber-300">{error}</p>
+        <div className="h-6" />
+        <Button
+          onClick={onSkip}
+          className="h-[54px] w-[200px] rounded-xl bg-white text-[15px] font-medium text-black hover:bg-white/90"
+        >
+          Skip for now
+        </Button>
+        <div className="h-12" />
+        <StepProgress current={2} total={4} />
+      </>
+    );
+  }
+
+  if (!models) {
+    return (
+      <>
+        <p className="max-w-[560px] text-[16px] leading-relaxed text-white/50">
+          Loading models…
+        </p>
+        <div className="h-12" />
+        <StepProgress current={2} total={4} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p className="max-w-[560px] text-[16px] leading-relaxed text-white/50 md:text-[17px]">
+        Which model will you use? We recommend one based on your system.
+      </p>
+      <p className="mt-2 max-w-[560px] text-xs leading-relaxed text-white/30">
+        {hardwareLine}
+      </p>
+      <div className="h-6" />
+      <div className="max-h-[42vh] w-full space-y-2 overflow-auto rounded-lg border border-white/10 bg-white/[0.04] p-2 text-left">
+        {models.map((m) => {
+          const total = m.files.reduce((a, f) => a + f.sizeBytes, 0);
+          const isPicked = pickedId === m.id;
+          const isRec = m.id === recommendedId;
+          const needRam = m.minRamGb;
+          const ramGb = hardware ? hardware.totalRamBytes / 1_000_000_000 : 99;
+          const blocked = needRam > 0 && ramGb < needRam;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onPick(m.id)}
+              className={`flex w-full flex-col rounded-md border px-3 py-2.5 text-left transition-colors ${
+                isPicked
+                  ? "border-white bg-white text-black"
+                  : "border-white/10 bg-transparent text-white hover:bg-white/[0.06]"
+              } ${blocked ? "opacity-60" : ""}`}
+            >
+              <span className="flex w-full items-center justify-between gap-2">
+                <span className="text-[13px] font-medium leading-tight">
+                  {m.name}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  {isRec ? (
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${isPicked ? "bg-black text-white" : "bg-white text-black"}`}
+                    >
+                      Tavsiya
+                    </span>
+                  ) : null}
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] ${isPicked ? "bg-black/10 text-black" : "bg-white/10 text-white/70"}`}
+                  >
+                    v{m.version}
+                  </span>
+                </span>
+              </span>
+              <span
+                className={`mt-1 font-mono text-[11px] ${isPicked ? "text-black/60" : "text-white/40"}`}
+              >
+                {m.id} • {m.engine} • {formatBytes(total)} •{" "}
+                {m.languages.length} langs • {m.license}
+              </span>
+              <span
+                className={`mt-0.5 text-[11px] ${isPicked ? "text-black/50" : "text-white/30"}`}
+              >
+                RAM {m.minRamGb}→{m.recommendedRamGb} GB
+                {m.minVramGb > 0
+                  ? ` • VRAM ${m.minVramGb}→${m.recommendedVramGb} GB`
+                  : ""}{" "}
+                {blocked ? "• Not enough RAM" : ""}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-2 max-w-[560px] text-xs text-white/25">
+        You can change or download later in Settings → Local. Parakeet 25 langs
+        is default for most PCs.
+      </p>
+      <div className="mt-6 flex w-full justify-center gap-3">
+        <Button
+          onClick={onContinue}
+          disabled={!pickedId}
+          className="h-[54px] w-[200px] rounded-xl bg-white text-[15px] font-medium text-black hover:bg-white/90 disabled:opacity-40"
+        >
+          Continue
+        </Button>
+      </div>
+      <button
+        type="button"
+        onClick={onSkip}
+        className="mt-3 text-xs text-white/40 hover:text-white/70"
+      >
+        Skip — decide later in Settings
+      </button>
+      <div className="h-12" />
+      <StepProgress current={2} total={4} />
+    </>
+  );
+}
+
+function StepProgress({
+  current,
+  total = 3,
+}: {
+  current: number;
+  total?: number;
+}) {
+  const steps = total === 4 ? [0, 1, 2, 3] : [0, 1, 2];
+  const last = steps.length - 1;
   return (
     <div className="flex items-center gap-0">
-      {[0, 1, 2].map((i) => (
+      {steps.map((i) => (
         <div key={i} className="flex items-center">
           <div
             className={`h-2.5 w-2.5 rounded-full transition-colors ${
@@ -253,11 +515,9 @@ function StepProgress({ current }: { current: number }) {
                   : "bg-white/15"
             }`}
           />
-          {i < 2 ? (
+          {i < last ? (
             <div
-              className={`h-px w-[72px] transition-colors md:w-[96px] ${
-                i < current ? "bg-white/30" : "bg-white/10"
-              }`}
+              className={`h-px w-[54px] transition-colors md:w-[72px] ${i < current ? "bg-white/30" : "bg-white/10"}`}
             />
           ) : null}
         </div>
