@@ -1,6 +1,6 @@
 # Privacy Policy — Algorith Voice (MVP)
 
-**Local-first.** Core dictation with the local model runs fully offline: audio never leaves your device, no account required for local mode.
+**Local-first.** Core dictation with the 6 on-device `sherpa-onnx` models (`parakeet-tdt-0.6b-v3`, `whisper-*`, `qwen3-asr-1.7b`, `distil-large-v3.5`) runs fully offline: audio never leaves your device, no account required for local mode. Models are fetched once from `https://huggingface.co/algorithco/*` over HTTPS and re-verified by SHA-256 before activation; `Settings → Local` shows license/attribution per model (CC-BY-4.0/MIT/Apache-2.0) and hardware/disk gates.
 
 **Cloud (opt-in only).** Cloud transcription (`Voxtral Realtime` primary, OpenRouter fallback) sends audio to our backend which proxies to the provider. Metering records minutes/requests — never raw audio — unless you explicitly enable audio-history storage (R2, off by default, 30-day auto-delete).
 
