@@ -282,4 +282,93 @@ mod tests {
             Compatibility::Compatible | Compatibility::Recommended
         ));
     }
+
+    #[test]
+    fn all_six_models_have_expected_ram_tiers() {
+        let manifest = default_manifest().expect("manifest");
+        validate_manifest(&manifest).expect("valid");
+        let hw = hardware(); // 16 GB
+        for model in &manifest.models {
+            let report = evaluate(&input(&hw, model));
+            assert!(
+                matches!(
+                    report.level,
+                    Compatibility::Compatible
+                        | Compatibility::Recommended
+                        | Compatibility::BarelyCompatible
+                ),
+                "{} should be at least barely compatible on 16GB, got {:?}: {}",
+                model.id,
+                report.level,
+                report.reasons.join("; ")
+            );
+        }
+        // Qwen and whisper-large-v3 need 8 GB min; 2GB machine must reject them, but whisper-small (2GB) stays barely/compatible
+        let mut low_hw = hardware();
+        low_hw.total_ram_bytes = 2 * 1024 * 1024 * 1024;
+        let small = manifest
+            .models
+            .iter()
+            .find(|m| m.id == "whisper-small")
+            .unwrap();
+        let qwen = manifest
+            .models
+            .iter()
+            .find(|m| m.id == "qwen3-asr-1.7b")
+            .unwrap();
+        let large = manifest
+            .models
+            .iter()
+            .find(|m| m.id == "whisper-large-v3")
+            .unwrap();
+        assert_ne!(
+            evaluate(&input(&low_hw, small)).level,
+            Compatibility::Unsupported,
+            "whisper-small 2GB min should not be unsupported on 2GB"
+        );
+        assert_eq!(
+            evaluate(&input(&low_hw, qwen)).level,
+            Compatibility::Unsupported,
+            "qwen 8GB min must be unsupported on 2GB"
+        );
+        assert_eq!(
+            evaluate(&input(&low_hw, large)).level,
+            Compatibility::Unsupported,
+            "whisper-large-v3 8GB min must be unsupported on 2GB"
+        );
+    }
+
+    #[test]
+    fn all_six_models_report_platform_and_files() {
+        let manifest = default_manifest().expect("manifest");
+        for m in &manifest.models {
+            assert!(m.supports_current_platform(), "{}", m.id);
+            assert!(!m.files.is_empty(), "{}", m.id);
+            assert!(m.languages.len() >= 1, "{}", m.id);
+        }
+        // Distil is English-only, parakeet covers 25 EU langs
+        let distil = manifest
+            .models
+            .iter()
+            .find(|m| m.id == "distil-large-v3.5")
+            .unwrap();
+        assert_eq!(distil.languages, vec!["en"]);
+        let parakeet = manifest
+            .models
+            .iter()
+            .find(|m| m.id == "parakeet-tdt-0.6b-v3")
+            .unwrap();
+        assert_eq!(parakeet.languages.len(), 25);
+        assert!(parakeet.files.iter().any(|f| f.filename == "tokens.txt"));
+        let qwen = manifest
+            .models
+            .iter()
+            .find(|m| m.id == "qwen3-asr-1.7b")
+            .unwrap();
+        assert_eq!(qwen.files.len(), 6);
+        assert!(qwen
+            .files
+            .iter()
+            .any(|f| f.filename == "tokenizer/vocab.json"));
+    }
 }

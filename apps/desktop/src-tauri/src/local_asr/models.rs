@@ -705,4 +705,59 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    #[test]
+    fn all_six_models_status_and_nested_tokenizer() {
+        let base = test_dir("six-models");
+        let m = manifest();
+        assert_eq!(m.models.len(), 6, "catalog must have 6 models");
+        for model in &m.models {
+            let info = status_info(&base, model, false).expect("status");
+            assert_eq!(info.status, ModelStatus::NotDownloaded, "{}", model.id);
+            assert_eq!(info.total_bytes, model.known_total_bytes(), "{}", model.id);
+        }
+        // Qwen nested tokenizer: partial .part under tokenizer/ must be counted
+        let qwen = m.models.iter().find(|x| x.id == "qwen3-asr-1.7b").unwrap();
+        let dir = model_dir(&base, &qwen.id).expect("dir");
+        std::fs::create_dir_all(dir.join("tokenizer")).expect("tokdir");
+        std::fs::write(dir.join("tokenizer/vocab.json.part"), vec![9u8; 2048]).expect("part");
+        let info = status_info(&base, qwen, false).expect("status");
+        assert_eq!(info.downloaded_bytes, 2048, "nested tokenizer part counted");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn six_models_have_distinct_totals_and_ids() {
+        let m = manifest();
+        let ids: Vec<&str> = m.models.iter().map(|x| x.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "parakeet-tdt-0.6b-v3",
+                "whisper-small",
+                "whisper-large-v3-turbo",
+                "whisper-large-v3",
+                "qwen3-asr-1.7b",
+                "distil-large-v3.5"
+            ]
+        );
+        // Totals must differ (except whisper tokens share 816k but onnx differ)
+        let totals: Vec<u64> = m.models.iter().map(|x| x.known_total_bytes()).collect();
+        assert!(totals.iter().all(|&t| t > 0));
+        // Parakeet ~670 MB, Qwen ~2.4 GB, small ~375 MB
+        let parakeet = m
+            .models
+            .iter()
+            .find(|x| x.id == "parakeet-tdt-0.6b-v3")
+            .unwrap();
+        assert_eq!(
+            parakeet.known_total_bytes(),
+            652184281 + 11845275 + 6355277 + 93939
+        );
+        let qwen = m.models.iter().find(|x| x.id == "qwen3-asr-1.7b").unwrap();
+        assert_eq!(
+            qwen.known_total_bytes(),
+            48080441 + 314222162 + 2037458645 + 2776833 + 1671853 + 12487
+        );
+    }
 }
