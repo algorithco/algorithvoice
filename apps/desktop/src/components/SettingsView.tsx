@@ -339,7 +339,7 @@ export function SettingsView({
       </section>
 
       <p className="mt-8 text-xs text-gray-500">
-        Algorith Voice v0.3.0 • Pure black & white • No fake analytics
+        Algorith Voice v0.4.0 • Pure black & white • No fake analytics
       </p>
     </div>
   );
