@@ -17,7 +17,8 @@ import {
   saveOnboarded,
   savePrefs,
 } from "./lib/prefs.js";
-import { type SessionInfo, sessionStatus } from "./lib/session.js";
+import { ensureFloatingPill } from "./lib/ptt.js";
+import { isTauri, type SessionInfo, sessionStatus } from "./lib/session.js";
 
 type View = "dashboard" | "dictate" | "history" | "settings";
 
@@ -46,12 +47,38 @@ export default function App() {
       setOnboarded(o);
       setReady(true);
     });
+    // Session must never block splash forever — 3s fallback to logged-out
+    let settled = false;
     void sessionStatus()
-      .then(setSession)
-      .catch(() => setSession({ loggedIn: false }));
+      .then((s) => {
+        settled = true;
+        setSession(s);
+      })
+      .catch(() => {
+        settled = true;
+        setSession({ loggedIn: false });
+      });
+    const fallback = window.setTimeout(() => {
+      if (!settled) setSession({ loggedIn: false });
+    }, 3000);
     const t = setTimeout(() => setSplashDone(true), 3800);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(fallback);
+    };
   }, []);
+
+  // Auto-show floating pill once main app is ready (not in pill/settings windows)
+  useEffect(() => {
+    if (isFloatingPill || isSettingsWindow) return;
+    if (!ready || !splashDone || !onboarded || !session?.loggedIn) return;
+    if (!isTauri()) return;
+    // Small delay lets main window finish paint before spawning pill
+    const id = window.setTimeout(() => {
+      void ensureFloatingPill().catch(() => {});
+    }, 650);
+    return () => clearTimeout(id);
+  }, [ready, splashDone, onboarded, session, isFloatingPill, isSettingsWindow]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", prefs.theme === "dark");
