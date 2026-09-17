@@ -3,7 +3,7 @@ import type {
   LocalModel,
   ModelStatusInfo,
 } from "@algorith-voice/shared-types";
-import { Button } from "@algorith-voice/ui";
+import { Button, Input } from "@algorith-voice/ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   cancelDownload,
@@ -105,6 +105,8 @@ export function ModelManager({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [langFilter, setLangFilter] = useState("all");
 
   const refresh = useCallback(async () => {
     if (!isTauri()) return;
@@ -294,6 +296,24 @@ export function ModelManager({
     return <p className="text-sm text-gray-500">Loading model catalog…</p>;
   }
 
+  const allLanguages = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of models) for (const l of m.languages) s.add(l);
+    return ["all", ...Array.from(s).sort()];
+  }, [models]);
+
+  const filteredModels = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return models.filter((m) => {
+      if (langFilter !== "all" && !m.languages.includes(langFilter))
+        return false;
+      if (!q) return true;
+      const hay =
+        `${m.id} ${m.name} ${m.engine} ${m.quantization} ${m.languages.join(" ")} ${m.license}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [models, query, langFilter]);
+
   return (
     <div className="flex flex-col gap-6">
       {/* Hardware + active status */}
@@ -334,241 +354,275 @@ export function ModelManager({
         </div>
       ) : null}
 
-      <div className="grid gap-4">
-        {models.map((m) => {
-          const status = statusMap[m.id];
-          const progress = progressMap[m.id];
-          const isActive = activeId === m.id;
-          const total = totalBytesOf(m);
-          const compatWarning =
-            hardware &&
-            m.minRamGb > 0 &&
-            hardware.totalRamBytes < m.minRamGb * 1_000_000_000
-              ? `Needs ${m.minRamGb} GB RAM — this machine has ${(hardware.totalRamBytes / 1_000_000_000).toFixed(1)} GB`
-              : hardware &&
-                  m.minVramGb > 0 &&
-                  (hardware.gpu?.totalVramBytes ?? 0) <
-                    m.minVramGb * 1_000_000_000
-                ? `Needs ${m.minVramGb} GB VRAM — no sufficient GPU detected`
-                : null;
-
-          const pct =
-            status?.status === "downloading" && progress
-              ? progress.totalBytes > 0
-                ? Math.round(
-                    (progress.downloadedBytes / progress.totalBytes) * 100,
-                  )
-                : null
-              : status?.status === "downloading"
-                ? total > 0
-                  ? Math.round((status.downloadedBytes / total) * 100)
-                  : null
-                : null;
-
-          const busy = busyId === m.id;
-
-          return (
-            <div
-              key={m.id}
-              className={`rounded-xl border p-5 transition-colors ${isActive ? "border-black bg-white dark:border-white dark:bg-black" : "border-gray-200 bg-white dark:border-gray-800 dark:bg-black"}`}
+      {/* Catalog filter for 6-model catalog */}
+      <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-black">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Input
+            placeholder="Search 6 models (id, name, language)…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="sm:max-w-[320px]"
+          />
+          <label className="flex items-center gap-2 text-xs text-gray-500">
+            Language
+            <select
+              value={langFilter}
+              onChange={(e) => setLangFilter(e.target.value)}
+              className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-black"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold text-black dark:text-white">
-                      {m.name}
-                    </h3>
-                    <span className="rounded bg-black px-2 py-0.5 text-xs font-mono text-white dark:bg-white dark:text-black">
-                      v{m.version}
-                    </span>
-                    {isActive ? (
-                      <span className="rounded-full bg-black px-2 py-0.5 text-xs text-white dark:bg-white dark:text-black">
-                        Active
+              {allLanguages.map((l) => (
+                <option key={l} value={l}>
+                  {l === "all" ? "All languages" : l}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <p className="text-xs text-gray-500">
+          Showing {filteredModels.length} of {models.length} models • Parakeet
+          25 langs • Whisper family 99 langs • Qwen 5 langs • Distil EN-only
+        </p>
+      </div>
+
+      <div className="grid gap-4">
+        {filteredModels.length === 0 ? (
+          <p className="text-sm text-gray-500">No models match your filter.</p>
+        ) : (
+          filteredModels.map((m) => {
+            const status = statusMap[m.id];
+            const progress = progressMap[m.id];
+            const isActive = activeId === m.id;
+            const total = totalBytesOf(m);
+            const compatWarning =
+              hardware &&
+              m.minRamGb > 0 &&
+              hardware.totalRamBytes < m.minRamGb * 1_000_000_000
+                ? `Needs ${m.minRamGb} GB RAM — this machine has ${(hardware.totalRamBytes / 1_000_000_000).toFixed(1)} GB`
+                : hardware &&
+                    m.minVramGb > 0 &&
+                    (hardware.gpu?.totalVramBytes ?? 0) <
+                      m.minVramGb * 1_000_000_000
+                  ? `Needs ${m.minVramGb} GB VRAM — no sufficient GPU detected`
+                  : null;
+
+            const pct =
+              status?.status === "downloading" && progress
+                ? progress.totalBytes > 0
+                  ? Math.round(
+                      (progress.downloadedBytes / progress.totalBytes) * 100,
+                    )
+                  : null
+                : status?.status === "downloading"
+                  ? total > 0
+                    ? Math.round((status.downloadedBytes / total) * 100)
+                    : null
+                  : null;
+
+            const busy = busyId === m.id;
+
+            return (
+              <div
+                key={m.id}
+                className={`rounded-xl border p-5 transition-colors ${isActive ? "border-black bg-white dark:border-white dark:bg-black" : "border-gray-200 bg-white dark:border-gray-800 dark:bg-black"}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-semibold text-black dark:text-white">
+                        {m.name}
+                      </h3>
+                      <span className="rounded bg-black px-2 py-0.5 text-xs font-mono text-white dark:bg-white dark:text-black">
+                        v{m.version}
                       </span>
-                    ) : null}
+                      {isActive ? (
+                        <span className="rounded-full bg-black px-2 py-0.5 text-xs text-white dark:bg-white dark:text-black">
+                          Active
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 font-mono text-xs text-gray-500">
+                      {m.id} • {m.engine} • {m.quantization} •{" "}
+                      {m.languages.length} languages
+                    </p>
                   </div>
-                  <p className="mt-1 font-mono text-xs text-gray-500">
-                    {m.id} • {m.engine} • {m.quantization} •{" "}
-                    {m.languages.length} languages
-                  </p>
-                </div>
-                <span
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${status ? statusTone(status.status) : "bg-gray-100 text-gray-500"}`}
-                >
-                  {status ? statusLabel(status.status) : "…"}
-                </span>
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
-                <span>
-                  {formatBytes(total)} • {m.files.length} files
-                </span>
-                <span>• {m.license}</span>
-                <span>
-                  • RAM {m.minRamGb}→{m.recommendedRamGb} GB
-                </span>
-                {m.minVramGb > 0 ? (
-                  <span>
-                    • VRAM {m.minVramGb}→{m.recommendedVramGb} GB
+                  <span
+                    className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${status ? statusTone(status.status) : "bg-gray-100 text-gray-500"}`}
+                  >
+                    {status ? statusLabel(status.status) : "…"}
                   </span>
-                ) : null}
-              </div>
-
-              {/* languages preview */}
-              <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-gray-500">
-                {m.languages.slice(0, 20).join(", ")}
-                {m.languages.length > 20
-                  ? ` +${m.languages.length - 20} more`
-                  : ""}
-              </p>
-
-              <p className="mt-2 text-xs italic text-gray-500">
-                {m.attribution}
-              </p>
-
-              {compatWarning ? (
-                <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                  {compatWarning}
-                </p>
-              ) : null}
-
-              {status?.status === "error" && status.errorMessage ? (
-                <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
-                  {status.errorCode ? `${status.errorCode}: ` : ""}
-                  {status.errorMessage}
-                </p>
-              ) : null}
-
-              {/* Progress */}
-              {status?.status === "downloading" ? (
-                <div className="mt-4">
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
-                    <div
-                      className="h-full bg-black transition-all dark:bg-white"
-                      style={{ width: pct != null ? `${pct}%` : "12%" }}
-                    />
-                  </div>
-                  <div className="mt-2 flex justify-between text-xs text-gray-500">
-                    <span>
-                      {progress
-                        ? formatBytes(progress.downloadedBytes)
-                        : status
-                          ? formatBytes(status.downloadedBytes)
-                          : "—"}{" "}
-                      /{" "}
-                      {progress?.totalBytes
-                        ? formatBytes(progress.totalBytes)
-                        : formatBytes(total)}{" "}
-                      {pct != null ? `• ${pct}%` : "• —"}
-                    </span>
-                    <span>
-                      {progress
-                        ? `${formatSpeed(progress.bytesPerSecond)} • ETA ${formatEta(progress.etaSeconds)}`
-                        : "starting…"}
-                    </span>
-                  </div>
                 </div>
-              ) : null}
 
-              {/* Actions */}
-              <div className="mt-4 flex flex-wrap gap-2">
-                {(!status || status.status === "not-downloaded") && (
-                  <Button
-                    size="sm"
-                    onClick={() => void handleDownload(m.id)}
-                    disabled={busy}
-                  >
-                    {busy ? "Starting…" : `Download • ${formatBytes(total)}`}
-                  </Button>
-                )}
-                {status?.status === "downloading" && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => void handleCancel(m.id)}
-                    disabled={busy}
-                  >
-                    Cancel
-                  </Button>
-                )}
-                {status?.status === "ready" && (
-                  <>
-                    <Button
-                      size="sm"
-                      variant={isActive ? "secondary" : "primary"}
-                      onClick={() => void handleSelect(m.id)}
-                      disabled={busy}
-                    >
-                      {isActive ? "Selected" : "Use this model"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void handleVerify(m.id)}
-                      disabled={busy}
-                    >
-                      Verify
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void handleDelete(m.id)}
-                      disabled={busy}
-                    >
-                      Delete
-                    </Button>
-                  </>
-                )}
-                {status?.status === "error" && (
-                  <>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
+                  <span>
+                    {formatBytes(total)} • {m.files.length} files
+                  </span>
+                  <span>• {m.license}</span>
+                  <span>
+                    • RAM {m.minRamGb}→{m.recommendedRamGb} GB
+                  </span>
+                  {m.minVramGb > 0 ? (
+                    <span>
+                      • VRAM {m.minVramGb}→{m.recommendedVramGb} GB
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* languages preview */}
+                <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-gray-500">
+                  {m.languages.slice(0, 20).join(", ")}
+                  {m.languages.length > 20
+                    ? ` +${m.languages.length - 20} more`
+                    : ""}
+                </p>
+
+                <p className="mt-2 text-xs italic text-gray-500">
+                  {m.attribution}
+                </p>
+
+                {compatWarning ? (
+                  <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                    {compatWarning}
+                  </p>
+                ) : null}
+
+                {status?.status === "error" && status.errorMessage ? (
+                  <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
+                    {status.errorCode ? `${status.errorCode}: ` : ""}
+                    {status.errorMessage}
+                  </p>
+                ) : null}
+
+                {/* Progress */}
+                {status?.status === "downloading" ? (
+                  <div className="mt-4">
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                      <div
+                        className="h-full bg-black transition-all dark:bg-white"
+                        style={{ width: pct != null ? `${pct}%` : "12%" }}
+                      />
+                    </div>
+                    <div className="mt-2 flex justify-between text-xs text-gray-500">
+                      <span>
+                        {progress
+                          ? formatBytes(progress.downloadedBytes)
+                          : status
+                            ? formatBytes(status.downloadedBytes)
+                            : "—"}{" "}
+                        /{" "}
+                        {progress?.totalBytes
+                          ? formatBytes(progress.totalBytes)
+                          : formatBytes(total)}{" "}
+                        {pct != null ? `• ${pct}%` : "• —"}
+                      </span>
+                      <span>
+                        {progress
+                          ? `${formatSpeed(progress.bytesPerSecond)} • ETA ${formatEta(progress.etaSeconds)}`
+                          : "starting…"}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Actions */}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {(!status || status.status === "not-downloaded") && (
                     <Button
                       size="sm"
                       onClick={() => void handleDownload(m.id)}
                       disabled={busy}
                     >
-                      Retry download
+                      {busy ? "Starting…" : `Download • ${formatBytes(total)}`}
                     </Button>
+                  )}
+                  {status?.status === "downloading" && (
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={() => void handleVerify(m.id)}
+                      onClick={() => void handleCancel(m.id)}
                       disabled={busy}
                     >
-                      Verify
+                      Cancel
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void handleDelete(m.id)}
-                      disabled={busy}
-                    >
-                      Delete
-                    </Button>
-                  </>
-                )}
-                {status?.status === "verifying" && (
-                  <span className="inline-flex items-center rounded-full border border-gray-200 px-3 py-2 text-xs dark:border-gray-700">
-                    Verifying…
-                  </span>
-                )}
-              </div>
+                  )}
+                  {status?.status === "ready" && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant={isActive ? "secondary" : "primary"}
+                        onClick={() => void handleSelect(m.id)}
+                        disabled={busy}
+                      >
+                        {isActive ? "Selected" : "Use this model"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void handleVerify(m.id)}
+                        disabled={busy}
+                      >
+                        Verify
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void handleDelete(m.id)}
+                        disabled={busy}
+                      >
+                        Delete
+                      </Button>
+                    </>
+                  )}
+                  {status?.status === "error" && (
+                    <>
+                      <Button
+                        size="sm"
+                        onClick={() => void handleDownload(m.id)}
+                        disabled={busy}
+                      >
+                        Retry download
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void handleVerify(m.id)}
+                        disabled={busy}
+                      >
+                        Verify
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void handleDelete(m.id)}
+                        disabled={busy}
+                      >
+                        Delete
+                      </Button>
+                    </>
+                  )}
+                  {status?.status === "verifying" && (
+                    <span className="inline-flex items-center rounded-full border border-gray-200 px-3 py-2 text-xs dark:border-gray-700">
+                      Verifying…
+                    </span>
+                  )}
+                </div>
 
-              {/* File list (collapsed) */}
-              <details className="mt-4">
-                <summary className="cursor-pointer text-xs text-gray-500">
-                  Files ({m.files.length})
-                </summary>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs font-mono text-gray-500">
-                  {m.files.map((f) => (
-                    <li key={f.filename}>
-                      {f.filename} • {formatBytes(f.sizeBytes)}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </div>
-          );
-        })}
+                {/* File list (collapsed) */}
+                <details className="mt-4">
+                  <summary className="cursor-pointer text-xs text-gray-500">
+                    Files ({m.files.length})
+                  </summary>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs font-mono text-gray-500">
+                    {m.files.map((f) => (
+                      <li key={f.filename}>
+                        {f.filename} • {formatBytes(f.sizeBytes)}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </div>
+            );
+          })
+        )}
       </div>
 
       <p className="text-xs text-gray-500">

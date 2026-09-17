@@ -389,6 +389,62 @@ mod tests {
             .find(|m| m.id == "parakeet-tdt-0.6b-v3")
             .expect("parakeet entry present");
         assert_eq!(parakeet.files.len(), 4);
+        // All 6 catalog entries must be present with real file lists (Phase 5)
+        let expected: &[(&str, usize)] = &[
+            ("parakeet-tdt-0.6b-v3", 4),
+            ("whisper-small", 3),
+            ("whisper-large-v3-turbo", 3),
+            ("whisper-large-v3", 3),
+            ("qwen3-asr-1.7b", 6),
+            ("distil-large-v3.5", 3),
+        ];
+        for (id, files) in expected {
+            let m = manifest
+                .models
+                .iter()
+                .find(|x| &x.id == id)
+                .unwrap_or_else(|| panic!("{id} present"));
+            assert_eq!(m.files.len(), *files, "{id} file count");
+            assert!(m.known_total_bytes() > 0, "{id} must have known size");
+            for f in &m.files {
+                assert!(f.size_bytes > 0, "{}:{} size", id, f.filename);
+                assert!(
+                    f.sha256.len() == 64
+                        && f.sha256
+                            != "0000000000000000000000000000000000000000000000000000000000000000",
+                    "{}:{} sha",
+                    id,
+                    f.filename
+                );
+            }
+        }
+        // Spot-check nested tokenizer layout and total sizes
+        let qwen = manifest
+            .models
+            .iter()
+            .find(|m| m.id == "qwen3-asr-1.7b")
+            .unwrap();
+        assert!(qwen
+            .files
+            .iter()
+            .any(|f| f.filename == "tokenizer/vocab.json"));
+        assert!(qwen
+            .files
+            .iter()
+            .any(|f| f.filename == "tokenizer/merges.txt"));
+        assert_eq!(
+            qwen.known_total_bytes(),
+            48080441 + 314222162 + 2037458645 + 2776833 + 1671853 + 12487
+        );
+        let whisper_small = manifest
+            .models
+            .iter()
+            .find(|m| m.id == "whisper-small")
+            .unwrap();
+        assert_eq!(
+            whisper_small.known_total_bytes(),
+            112442483 + 262226114 + 816730
+        );
     }
 
     #[test]
