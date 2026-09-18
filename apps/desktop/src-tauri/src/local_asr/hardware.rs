@@ -73,6 +73,13 @@ pub fn detect() -> HardwareInfo {
     }
 }
 
+/// Cheap NVIDIA presence probe for engine load decisions (CUDA attempt vs
+/// straight CPU). Runs only the NVML probe — no sysinfo scan — and never
+/// fails: any hiccup means "no GPU".
+pub fn has_nvidia_gpu() -> bool {
+    detect_nvidia_gpu().is_some()
+}
+
 /// Probe NVIDIA GPUs through a runtime-loaded NVML. Returns `None` when the
 /// library, any symbol, or any call is unavailable — callers treat that as
 /// "no discrete GPU", never as failure.

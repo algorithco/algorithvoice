@@ -31,6 +31,10 @@ export interface WorkerStatus {
   lifecycle: WorkerLifecycle;
   modelId?: string | null;
   failure?: string | null;
+  /** Execution provider of the loaded engine ("cpu"/"cuda"), if any. */
+  provider?: string | null;
+  /** Effective language of the loaded engine (null = auto-detect), if any. */
+  language?: string | null;
 }
 
 export interface HardwareInfo {

@@ -52,10 +52,26 @@ impl Transcript {
 /// lifecycle manager below provides the async shell with timeouts.
 pub trait LocalTranscriber: Send + Sync {
     fn model_id(&self) -> &str;
-    /// Decode 16 kHz mono samples. Blocking. `language` is recorded as
-    /// metadata; v1 engines all auto-detect (whisper loads with an empty
-    /// language for auto mode — per-language loads are future work).
+    /// Decode 16 kHz mono samples. Blocking. `language` is BCP-47-ish or
+    /// `"auto"`; engines that select a language at load time must have been
+    /// (re)built for it by the caller (see `supports_language_selection`).
     fn transcribe(&self, samples: &[f32], language: &str) -> Result<Transcript, AppError>;
+    /// Effective language baked into this engine (`None` = auto-detect).
+    /// The worker snapshots it at load for lazy language switching.
+    fn language(&self) -> Option<&str> {
+        None
+    }
+    /// True when the engine honors per-request languages by rebuilding
+    /// (Whisper bakes `language` into the recognizer at creation).
+    /// Transducer/Qwen3-style multilingual engines return false: one load
+    /// serves every language, so callers must not reload on language change.
+    fn supports_language_selection(&self) -> bool {
+        false
+    }
+    /// Execution provider the engine actually runs on (`"cpu"`, `"cuda"`).
+    fn provider(&self) -> &str {
+        "cpu"
+    }
 }
 
 /// Which Sherpa model family a manifest entry maps to, derived from its
@@ -165,6 +181,12 @@ fn missing_part(model_id: &str, what: &str) -> AppError {
 pub struct SherpaTranscriber {
     model_id: String,
     recognizer: sherpa_onnx::OfflineRecognizer,
+    /// Effective language baked into the recognizer (`None` = auto-detect).
+    language: Option<String>,
+    /// True only for Whisper: the only family that bakes a language in.
+    selects_language: bool,
+    /// Provider the recognizer actually runs on (`"cpu"` or `"cuda"`).
+    provider: String,
 }
 
 impl std::fmt::Debug for SherpaTranscriber {
@@ -180,8 +202,34 @@ impl std::fmt::Debug for SherpaTranscriber {
 impl SherpaTranscriber {
     /// Load and validate a model directory. Blocking for seconds (hundreds
     /// of MB of weights) — callers must offload (see `TranscriptionWorker`).
-    pub fn load(model: &LocalModel, dir: &Path) -> Result<Self, AppError> {
+    ///
+    /// `language` is BCP-47-ish (`"uz"`, `"en"`) or `"auto"`/empty. Whisper
+    /// bakes it into the recognizer at creation: a non-auto request for an
+    /// unsupported language is refused loudly, never silently auto-detected.
+    /// Transducer/Qwen3 engines are multilingual per load, so the language
+    /// is metadata-only for them.
+    pub fn load(model: &LocalModel, dir: &Path, language: &str) -> Result<Self, AppError> {
         let family = resolve_sherpa_family(model)?;
+        let selects_language = matches!(family, SherpaFamily::Whisper { .. });
+        let want = normalize_language(language);
+        // Cloned, not moved: `want` below becomes the recognizer's language
+        // verbatim (`Some("")` = auto-detect, exactly the old behavior).
+        let want_opt = if want.is_empty() {
+            None
+        } else {
+            Some(want.clone())
+        };
+        if let (Some(lang), SherpaFamily::Whisper { .. }) = (want_opt.as_deref(), &family) {
+            if !model.languages.is_empty()
+                && !model.languages.iter().any(|l| l.eq_ignore_ascii_case(lang))
+            {
+                return Err(AppError::model_incompatible(format!(
+                    "model {} does not support language '{lang}'; supported: {}",
+                    model.id,
+                    model.languages.join(", ")
+                )));
+            }
+        }
         // Every listed file must exist before the engine touches anything:
         // a half-present directory is a re-download case, not a decode case.
         match &family {
@@ -240,12 +288,13 @@ impl SherpaTranscriber {
                 decoder,
                 tokens,
             } => {
-                // Empty language = auto-detect (matches upstream sherpa
-                // behavior); per-language loads are future work.
+                // The language is baked into the recognizer at creation:
+                // empty = auto-detect (upstream sherpa behavior), otherwise
+                // the decoder is forced to that language (validated above).
                 config.model_config.whisper = sherpa_onnx::OfflineWhisperModelConfig {
                     encoder: Some(join(dir, &encoder)),
                     decoder: Some(join(dir, &decoder)),
-                    language: Some(String::new()),
+                    language: Some(want),
                     task: Some("transcribe".to_string()),
                     ..Default::default()
                 };
@@ -267,18 +316,47 @@ impl SherpaTranscriber {
             }
         }
         config.model_config.num_threads = default_threads();
-        config.model_config.provider = Some("cpu".to_string());
         config.model_config.debug = false;
-        let recognizer = sherpa_onnx::OfflineRecognizer::create(&config).ok_or_else(|| {
+        // Prefer CUDA when an NVIDIA GPU is present; fall back to CPU when
+        // the linked ONNX Runtime has no CUDA execution provider (creation
+        // fails fast, before any weights load) or the GPU run fails.
+        // The effective provider is recorded and reported in status.
+        let mut provider = select_provider();
+        config.model_config.provider = Some(provider.clone());
+        let mut recognizer = sherpa_onnx::OfflineRecognizer::create(&config);
+        if recognizer.is_none() && provider != "cpu" {
+            provider = "cpu".to_string();
+            config.model_config.provider = Some(provider.clone());
+            recognizer = sherpa_onnx::OfflineRecognizer::create(&config);
+        }
+        let recognizer = recognizer.ok_or_else(|| {
             AppError::engine_init_failed(format!(
                 "sherpa could not initialise model {} (bad weights or unsupported hardware)",
                 model.id
             ))
         })?;
+        // Only Whisper bakes the language in; other families serve every
+        // language from one load. (`family` was consumed by the config
+        // match above, so the precomputed flag decides here.)
+        let effective_language = if selects_language { want_opt } else { None };
         Ok(Self {
             model_id: model.id.clone(),
             recognizer,
+            language: effective_language,
+            selects_language,
+            provider,
         })
+    }
+}
+
+/// Execution provider preference for a fresh load: CUDA when an NVIDIA GPU
+/// is detectable, CPU otherwise. Creation failure still falls back to CPU
+/// (see `load`), so a CPU-only ONNX Runtime build never breaks loading.
+fn select_provider() -> String {
+    if crate::local_asr::hardware::has_nvidia_gpu() {
+        "cuda".to_string()
+    } else {
+        "cpu".to_string()
     }
 }
 
@@ -303,7 +381,21 @@ impl LocalTranscriber for SherpaTranscriber {
         &self.model_id
     }
 
-    fn transcribe(&self, samples: &[f32], language: &str) -> Result<Transcript, AppError> {
+    fn language(&self) -> Option<&str> {
+        self.language.as_deref()
+    }
+
+    fn supports_language_selection(&self) -> bool {
+        // Only Whisper bakes a language into the recognizer; transducer and
+        // Qwen3 loads serve every language.
+        self.selects_language
+    }
+
+    fn provider(&self) -> &str {
+        &self.provider
+    }
+
+    fn transcribe(&self, samples: &[f32], _language: &str) -> Result<Transcript, AppError> {
         if samples.is_empty() {
             return Ok(Transcript::empty());
         }
@@ -315,10 +407,10 @@ impl LocalTranscriber for SherpaTranscriber {
             .ok_or_else(|| AppError::engine_init_failed("sherpa returned no result"))?;
         let text = result.text.trim().to_string();
         let duration = samples.len() as f64 / f64::from(TARGET_SAMPLE_RATE);
-        let reported_language = match language.trim() {
-            "" | "auto" => None,
-            other => Some(other.to_string()),
-        };
+        // Report the language the engine actually ran with — never echo the
+        // request: in auto mode sherpa detects per utterance and exposes no
+        // detected tag, so `None` is the honest answer.
+        let effective = self.language.clone();
         Ok(Transcript {
             segments: vec![TranscriptSegment {
                 start_secs: 0.0,
@@ -326,7 +418,7 @@ impl LocalTranscriber for SherpaTranscriber {
                 text: text.clone(),
             }],
             text,
-            language: reported_language,
+            language: effective,
         })
     }
 }
@@ -358,6 +450,10 @@ pub struct WorkerStatus {
     pub lifecycle: WorkerLifecycle,
     pub model_id: Option<String>,
     pub failure: Option<String>,
+    /// Execution provider of the loaded engine (`"cpu"`/`"cuda"`), if any.
+    pub provider: Option<String>,
+    /// Effective language of the loaded engine (`None` = auto-detect), if any.
+    pub language: Option<String>,
 }
 
 struct WorkerInner {
@@ -365,6 +461,11 @@ struct WorkerInner {
     engine: Option<std::sync::Arc<Mutex<Box<dyn LocalTranscriber>>>>,
     model_id: Option<String>,
     failure: Option<String>,
+    /// Snapshots taken at load so status/language checks never lock the
+    /// engine mutex (which a running decode holds for its whole duration).
+    loaded_provider: Option<String>,
+    loaded_language: Option<String>,
+    language_selective: bool,
 }
 
 /// Owns one loaded engine with explicit lifecycle. All methods are cheap
@@ -387,6 +488,9 @@ impl TranscriptionWorker {
                 engine: None,
                 model_id: None,
                 failure: None,
+                loaded_provider: None,
+                loaded_language: None,
+                language_selective: false,
             }),
             transcribe_timeout,
         }
@@ -398,6 +502,8 @@ impl TranscriptionWorker {
                 lifecycle: inner.lifecycle,
                 model_id: inner.model_id.clone(),
                 failure: inner.failure.clone(),
+                provider: inner.loaded_provider.clone(),
+                language: inner.loaded_language.clone(),
             },
             Err(poisoned) => {
                 // A previous holder panicked while holding the lock. Report
@@ -413,6 +519,8 @@ impl TranscriptionWorker {
                             .clone()
                             .unwrap_or_else(|| "worker state is unavailable".to_string()),
                     ),
+                    provider: inner.loaded_provider.clone(),
+                    language: inner.loaded_language.clone(),
                 }
             }
         }
@@ -430,17 +538,46 @@ impl TranscriptionWorker {
             .unwrap_or(false)
     }
 
-    /// Load a model with the production Sherpa loader. Blocking — callers
-    /// must move it off the async executor (spawn_blocking at the command
-    /// layer, as with clipboard paste).
+    /// True when the worker holds `model_id` ready but its baked-in language
+    /// differs from `want` (`None` = auto). Only ever true for selective
+    /// engines (Whisper): multilingual engines serve every language from one
+    /// load, so callers must not reload for them. Cheap lock read.
+    pub fn language_mismatch(&self, model_id: &str, want: Option<&str>) -> bool {
+        self.inner
+            .lock()
+            .map(|inner| {
+                inner.lifecycle == WorkerLifecycle::Ready
+                    && inner.model_id.as_deref() == Some(model_id)
+                    && inner.language_selective
+                    && inner.loaded_language.as_deref() != want
+            })
+            .unwrap_or(false)
+    }
+
+    /// Load a model with the production Sherpa loader (auto-detect
+    /// language). Blocking — callers must move it off the async executor
+    /// (spawn_blocking at the command layer, as with clipboard paste).
     pub fn load(
         &self,
         model: &LocalModel,
         dir: &Path,
         on_stage: impl Fn(LoadStage),
     ) -> Result<(), AppError> {
+        self.load_in(model, dir, "", on_stage)
+    }
+
+    /// Load with an explicit language (`"uz"`, `"en"`, `"auto"`/empty).
+    /// Whisper bakes it into the recognizer; other families ignore it.
+    pub fn load_in(
+        &self,
+        model: &LocalModel,
+        dir: &Path,
+        language: &str,
+        on_stage: impl Fn(LoadStage),
+    ) -> Result<(), AppError> {
         self.load_with(model, dir, on_stage, |model, dir| {
-            Ok(Box::new(SherpaTranscriber::load(model, dir)?) as Box<dyn LocalTranscriber>)
+            Ok(Box::new(SherpaTranscriber::load(model, dir, language)?)
+                as Box<dyn LocalTranscriber>)
         })
     }
 
@@ -493,6 +630,11 @@ impl TranscriptionWorker {
         on_stage(LoadStage::CreatingEngine);
         match loader(model, dir) {
             Ok(engine) => {
+                // Snapshot engine traits before the move: powers status()
+                // and lazy language switching without locking the engine.
+                let loaded_provider = engine.provider().to_owned();
+                let loaded_language = engine.language().map(str::to_owned);
+                let language_selective = engine.supports_language_selection();
                 let mut inner = self
                     .inner
                     .lock()
@@ -501,6 +643,9 @@ impl TranscriptionWorker {
                 inner.lifecycle = WorkerLifecycle::Ready;
                 inner.model_id = Some(model.id.clone());
                 inner.failure = None;
+                inner.loaded_provider = Some(loaded_provider);
+                inner.loaded_language = loaded_language;
+                inner.language_selective = language_selective;
                 on_stage(LoadStage::Ready);
                 Ok(())
             }
@@ -518,6 +663,9 @@ impl TranscriptionWorker {
             inner.model_id = None;
             inner.failure = None;
             inner.lifecycle = WorkerLifecycle::Unloaded;
+            inner.loaded_provider = None;
+            inner.loaded_language = None;
+            inner.language_selective = false;
         }
     }
 
@@ -654,6 +802,9 @@ impl TranscriptionWorker {
             inner.failure = failure;
             if lifecycle != WorkerLifecycle::Ready {
                 inner.engine = None;
+                inner.loaded_provider = None;
+                inner.loaded_language = None;
+                inner.language_selective = false;
             }
         }
     }
@@ -669,10 +820,21 @@ impl Default for TranscriptionWorker {
     }
 }
 
-fn normalize_language(language: &str) -> String {
+/// Normalize a requested language to the engine's canonical form: `""`
+/// for auto-detect, otherwise a lowercased bare ISO code (`"en-US"` →
+/// `"en"`). Shared with the PTT path so the lazy-switch check and the
+/// loader agree on what "same language" means.
+pub(crate) fn normalize_language(language: &str) -> String {
+    // Lowercased bare code: whisper language tokens and manifest codes are
+    // lowercase ISO codes, so `"EN"`, `"en-US"` and `"en"` select the same
+    // load instead of failing on casing or region suffixes.
     match language.trim() {
         "" | "auto" => String::new(),
-        other => other.to_string(),
+        other => other
+            .split(['-', '_'])
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase(),
     }
 }
 
@@ -834,6 +996,8 @@ mod tests {
     struct FakeTranscriber {
         id: String,
         behavior: Mutex<FakeBehavior>,
+        lang: Option<String>,
+        selective: bool,
     }
 
     impl FakeTranscriber {
@@ -841,6 +1005,17 @@ mod tests {
             Self {
                 id: "fake-model".to_string(),
                 behavior: Mutex::new(behavior),
+                lang: None,
+                selective: false,
+            }
+        }
+
+        fn selective(behavior: FakeBehavior, lang: Option<&str>) -> Self {
+            Self {
+                id: "fake-model".to_string(),
+                behavior: Mutex::new(behavior),
+                lang: lang.map(str::to_owned),
+                selective: true,
             }
         }
     }
@@ -850,6 +1025,13 @@ mod tests {
             &self.id
         }
 
+        fn language(&self) -> Option<&str> {
+            self.lang.as_deref()
+        }
+
+        fn supports_language_selection(&self) -> bool {
+            self.selective
+        }
         fn transcribe(&self, samples: &[f32], language: &str) -> Result<Transcript, AppError> {
             let mut behavior = self.behavior.lock().expect("fake lock");
             let language = match normalize_language(language).as_str() {
@@ -888,6 +1070,24 @@ mod tests {
             Path::new("."),
             |_| {},
             |_, _| Ok(Box::new(FakeTranscriber::new(behavior)) as Box<dyn LocalTranscriber>),
+        )
+    }
+
+    fn load_selective_fake(
+        worker: &TranscriptionWorker,
+        lang: Option<&str>,
+    ) -> Result<(), AppError> {
+        let model = parakeet_model();
+        worker.load_with(
+            &model,
+            Path::new("."),
+            |_| {},
+            |_, _| {
+                Ok(Box::new(FakeTranscriber::selective(
+                    FakeBehavior::Text("x".to_string()),
+                    lang,
+                )) as Box<dyn LocalTranscriber>)
+            },
         )
     }
 
@@ -1120,7 +1320,7 @@ mod tests {
         let dir = test_dir("missing-files");
         std::fs::create_dir_all(&dir).expect("mkdir");
         let model = parakeet_model();
-        let err = SherpaTranscriber::load(&model, &dir).expect_err("missing files fail");
+        let err = SherpaTranscriber::load(&model, &dir, "auto").expect_err("missing files fail");
         assert_eq!(err.code, "engine-init-failed");
         assert!(
             err.message.contains("encoder"),
@@ -1128,6 +1328,84 @@ mod tests {
             err.message
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn normalize_language_canonicalizes_request() {
+        assert_eq!(normalize_language(""), "");
+        assert_eq!(normalize_language("auto"), "");
+        assert_eq!(normalize_language("  auto  "), "");
+        assert_eq!(normalize_language("en"), "en");
+        assert_eq!(normalize_language("EN"), "en");
+        assert_eq!(normalize_language("en-US"), "en");
+        assert_eq!(normalize_language("uz"), "uz");
+    }
+
+    #[test]
+    fn whisper_load_refuses_unsupported_language_loudly() {
+        // Language validation runs before any file access: no weights
+        // needed, and the error names the supported set (never silent auto).
+        let manifest = default_manifest().expect("manifest");
+        let whisper = manifest
+            .models
+            .iter()
+            .find(|m| m.id == "whisper-small")
+            .expect("whisper entry");
+        let dir = test_dir("bad-language");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let err = SherpaTranscriber::load(whisper, &dir, "xx").expect_err("unsupported lang fails");
+        assert_eq!(err.code, "model-incompatible");
+        assert!(
+            err.message.contains("'xx'"),
+            "names the request: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains("whisper-small"),
+            "names the model: {}",
+            err.message
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn language_mismatch_only_fires_for_selective_engines() {
+        // Non-selective (transducer-style) engine: every language matches.
+        let worker = TranscriptionWorker::new();
+        load_fake(&worker, FakeBehavior::Text("x".to_string())).expect("load");
+        assert!(!worker.language_mismatch("parakeet-tdt-0.6b-v3", Some("en")));
+        assert!(!worker.language_mismatch("parakeet-tdt-0.6b-v3", Some("uz")));
+        assert!(!worker.language_mismatch("parakeet-tdt-0.6b-v3", None));
+        assert!(!worker.language_mismatch("other-model", Some("en")));
+
+        // Selective (whisper-style) engine baked for "en".
+        let worker = TranscriptionWorker::new();
+        load_selective_fake(&worker, Some("en")).expect("load");
+        assert!(!worker.language_mismatch("parakeet-tdt-0.6b-v3", Some("en")));
+        assert!(worker.language_mismatch("parakeet-tdt-0.6b-v3", Some("uz")));
+        assert!(worker.language_mismatch("parakeet-tdt-0.6b-v3", None));
+
+        // Selective engine in auto mode only matches auto.
+        let worker = TranscriptionWorker::new();
+        load_selective_fake(&worker, None).expect("load");
+        assert!(!worker.language_mismatch("parakeet-tdt-0.6b-v3", None));
+        assert!(worker.language_mismatch("parakeet-tdt-0.6b-v3", Some("en")));
+    }
+
+    #[test]
+    fn status_snapshots_provider_and_language() {
+        let worker = TranscriptionWorker::new();
+        let empty = worker.status();
+        assert_eq!(empty.provider, None);
+        assert_eq!(empty.language, None);
+        load_selective_fake(&worker, Some("uz")).expect("load");
+        let ready = worker.status();
+        assert_eq!(ready.provider.as_deref(), Some("cpu"));
+        assert_eq!(ready.language.as_deref(), Some("uz"));
+        worker.unload();
+        let cleared = worker.status();
+        assert_eq!(cleared.provider, None);
+        assert_eq!(cleared.language, None);
     }
 
     #[test]
