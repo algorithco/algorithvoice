@@ -567,5 +567,6 @@
       "supportedOs": ["windows", "macos", "linux"],
       "supportedArch": ["x64", "arm64"]
     }
-  ]
+  ],
+  "signature": "fb2d7b1d05c246d859b6500905c72fc1551eca8938f124abf65679f4e781246835fa47f3679abe16f20aedb3e02cdbd8b1dc8fac5260af8e429269c8d78fbe02"
 }

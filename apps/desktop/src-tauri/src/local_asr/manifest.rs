@@ -86,6 +86,77 @@ pub struct LocalModel {
 pub struct ModelManifest {
     pub manifest_version: u32,
     pub models: Vec<LocalModel>,
+    /// Hex-encoded Ed25519 signature over the canonical models JSON.
+    /// Absent in the current bundled template (rollout phase); when present
+    /// it MUST verify or downloads refuse to start (fail closed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+}
+
+/// Bundled Ed25519 public key (hex, 32 bytes) that signs releases of the
+/// model manifest. Baked in from `manifest_signing_pubkey.hex` (committed);
+/// the matching seed lives outside the repo / in the MANIFEST_SIGN_KEY_HEX
+/// CI secret and is used by `scripts/sign-manifest.py` at release time.
+/// Dedicated key, separate from the updater Minisign key.
+pub const MANIFEST_SIGNING_PUBKEY_HEX: &str = include_str!("manifest_signing_pubkey.hex");
+
+/// Canonical bytes covered by `signature`: JSON encoding of `models` only
+/// (version excluded so schema bumps don't invalidate model signatures).
+pub fn manifest_signing_bytes(manifest: &ModelManifest) -> AppResult<Vec<u8>> {
+    serde_json::to_vec(&manifest.models)
+        .map_err(|e| AppError::internal(format!("cannot encode manifest for signing: {e}")))
+}
+
+/// Verify `manifest.signature` against the bundled pubkey. Always
+/// fail-closed: a missing, malformed, or invalid signature refuses the
+/// download. (The unsigned-allowed branch below only triggers if the baked
+/// pubkey file is emptied, in which case `build.rs` already fails the build
+/// first — see `src-tauri/build.rs`.) Per-file SHA-256 still applies
+/// regardless.
+pub fn verify_manifest_signature(manifest: &ModelManifest) -> AppResult<()> {
+    match manifest.signature.as_deref() {
+        None => {
+            if MANIFEST_SIGNING_PUBKEY_HEX.is_empty() {
+                eprintln!(
+                    "algorith-voice: model manifest is unsigned (no signing pubkey baked in) — trusting bundled template; per-file SHA-256 still enforced"
+                );
+                Ok(())
+            } else {
+                Err(AppError::model_download_failed(
+                    "model manifest is missing its signature — refusing to download",
+                ))
+            }
+        }
+        Some(sig_hex) => {
+            if MANIFEST_SIGNING_PUBKEY_HEX.is_empty() {
+                return Err(AppError::model_download_failed(
+                    "model manifest is signed but no signing pubkey is baked in — refusing to download",
+                ));
+            }
+            use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+            let pub_bytes = hex::decode(MANIFEST_SIGNING_PUBKEY_HEX.trim())
+                .map_err(|_| AppError::internal("bundled manifest signing pubkey is malformed"))?;
+            let sig_bytes = hex::decode(sig_hex.trim()).map_err(|_| {
+                AppError::model_download_failed("model manifest signature is malformed")
+            })?;
+            let pub_arr: [u8; 32] = pub_bytes.try_into().map_err(|_| {
+                AppError::internal("bundled manifest signing pubkey must be 32 bytes")
+            })?;
+            let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| {
+                AppError::model_download_failed("model manifest signature must be 64 bytes")
+            })?;
+            let key = VerifyingKey::from_bytes(&pub_arr)
+                .map_err(|e| AppError::internal(format!("bad manifest signing pubkey: {e}")))?;
+            let sig = Signature::from_bytes(&sig_arr);
+            let msg = manifest_signing_bytes(manifest)?;
+            key.verify(&msg, &sig).map_err(|_| {
+                AppError::model_download_failed(
+                    "model manifest signature is invalid — refusing to download",
+                )
+            })?;
+            Ok(())
+        }
+    }
 }
 
 /// The manifest baked into the binary. Template values until configured.
@@ -353,6 +424,7 @@ mod tests {
         ModelManifest {
             manifest_version: MANIFEST_VERSION,
             models: vec![example_model()],
+            signature: None,
         }
     }
 
@@ -550,6 +622,48 @@ mod tests {
             ..example_file("other.onnx")
         });
         assert_eq!(model.known_total_bytes(), 1024);
+    }
+
+    #[test]
+    fn bundled_manifest_verifies_against_baked_pubkey() {
+        // Authoritative cross-check for the release pipeline: the committed
+        // `default_manifest.json` signature must verify with the baked
+        // pubkey. This is what proves the Python signing script's
+        // canonicalization matches the Rust verifier — if this fails after
+        // re-signing, DO NOT SHIP: fix `scripts/sign-manifest.py` first.
+        assert_eq!(MANIFEST_SIGNING_PUBKEY_HEX.trim().len(), 64);
+        let manifest = default_manifest().expect("bundled manifest parses");
+        assert!(
+            manifest.signature.as_deref().is_some_and(|s| !s.is_empty()),
+            "bundled manifest must carry a signature"
+        );
+        verify_manifest_signature(&manifest).expect("bundled signature valid");
+    }
+
+    #[test]
+    fn tampered_manifest_fails_closed() {
+        let mut manifest = default_manifest().expect("bundled manifest parses");
+        manifest.models[0].name.push_str(" (tampered)");
+        let err = verify_manifest_signature(&manifest).expect_err("must fail closed");
+        assert_eq!(err.code, "model-download-failed");
+    }
+
+    #[test]
+    fn unsigned_manifest_fails_closed_once_keyed() {
+        // With a pubkey baked in, a missing signature is a hard error —
+        // there is no longer a "rollout" mode that trusts unsigned manifests.
+        let manifest = example_manifest();
+        assert!(manifest.signature.is_none());
+        let err = verify_manifest_signature(&manifest).expect_err("must fail closed");
+        assert_eq!(err.code, "model-download-failed");
+    }
+
+    #[test]
+    fn malformed_signature_fails_closed() {
+        let mut manifest = example_manifest();
+        manifest.signature = Some("not-hex".to_string());
+        let err = verify_manifest_signature(&manifest).expect_err("must fail closed");
+        assert_eq!(err.code, "model-download-failed");
     }
 
     #[test]
