@@ -12,7 +12,8 @@
     "tauri:build": "tauri build",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run",
+    "e2e": "node --test e2e/tauri.e2e.js"
   },
   "dependencies": {
     "@algorith-voice/shared-types": "workspace:*",
@@ -50,6 +51,7 @@
     "@types/react-dom": "19.2.0",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^30.0.1",
+    "selenium-webdriver": "^4.49.0",
     "tailwindcss": "^4.1.11",
     "typescript": "catalog:",
     "vite": "^6.3.5",
