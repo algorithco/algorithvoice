@@ -45,6 +45,14 @@ impl AppError {
         Self::new("internal", msg)
     }
 
+    /// Explicit not-implemented marker. Used instead of silent fake success
+    /// for product surfaces that need business input (e.g. licensing).
+    /// NEEDS PRODUCT INPUT: replace each `not-implemented` return with real
+    /// logic once the backend contract is defined.
+    pub fn not_implemented(msg: impl Into<String>) -> Self {
+        Self::new("not-implemented", msg)
+    }
+
     // ---- Local speech recognition (model manager + inference) ----
     // Codes are stable API: the frontend branches on them, so never rename.
 
@@ -174,6 +182,7 @@ mod tests {
             ),
             (AppError::model_incompatible("x"), "model-incompatible"),
             (AppError::model_not_loaded("x"), "model-not-loaded"),
+            (AppError::not_implemented("x"), "not-implemented"),
             (AppError::engine_init_failed("x"), "engine-init-failed"),
             (AppError::inference_timeout("x"), "inference-timeout"),
             (
