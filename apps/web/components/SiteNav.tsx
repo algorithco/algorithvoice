@@ -8,15 +8,18 @@ import GooeyNav from "./GooeyNav";
 import { ShinyButton } from "./ShinyButton";
 
 // V5 nav: wordmark, links, primary CTA — now with scroll-driven floating pill + GooeyNav for nav items (not Download).
-const NAV_ITEMS = [
+const PUBLIC_ITEMS = [
   { href: "/docs", label: "Docs" },
   { href: "/languages", label: "Languages" },
   { href: "/pricing", label: "Pricing" },
-  { href: "/login", label: "Log in" },
 ] as const;
 
-export function SiteNav() {
+// Server-known session wins (no flash). Otherwise the nav self-detects via
+// GET /api/auth/me on mount — every page renders its own <SiteNav />, so the
+// check re-runs on each navigation and never goes stale (login/logout).
+export function SiteNav({ signedIn }: { signedIn?: boolean }) {
   const pathname = usePathname();
+  const [detected, setDetected] = useState<boolean | null>(null);
   const [isScrolled, setIsScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const ticking = useRef(false);
@@ -41,6 +44,28 @@ export function SiteNav() {
     };
   }, []);
 
+  useEffect(() => {
+    if (signedIn !== undefined) return;
+    let cancelled = false;
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((r) => {
+        if (!cancelled) setDetected(r.ok);
+      })
+      .catch(() => {
+        if (!cancelled) setDetected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn]);
+
+  const isAuthed = signedIn ?? detected ?? false;
+  const NAV_ITEMS = [
+    ...PUBLIC_ITEMS,
+    isAuthed
+      ? { href: "/dashboard", label: "Dashboard" }
+      : { href: "/login", label: "Log in" },
+  ];
   // Close the mobile menu on route change or Escape.
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is intentionally the only dep — re-runs to close the menu on navigation.
   useEffect(() => {

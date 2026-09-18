@@ -4,7 +4,13 @@ import { signupSchema } from "@algorith-voice/shared-types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { AuthShell, Field, Input } from "../../components/AuthShell";
+import {
+  AuthShell,
+  Field,
+  Input,
+  OAuthButtons,
+  OAuthDivider,
+} from "../../components/AuthShell";
 import { Reveal } from "../../components/Reveal";
 
 export default function RegisterPage() {
@@ -80,55 +86,61 @@ export default function RegisterPage() {
           </>
         }
       >
-        <form onSubmit={submit} className="flex flex-col gap-5">
-          <Field label="Email">
-            <Input
-              type="email"
-              autoComplete="email"
-              placeholder="you@algorithvoice.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </Field>
-          <Field label="Name (optional)">
-            <Input
-              type="text"
-              autoComplete="name"
-              placeholder="Ada Lovelace"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </Field>
-          <Field label="Password">
-            <Input
-              type="password"
-              autoComplete="new-password"
-              placeholder="At least 12 characters"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </Field>
-          <Field label="Confirm password">
-            <Input
-              type="password"
-              autoComplete="new-password"
-              placeholder="Repeat password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              required
-            />
-          </Field>
-          {err ? <p className="t-cap normal-case text-red-400">{err}</p> : null}
-          <button
-            type="submit"
-            disabled={busy}
-            className="btn btn-primary w-full"
-          >
-            {busy ? "Creating…" : "Create account"}
-          </button>
-        </form>
+        <div className="flex flex-col gap-5">
+          <OAuthButtons mode="register" />
+          <OAuthDivider text="or sign up with email" />
+          <form onSubmit={submit} className="flex flex-col gap-5">
+            <Field label="Email">
+              <Input
+                type="email"
+                autoComplete="email"
+                placeholder="you@algorithvoice.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </Field>
+            <Field label="Name (optional)">
+              <Input
+                type="text"
+                autoComplete="name"
+                placeholder="Ada Lovelace"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </Field>
+            <Field label="Password">
+              <Input
+                type="password"
+                autoComplete="new-password"
+                placeholder="At least 12 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </Field>
+            <Field label="Confirm password">
+              <Input
+                type="password"
+                autoComplete="new-password"
+                placeholder="Repeat password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                required
+              />
+            </Field>
+            {err ? (
+              <p className="t-cap normal-case text-red-400">{err}</p>
+            ) : null}
+            <button
+              type="submit"
+              disabled={busy}
+              className="btn btn-primary w-full"
+            >
+              {busy ? "Creating…" : "Create account"}
+            </button>
+          </form>
+        </div>
       </AuthShell>
     </Reveal>
   );
