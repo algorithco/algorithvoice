@@ -1,5 +1,20 @@
 import { z } from "zod";
 
+// Local dev: load .env files via Node's native loader (Node >= 20.12).
+// CI / Docker / Fly inject real env vars, which are never overridden
+// (loadEnvFile does not overwrite existing vars).
+// Backend-local .env wins; repo-root .env fills the gaps.
+try {
+  process.loadEnvFile();
+} catch {
+  // No .env in cwd (CI/prod) — env comes from the environment.
+}
+try {
+  process.loadEnvFile("../../.env");
+} catch {
+  // Optional fallback — root .env may not exist.
+}
+
 const PLACEHOLDER = /change-me|example|test|password/i;
 
 // .env files conventionally contain KEY= (empty) for unset secrets —
