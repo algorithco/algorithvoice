@@ -4,9 +4,9 @@ import {
   OAUTH_PROVIDERS,
   type OAuthProvider,
   oauthProviderLabel,
-  type SessionInfo,
   signInWithOAuth,
-} from "../lib/session.js";
+} from "../lib/session/auth.js";
+import type { SessionInfo } from "../lib/session/types.js";
 import { Loader } from "./animate-ui/icons/loader.js";
 import { LogIn } from "./animate-ui/icons/log-in.js";
 

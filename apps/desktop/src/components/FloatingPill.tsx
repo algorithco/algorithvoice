@@ -11,7 +11,8 @@ import {
   saveLastTranscript,
   transcribeAndPaste,
 } from "../lib/ptt.js";
-import { isTauri, setTrayState } from "../lib/session.js";
+import { isTauri } from "../lib/session/env.js";
+import { setTrayState } from "../lib/session/tray.js";
 import { AudioLines } from "./animate-ui/icons/audio-lines.js";
 import { Loader } from "./animate-ui/icons/loader.js";
 import type { Prefs } from "./SettingsView.js";

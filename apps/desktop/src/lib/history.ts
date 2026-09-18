@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { isTauri } from "./session.js";
+import { isTauri } from "./session/env.js";
 
 export interface HistoryEntry {
   id: string;
@@ -26,7 +26,7 @@ async function tauri<T>(
   return invoke<T>(cmd, args);
 }
 
-function safeParseHistory(raw: string | null): HistoryEntry[] {
+export function safeParseHistory(raw: string | null): HistoryEntry[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw, (k, v) => {

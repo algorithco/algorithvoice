@@ -12,7 +12,8 @@ import {
   setFloatingPillVisible,
   setGroqApiKey,
 } from "../lib/ptt.js";
-import { isTauri, setTrayState, type TrayState } from "../lib/session.js";
+import { isTauri } from "../lib/session/env.js";
+import { setTrayState, type TrayState } from "../lib/session/tray.js";
 
 // Core interaction moment: PTT simulator wired to the real tray command.
 // Phase 2 replaces the timers with cpal → VAD → STT → inject.

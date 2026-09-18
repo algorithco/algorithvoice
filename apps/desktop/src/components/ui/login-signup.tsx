@@ -13,7 +13,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { loginDemo, type SessionInfo, signInDesktop } from "@/lib/session";
+import { signInDesktop } from "@/lib/session/auth";
+import { loginDemo } from "@/lib/session/demo-account";
+import type { SessionInfo } from "@/lib/session/types";
 
 type Props = {
   onDone: (s: SessionInfo) => void;

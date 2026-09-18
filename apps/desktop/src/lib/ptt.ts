@@ -1,6 +1,6 @@
 import type { SttMode } from "@algorith-voice/shared-types";
 import { invoke } from "@tauri-apps/api/core";
-import { isTauri } from "./session.js";
+import { isTauri } from "./session/env.js";
 
 // Push-to-talk invoke helpers (additive — existing session/prefs untouched).
 
@@ -98,6 +98,12 @@ export async function pasteText(text: string): Promise<void> {
   await tauri("paste_text", { text, restoreClipboard: true });
 }
 
+// Groq key audit (P3): the key is NEVER persisted in plugin-store or
+// localStorage. Frontend only forwards it to the Rust `set_groq_api_key`
+// command, which stores it in the OS keyring (same pattern as the device
+// session). Resolution order lives in Rust: explicit arg → GROQ_API_KEY env
+// → keyring. `apiKey: null` below is intentional — cloud calls resolve the
+// key server-side in Rust, never from JS memory beyond this call.
 export async function setGroqApiKey(apiKey: string): Promise<void> {
   await tauri("set_groq_api_key", { apiKey });
 }
