@@ -102,7 +102,14 @@ export function BlurText({
     <h1
       ref={ref}
       className={className}
-      style={{ display: "flex", flexWrap: "wrap", justifyContent: "center" }}
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        justifyContent: "center",
+        minWidth: 0,
+        maxWidth: "100%",
+        overflowWrap: "anywhere",
+      }}
     >
       {elements.map((segment, index) => {
         const animateKeyframes = buildKeyframes(fromSnapshot, toSnapshots);

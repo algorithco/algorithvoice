@@ -40,7 +40,9 @@ export function Reveal({
   return (
     <div
       ref={ref}
-      className={`rv ${className}`}
+      // min-w-0: grid/flex item blowout guard — long unbroken content
+      // (code blocks) inside must scroll internally, not widen the page.
+      className={`rv min-w-0 ${className}`}
       style={{ "--rv-d": `${delay}ms` } as CSSProperties}
     >
       {children}

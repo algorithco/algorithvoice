@@ -8,7 +8,6 @@ const COLS = [
     links: [
       { href: "/download", label: "Download" },
       { href: "/pricing", label: "Pricing" },
-      { href: "/dashboard", label: "Dashboard" },
     ],
   },
   {
@@ -39,12 +38,12 @@ export function SiteFooter() {
           {COLS.map((c) => (
             <nav key={c.title} aria-label={c.title}>
               <p className="t-cap text-faint">{c.title}</p>
-              <ul className="mt-4 flex flex-col gap-3">
+              <ul className="mt-2 flex flex-col">
                 {c.links.map((l) => (
                   <li key={l.href}>
                     <Link
                       href={l.href}
-                      className="t-body text-sub transition-colors duration-150 ease-app hover:text-ink"
+                      className="t-body inline-flex min-h-[44px] items-center text-sub transition-colors duration-150 ease-app hover:text-ink"
                     >
                       {l.label}
                     </Link>
@@ -54,7 +53,7 @@ export function SiteFooter() {
             </nav>
           ))}
         </div>
-        <div className="mt-12 flex items-center justify-between border-t border-line pt-6">
+        <div className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6">
           <span className="t-body text-faint">© 2026 Algorith Voice</span>
           <span className="font-mono text-xs leading-4 font-normal text-faint">
             v1.0.0

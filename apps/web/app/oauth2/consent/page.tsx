@@ -91,7 +91,7 @@ export default async function ConsentPage({
         }
       >
         <div className="flex flex-col gap-4">
-          <p className="text-sm">
+          <p className="break-words text-sm">
             <span className="font-semibold">Algorith Voice Desktop</span> wants
             to access your account
             {user.email ? ` (${user.email})` : ""}.
@@ -101,12 +101,12 @@ export default async function ConsentPage({
             your data. Scopes: profile, email
             {/* offline_access enables stay-signed-in */}.
           </p>
-          <form action={act} className="flex gap-3">
+          <form action={act} className="flex flex-col gap-3 sm:flex-row">
             <button
               type="submit"
               name="approved"
               value="true"
-              className="rounded-md bg-black px-5 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
+              className="min-h-[44px] rounded-md bg-black px-5 py-2.5 text-sm font-medium text-white dark:bg-white dark:text-black"
             >
               Allow
             </button>
@@ -114,7 +114,7 @@ export default async function ConsentPage({
               type="submit"
               name="approved"
               value="false"
-              className="rounded-md border px-5 py-2 text-sm"
+              className="min-h-[44px] rounded-md border px-5 py-2.5 text-sm"
             >
               Deny
             </button>

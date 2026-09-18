@@ -30,7 +30,7 @@ export default async function DownloadPage() {
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
-      <main className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
+      <main className="mx-auto max-w-[1200px] px-4 py-12 sm:px-6 sm:py-24 md:px-16 md:py-32">
         <Reveal>
           <p className="t-cap text-faint">Download</p>
           <h1 className="t-h1 mt-4">Get Algorith Voice.</h1>
@@ -45,11 +45,11 @@ export default async function DownloadPage() {
             {assets.map((a) => (
               <li
                 key={a.name}
-                className="flex items-center justify-between gap-4 p-4"
+                className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
               >
                 <a
                   href={a.browser_download_url}
-                  className="font-mono text-sm leading-6 font-medium underline"
+                  className="inline-block min-w-0 py-2 font-mono text-sm leading-6 font-medium break-all underline sm:py-1"
                 >
                   {a.name}
                 </a>

@@ -49,18 +49,24 @@ function PlanCard({ plan }: { plan: (typeof PLANS)[number] }) {
       pixelScale={0.2}
       cover={plan.featured ? "var(--v5-t1)" : "var(--v5-surface)"}
       aspectRatio="auto"
-      className={`h-full rounded-lg border border-line ${shell}`}
-      style={{ minHeight: 440 }}
+      className={`h-full min-h-[380px] rounded-lg border border-line sm:min-h-[440px] ${shell}`}
       firstContent={
-        <div className="flex h-full flex-col p-8">
+        <div className="flex h-full flex-col p-6 sm:p-8">
           <p className={`t-cap ${faint}`}>{plan.name}</p>
           <p className="t-h1 mt-4">{plan.price}</p>
           <p className={`t-body mt-4 flex-1 ${faint}`}>{plan.tagline}</p>
-          <p className={`t-cap mt-8 ${faint}`}>Hover for specs →</p>
+          <p className={`t-cap mt-8 ${faint}`}>
+            <span className="hidden [@media(hover:hover)]:inline">
+              Hover for specs →
+            </span>
+            <span className="[@media(hover:hover)]:hidden">
+              Tap for specs →
+            </span>
+          </p>
         </div>
       }
       secondContent={
-        <div className="flex h-full flex-col p-8">
+        <div className="flex h-full flex-col p-6 sm:p-8">
           <p className={`t-cap ${faint}`}>{plan.name} · Specs</p>
           <ul className="mt-6 flex flex-1 flex-col gap-3">
             {plan.lines.map((l) => (
@@ -92,14 +98,14 @@ export default function PricingPage() {
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
-      <main className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
+      <main className="mx-auto max-w-[1200px] px-4 py-12 sm:px-6 sm:py-24 md:px-16 md:py-32">
         <Reveal>
           <p className="t-cap text-faint">Pricing</p>
           <h1 className="t-h1 mt-4 max-w-[24ch]">
             Start free. Upgrade when dictation becomes the way you work.
           </h1>
         </Reveal>
-        <div className="mt-12 grid gap-6 md:grid-cols-2">
+        <div className="mt-8 grid gap-4 sm:mt-12 sm:gap-6 md:grid-cols-2">
           {PLANS.map((p, i) => (
             <Reveal key={p.name} delay={i * 80} className="h-full min-w-0">
               <PlanCard plan={p} />
