@@ -15,7 +15,8 @@ use crate::local_asr::events::{
 };
 use crate::local_asr::hardware::{self, HardwareInfo};
 use crate::local_asr::manifest::{
-    default_manifest, is_configured, validate_manifest, LocalModel, ModelManifest,
+    default_manifest, is_configured, validate_manifest, verify_manifest_signature, LocalModel,
+    ModelManifest,
 };
 use crate::local_asr::models::{
     self, InstalledFile, InstalledModel, InstalledRecord, ModelStatus, ModelStatusInfo,
@@ -40,6 +41,9 @@ fn app_data_dir(app: &AppHandle) -> AppResult<PathBuf> {
 fn load_manifest() -> AppResult<ModelManifest> {
     let manifest = default_manifest()?;
     validate_manifest(&manifest)?;
+    // Fail closed on tampered manifests before trusting URLs/checksums.
+    // Per-file SHA-256 is still verified after download regardless.
+    verify_manifest_signature(&manifest)?;
     Ok(manifest)
 }
 
@@ -238,9 +242,25 @@ pub async fn download_model(
                 Ok(()) => match record_install(&done_dir, &done_model) {
                     Ok(_) => models::status_info(&done_data, &done_model, false)
                         .unwrap_or_else(|e| error_status(&done_model, &e)),
-                    Err(e) => error_status(&done_model, &e),
+                    Err(e) => {
+                        crate::logging::log_event(
+                            &app_done,
+                            "models",
+                            "download-record-failed",
+                            &e.to_string(),
+                        );
+                        error_status(&done_model, &e)
+                    }
                 },
-                Err(e) => error_status(&done_model, &e),
+                Err(e) => {
+                    crate::logging::log_event(
+                        &app_done,
+                        "models",
+                        "download-failed",
+                        &e.to_string(),
+                    );
+                    error_status(&done_model, &e)
+                }
             };
             emit_status(&app_done, &info);
         },

@@ -960,7 +960,8 @@ pub fn engine_layout(model: &LocalModel) -> Result<EngineLayout, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::local_asr::manifest::{default_manifest, validate_manifest, ModelEngine};
+    use crate::local_asr::manifest::{default_manifest, validate_manifest, ModelEngine, ModelFile};
+    use sha2::{Digest, Sha256};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn parakeet_model() -> LocalModel {
@@ -1063,11 +1064,34 @@ mod tests {
         }
     }
 
+    /// Hermetic fake model: tiny on-disk weights with matching size+sha256
+    /// so `load_with`'s integrity preflight passes without the 670MB real
+    /// bundle. Keeps the parakeet id so `is_ready_for`/`language_mismatch`
+    /// assertions hold. Temp dirs are unique per call and intentionally
+    /// left for the OS temp cleaner (files are 1 KiB each).
+    fn fake_model_on_disk(tag: &str) -> (LocalModel, PathBuf) {
+        let dir = test_dir(tag);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let mut content = format!("fake-weights-{tag}\n").into_bytes();
+        content.resize(1024, 0xA5);
+        let digest = format!("{:x}", Sha256::digest(&content));
+        std::fs::write(dir.join("fake-weights.bin"), &content).expect("write");
+        let mut model = parakeet_model();
+        model.files = vec![ModelFile {
+            filename: "fake-weights.bin".to_string(),
+            url: "https://example.invalid/fake-weights.bin".to_string(),
+            fallback_url: None,
+            sha256: digest,
+            size_bytes: content.len() as u64,
+        }];
+        (model, dir)
+    }
+
     fn load_fake(worker: &TranscriptionWorker, behavior: FakeBehavior) -> Result<(), AppError> {
-        let model = parakeet_model();
+        let (model, dir) = fake_model_on_disk("load");
         worker.load_with(
             &model,
-            Path::new("."),
+            &dir,
             |_| {},
             |_, _| Ok(Box::new(FakeTranscriber::new(behavior)) as Box<dyn LocalTranscriber>),
         )
@@ -1077,10 +1101,10 @@ mod tests {
         worker: &TranscriptionWorker,
         lang: Option<&str>,
     ) -> Result<(), AppError> {
-        let model = parakeet_model();
+        let (model, dir) = fake_model_on_disk("load-selective");
         worker.load_with(
             &model,
-            Path::new("."),
+            &dir,
             |_| {},
             |_, _| {
                 Ok(Box::new(FakeTranscriber::selective(
@@ -1203,14 +1227,14 @@ mod tests {
         // Receiver is Send but not Sync, so nothing is shared by reference).
         // entered/release pair already synchronizes both sides; no barrier
         // needed (a 2-party barrier with one waiter would deadlock).
+        let (first_model, first_dir) = fake_model_on_disk("concurrent-first");
+        let (second_model, second_dir) = fake_model_on_disk("concurrent-second");
         let handle = std::thread::spawn({
             let worker = worker.clone();
             move || {
-                let mut model = parakeet_model();
-                model.id = "fake-model".to_string();
                 worker.load_with(
-                    &model,
-                    Path::new("."),
+                    &first_model,
+                    &first_dir,
                     |_| {},
                     |_, _| {
                         let _ = entered_tx.send(());
@@ -1226,12 +1250,10 @@ mod tests {
         // Wait until the first load is inside its loader, then attempt a
         // second load: it must be refused as busy, not deadlock.
         entered_rx.recv().expect("first loader entered");
-        let mut model = parakeet_model();
-        model.id = "fake-model".to_string();
         let err = worker
             .load_with(
-                &model,
-                Path::new("."),
+                &second_model,
+                &second_dir,
                 |_| {},
                 |_, _| panic!("second loader must never run"),
             )

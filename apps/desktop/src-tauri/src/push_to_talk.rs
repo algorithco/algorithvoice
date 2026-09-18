@@ -562,64 +562,81 @@ pub fn get_foreground_info() -> AppResult<ForegroundInfo> {
 /// NOTE: `.transparent()` on macOS requires the `macos-private-api`
 /// Cargo feature on `tauri` (see Cargo.toml) — without it the method
 /// does not exist on that target and the release build fails (E0599).
+pub(crate) const PILL_SIZE: f64 = 72.0;
+pub(crate) const PILL_MARGIN_RIGHT: f64 = 24.0;
+pub(crate) const PILL_MARGIN_BOTTOM: f64 = 96.0;
+
+/// Bottom-right pill position for a monitor's logical geometry.
+/// Pure so unit tests and the WebDriver E2E suite (`apps/desktop/e2e`)
+/// assert the same numbers the builder uses.
+pub(crate) fn pill_position(
+    logical_x: f64,
+    logical_y: f64,
+    logical_w: f64,
+    logical_h: f64,
+) -> (f64, f64) {
+    (
+        logical_x + logical_w - PILL_SIZE - PILL_MARGIN_RIGHT,
+        logical_y + logical_h - PILL_SIZE - PILL_MARGIN_BOTTOM,
+    )
+}
+
 #[tauri::command]
-pub fn ensure_floating_pill(app: AppHandle) -> AppResult<()> {
+pub async fn ensure_floating_pill(app: AppHandle) -> AppResult<()> {
     if let Some(win) = app.get_webview_window(FLOATING_LABEL) {
         let _ = win.unminimize();
         win.show().map_err(|e| AppError::window(e.to_string()))?;
         return Ok(());
     }
-    let mut builder = tauri::WebviewWindowBuilder::new(
-        &app,
-        FLOATING_LABEL,
-        WebviewUrl::App("index.html".into()),
-    )
-    .title("Algorith Voice — Talk")
-    .inner_size(72.0, 72.0)
-    .min_inner_size(60.0, 60.0)
-    .max_inner_size(160.0, 160.0)
-    .resizable(false)
-    .decorations(false)
-    .transparent(true)
-    .shadow(false)
-    .always_on_top(true)
-    .visible_on_all_workspaces(true)
-    .skip_taskbar(true)
-    .focused(false)
-    .focusable(false);
-    // Explicit position: some platforms (esp. Windows, on multi-monitor /
-    // recently-rearranged setups) compute a bad default position for a
-    // frameless undecorated window and it lands off-screen even though
-    // is_visible() reports true. Pin it to the primary monitor's
-    // bottom-right corner, clear of the taskbar.
-    if let Ok(Some(monitor)) = app.primary_monitor() {
-        let scale = monitor.scale_factor();
-        let m_pos = monitor.position();
-        let m_size = monitor.size();
-        let logical_x = m_pos.x as f64 / scale;
-        let logical_y = m_pos.y as f64 / scale;
-        let logical_w = m_size.width as f64 / scale;
-        let logical_h = m_size.height as f64 / scale;
-        const PILL: f64 = 72.0;
-        const MARGIN_RIGHT: f64 = 24.0;
-        const MARGIN_BOTTOM: f64 = 96.0;
-        builder = builder.position(
-            logical_x + logical_w - PILL - MARGIN_RIGHT,
-            logical_y + logical_h - PILL - MARGIN_BOTTOM,
-        );
-    }
-    let win = builder
-        .build()
-        .map_err(|e| AppError::window(e.to_string()))?;
+    // Window creation must happen on the main thread (see window.rs);
+    // building from the command worker deadlocks the webview at about:blank.
+    let win = crate::window::build_on_main_thread(&app, |handle| {
+        let mut builder = tauri::WebviewWindowBuilder::new(
+            &handle,
+            FLOATING_LABEL,
+            WebviewUrl::App("index.html".into()),
+        )
+        .title("Algorith Voice — Talk")
+        .inner_size(72.0, 72.0)
+        .min_inner_size(60.0, 60.0)
+        .max_inner_size(160.0, 160.0)
+        .resizable(false)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .visible_on_all_workspaces(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .focusable(false);
+        // Explicit position: some platforms (esp. Windows, on multi-monitor /
+        // recently-rearranged setups) compute a bad default position for a
+        // frameless undecorated window and it lands off-screen even though
+        // is_visible() reports true. Pin it to the primary monitor's
+        // bottom-right corner, clear of the taskbar.
+        if let Ok(Some(monitor)) = handle.primary_monitor() {
+            let scale = monitor.scale_factor();
+            let m_pos = monitor.position();
+            let m_size = monitor.size();
+            let logical_x = m_pos.x as f64 / scale;
+            let logical_y = m_pos.y as f64 / scale;
+            let logical_w = m_size.width as f64 / scale;
+            let logical_h = m_size.height as f64 / scale;
+            let (x, y) = pill_position(logical_x, logical_y, logical_w, logical_h);
+            builder = builder.position(x, y);
+        }
+        builder.build()
+    })
+    .await?;
     let _ = win.show();
     Ok(())
 }
 
 #[tauri::command]
-pub fn set_floating_pill_visible(app: AppHandle, visible: bool) -> AppResult<()> {
+pub async fn set_floating_pill_visible(app: AppHandle, visible: bool) -> AppResult<()> {
     let Some(win) = app.get_webview_window(FLOATING_LABEL) else {
         if visible {
-            return ensure_floating_pill(app);
+            return ensure_floating_pill(app).await;
         }
         return Ok(());
     };
@@ -643,6 +660,17 @@ pub fn floating_pill_visible(app: AppHandle) -> bool {
 mod tests {
     use super::*;
     use base64::Engine as _;
+
+    #[test]
+    fn pill_sits_bottom_right_clear_of_taskbar() {
+        // 1920x1080 primary monitor at origin (scale 1).
+        let (x, y) = pill_position(0.0, 0.0, 1920.0, 1080.0);
+        assert_eq!((x, y), (1920.0 - 72.0 - 24.0, 1080.0 - 72.0 - 96.0));
+        assert_eq!((x, y), (1824.0, 912.0));
+        // Offset secondary monitor: position follows the monitor origin.
+        let (x2, y2) = pill_position(1920.0, 0.0, 1920.0, 1080.0);
+        assert_eq!((x2, y2), (3744.0, 912.0));
+    }
 
     #[test]
     fn strips_data_url_prefix() {

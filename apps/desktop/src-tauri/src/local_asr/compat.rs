@@ -344,7 +344,7 @@ mod tests {
         for m in &manifest.models {
             assert!(m.supports_current_platform(), "{}", m.id);
             assert!(!m.files.is_empty(), "{}", m.id);
-            assert!(m.languages.len() >= 1, "{}", m.id);
+            assert!(!m.languages.is_empty(), "{}", m.id);
         }
         // Distil is English-only, parakeet covers 25 EU langs
         let distil = manifest
