@@ -6,6 +6,9 @@
   "permissions": [
     "core:tray:default",
     "core:window:default",
+    "core:webview:default",
+    "core:webview:allow-create-webview-window",
+    "core:webview:allow-create-webview",
     "core:app:default",
     "core:event:default",
     "core:menu:default",
@@ -18,13 +21,22 @@
     "autostart:allow-is-enabled",
     "updater:allow-check",
     "updater:allow-download-and-install",
+    "process:allow-restart",
     "store:allow-get",
     "store:allow-set",
     "store:allow-save",
-    "dialog:allow-open",
     "dialog:allow-message",
     "notification:allow-notify",
     "deep-link:allow-get-current",
-    "opener:allow-open-url"
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://api.algorithvoice.com/*" },
+        { "url": "https://github.com/*" },
+        { "url": "https://*.githubusercontent.com/*" },
+        { "url": "https://huggingface.co/*" },
+        { "url": "https://*.huggingface.co/*" }
+      ]
+    }
   ]
 }

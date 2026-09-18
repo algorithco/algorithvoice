@@ -85,9 +85,10 @@ pub fn history_stats(db: tauri::State<'_, Db>) -> AppResult<HistoryStats> {
         )
         .map_err(|e| AppError::store(e.to_string()))?;
 
-    // total words: sum of word counts
+    // total words: sum of word counts, bounded to latest 5000 rows to
+    // avoid DoS on huge histories (counts stay exact for typical use).
     let mut stmt = conn
-        .prepare("SELECT transcript FROM history")
+        .prepare("SELECT transcript FROM history ORDER BY created_at DESC LIMIT 5000")
         .map_err(|e| AppError::store(e.to_string()))?;
     let rows = stmt
         .query_map([], |r| r.get::<_, String>(0))
@@ -97,7 +98,7 @@ pub fn history_stats(db: tauri::State<'_, Db>) -> AppResult<HistoryStats> {
     // For today words we need to filter, so do second query for today
     // Instead we compute via separate query with filtering
     let mut today_stmt = conn
-        .prepare("SELECT transcript FROM history WHERE created_at >= ?1")
+        .prepare("SELECT transcript FROM history WHERE created_at >= ?1 ORDER BY created_at DESC LIMIT 5000")
         .map_err(|e| AppError::store(e.to_string()))?;
     let today_rows = today_stmt
         .query_map([today_start], |r| r.get::<_, String>(0))
@@ -119,6 +120,9 @@ pub fn history_stats(db: tauri::State<'_, Db>) -> AppResult<HistoryStats> {
 
 #[tauri::command]
 pub fn history_delete(db: tauri::State<'_, Db>, id: String) -> AppResult<()> {
+    if id.is_empty() || id.len() > 128 {
+        return Err(AppError::new("history", "invalid id"));
+    }
     let conn = db.0.lock().map_err(|_| AppError::store("db lock"))?;
     let n = conn
         .execute("DELETE FROM history WHERE id = ?1", [&id])

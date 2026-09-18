@@ -106,12 +106,15 @@ fn show_main_window(app: &tauri::AppHandle) -> AppResult<()> {
 fn open_settings(app: tauri::AppHandle) -> AppResult<()> {
     if let Some(win) = app.get_webview_window("settings") {
         let _ = win.unminimize();
-        let _ = win.show();
+        win.show().map_err(|e| AppError::window(e.to_string()))?;
         win.set_focus()
             .map_err(|e| AppError::window(e.to_string()))?;
+        // Hidden window preserves React state — nudge it to reload prefs.
+        let _ = win.emit("settings-refresh", ());
         return Ok(());
     }
-    // Same bundle as main; frontend renders the settings view when label == "settings".
+    // Static window defined in tauri.conf.json with visible:false should have
+    // been found above; fallback builder covers dev without config rebuild.
     let window = tauri::WebviewWindowBuilder::new(
         &app,
         "settings",
@@ -123,7 +126,7 @@ fn open_settings(app: tauri::AppHandle) -> AppResult<()> {
     .center()
     .focused(true)
     .build()
-    .map_err(|e| AppError::window(e.to_string()))?;
+    .map_err(|e| AppError::window(format!("create settings window: {e}")))?;
     window
         .set_focus()
         .map_err(|e| AppError::window(e.to_string()))?;
@@ -185,7 +188,14 @@ fn store_session(
     let refresh = refreshToken
         .or(refresh_token)
         .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty());
+        .filter(|value| !value.is_empty())
+        .filter(|value| value.len() <= 8192);
+    if refreshToken
+        .or(refresh_token)
+        .is_some_and(|v| v.trim().len() > 8192)
+    {
+        return Err(AppError::session("refresh token too long"));
+    }
     let mut payload = serde_json::json!({ "access_token": token, "email": email });
     if let Some(value) = refresh {
         payload["refresh_token"] = serde_json::Value::String(value);
@@ -228,8 +238,8 @@ fn normalize_hotkey(raw: &str) -> AppResult<String> {
     if hotkey.is_empty() {
         return Err(AppError::shortcut("hotkey must not be empty"));
     }
-    if hotkey.len() > 48 {
-        return Err(AppError::shortcut("hotkey too long"));
+    if hotkey.len() > 32 {
+        return Err(AppError::shortcut("hotkey too long (max 32)"));
     }
     if !hotkey
         .chars()
@@ -239,6 +249,34 @@ fn normalize_hotkey(raw: &str) -> AppResult<String> {
     }
     if !hotkey.chars().any(|c| c.is_ascii_alphanumeric()) {
         return Err(AppError::shortcut("hotkey must contain a key"));
+    }
+    // Require at least one modifier to avoid hijacking single keys
+    let lower = hotkey.to_ascii_lowercase();
+    let has_modifier = ["ctrl", "alt", "shift", "super", "meta", "command", "cmd"]
+        .iter()
+        .any(|m| lower.contains(m));
+    if !has_modifier || !lower.contains('+') {
+        return Err(AppError::shortcut(
+            "hotkey must include a modifier (Ctrl/Alt/Shift/Super) + key, e.g. Ctrl+Space",
+        ));
+    }
+    // Blocklist dangerous system combos
+    let blocked = [
+        "alt+f4",
+        "ctrl+alt+del",
+        "ctrl+alt+delete",
+        "super+l",
+        "meta+l",
+        "ctrl+q",
+        "alt+tab",
+        "super+d",
+    ];
+    if blocked.iter().any(|b| lower == *b) {
+        return Err(AppError::shortcut("hotkey is reserved by the OS"));
+    }
+    // Basic structure: modifiers + final key, no empty segments like "Ctrl++A" or trailing "+"
+    if hotkey.contains("++") || hotkey.starts_with('+') || hotkey.ends_with('+') {
+        return Err(AppError::shortcut("hotkey format is invalid"));
     }
     Ok(hotkey)
 }
@@ -358,10 +396,15 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => {
-                let _ = show_main_window(app);
+                if let Err(e) = show_main_window(app) {
+                    eprintln!("algorith-voice: show_main_window failed: {e}");
+                }
             }
             "settings" => {
-                let _ = open_settings(app.clone());
+                if let Err(e) = open_settings(app.clone()) {
+                    eprintln!("algorith-voice: open_settings failed: {e}");
+                    let _ = app.emit("settings-error", e.to_string());
+                }
             }
             "quit" => {
                 // 1) Remember the intent so CloseRequested below lets the
@@ -417,13 +460,22 @@ fn focus_main_for_external_event(handle: &tauri::AppHandle) {
 
 fn is_deep_link(raw: &str) -> bool {
     let trimmed = raw.trim();
-    // Accept `algorithvoice://...` and `algorithvoice:...` (Windows sometimes
-    // strips slashes). Case-insensitive scheme, validated before emitting so
-    // a fake CLI arg cannot spoof an auth callback.
-    let lower = trimmed.to_ascii_lowercase();
-    let scheme_slashes = format!("{DEEP_LINK_SCHEME}://");
-    let scheme_bare = format!("{DEEP_LINK_SCHEME}:");
-    lower.starts_with(&scheme_slashes) || lower.starts_with(&scheme_bare)
+    // Strict allowlist: only `algorithvoice://auth-callback?...` (with or
+    // without trailing slash, optional query/fragment). Reject bare scheme,
+    // other hosts, and file paths. Case-insensitive.
+    let Ok(url) = url::Url::parse(trimmed) else {
+        return false;
+    };
+    if url.scheme().to_ascii_lowercase() != DEEP_LINK_SCHEME {
+        return false;
+    }
+    // Require host `auth-callback` (covers `algorithvoice://auth-callback`)
+    // Tauri on Windows may deliver `algorithvoice://auth-callback?code=...`
+    // which url crate parses with host = Some("auth-callback").
+    match url.host_str() {
+        Some(host) if host.eq_ignore_ascii_case("auth-callback") => true,
+        _ => false,
+    }
 }
 
 fn handle_argv_deep_links(handle: &tauri::AppHandle, argv: &[String]) {
@@ -452,7 +504,11 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             focus_main_for_external_event(app);
             handle_argv_deep_links(app, &argv);
-            let _ = app.emit("single-instance", argv.clone());
+            // Emit only sanitized deep-links, never raw argv (prevents argv injection).
+            let filtered: Vec<String> = argv.into_iter().filter(|a| is_deep_link(a)).collect();
+            if !filtered.is_empty() {
+                let _ = app.emit("auth-callback", filtered);
+            }
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
@@ -538,12 +594,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Dictation apps live in the tray: close hides, Quit exits.
-            // The floating pill follows the same rule so its close button
-            // never kills the process (reopen via Dictate view / tray).
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // During Quit, let every window close for real so the
-                // runtime can finish tearing down and the process ends.
                 let exiting = window
                     .app_handle()
                     .try_state::<AppState>()
@@ -552,6 +603,10 @@ pub fn run() {
                 if exiting {
                     return;
                 }
+                // Main + pill live in tray: hide on close, Quit exits.
+                // Settings also hides but emits refresh on next open (see open_settings)
+                // so stale prefs don't persist. Destroy would lose window state,
+                // hide keeps it cheap but forces a reload event.
                 if window.label() == "main"
                     || window.label() == "settings"
                     || window.label() == "floating-pill"
@@ -602,7 +657,8 @@ pub fn run() {
             local_asr::commands::start_inference_worker,
             local_asr::commands::stop_inference_worker,
             local_asr::commands::get_transcription_status,
-            local_asr::commands::get_hardware_info
+            local_asr::commands::get_hardware_info,
+            local_asr::commands::get_model_compatibilities
         ])
         .run(tauri::generate_context!())
         .expect("error while running Algorith Voice");
