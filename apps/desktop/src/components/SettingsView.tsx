@@ -2,20 +2,17 @@ import type { SttMode } from "@algorith-voice/shared-types";
 import { Button, Input } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { useEffect, useState } from "react";
-import {
-  DEMO_EMAIL,
-  isTauri,
-  login,
-  loginDemo,
-  logout,
-  type SessionInfo,
-  sessionStatus,
-  signup,
-} from "../lib/session.js";
-import { ModelManager } from "./ModelManager.js";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { login, logout, sessionStatus, signup } from "../lib/session/auth.js";
+import { DEMO_EMAIL, loginDemo } from "../lib/session/demo-account.js";
+import { isTauri } from "../lib/session/env.js";
+import type { SessionInfo } from "../lib/session/types.js";
 import { OAuthButtons } from "./OAuthButtons.js";
 import { triggerUpdateCheck } from "./UpdateAnnouncement.js";
+
+const ModelManager = lazy(() =>
+  import("./ModelManager.js").then((m) => ({ default: m.ModelManager })),
+);
 
 export interface Prefs {
   hotkey: string;
@@ -235,7 +232,22 @@ export function SettingsView({
                     return String(e);
                   }
                 })();
-        setHotkeyError(msg);
+        setHotkeyError(
+          `${msg} — pick a different hotkey (it may be owned by the OS or another app).`,
+        );
+        // Surface registration failure outside the inline hint too: hotkey
+        // conflicts are otherwise easy to miss.
+        try {
+          const { sendNotification } = await import(
+            "@tauri-apps/plugin-notification"
+          );
+          sendNotification({
+            title: "Hotkey unavailable",
+            body: msg.slice(0, 200),
+          });
+        } catch {
+          // Notification plugin is best-effort.
+        }
       }
     } else {
       // Browser preview: just save pref
@@ -350,7 +362,15 @@ export function SettingsView({
             </div>
             {prefs.mode === "local" ? (
               <div className="mt-4">
-                <ModelManager prefs={prefs} onPrefs={onPrefs} />
+                <Suspense
+                  fallback={
+                    <p className="text-xs text-gray-500">
+                      Loading model manager…
+                    </p>
+                  }
+                >
+                  <ModelManager prefs={prefs} onPrefs={onPrefs} />
+                </Suspense>
               </div>
             ) : (
               <p className="mt-2 text-xs text-gray-500">
@@ -447,6 +467,58 @@ export function SettingsView({
             </a>
             .
           </p>
+        </div>
+      </section>
+
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
+          Diagnostics
+        </h2>
+        <p className="mt-2 text-xs text-gray-500">
+          Structured Rust logs live in{" "}
+          <span className="font-mono">&lt;app_data&gt;/logs/</span> (auth,
+          downloads, hotkeys, DB). Attach them when reporting issues.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              void (async () => {
+                if (!isTauri()) return;
+                try {
+                  const { invoke } = await import("@tauri-apps/api/core");
+                  const dir = await invoke<string>("get_log_dir");
+                  const { openUrl } = await import("@tauri-apps/plugin-opener");
+                  // openUrl handles file:// on desktop shells; fall back to copy.
+                  await openUrl(`file://${dir}`).catch(async () => {
+                    await navigator.clipboard.writeText(dir).catch(() => {});
+                  });
+                } catch {
+                  // best-effort
+                }
+              })();
+            }}
+          >
+            Open logs folder
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              void (async () => {
+                try {
+                  const { invoke } = await import("@tauri-apps/api/core");
+                  const text = await invoke<string>("read_recent_logs", {
+                    maxBytes: 200_000,
+                  });
+                  await navigator.clipboard.writeText(text).catch(() => {});
+                } catch {
+                  // best-effort
+                }
+              })();
+            }}
+          >
+            Copy recent logs
+          </Button>
         </div>
       </section>
 
