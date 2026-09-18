@@ -25,9 +25,7 @@ for (const vp of viewports) {
       bodySW: document.body.scrollWidth,
       innerWidth: window.innerWidth,
       ctnRect: ctn?.getBoundingClientRect().toJSON(),
-      canvasAttr: canvas
-        ? { w: canvas.width, h: canvas.height }
-        : null,
+      canvasAttr: canvas ? { w: canvas.width, h: canvas.height } : null,
       canvasStyle: canvas
         ? { w: canvas.style.width, h: canvas.style.height }
         : null,

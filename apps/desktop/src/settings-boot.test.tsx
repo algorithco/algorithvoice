@@ -8,10 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // jsdom has no IntersectionObserver, but motion's useInView (pulled in via
 // animate-ui icons) observes on mount. Stub it so boot tests don't crash.
-if (
-  typeof window !== "undefined" &&
-  !("IntersectionObserver" in window)
-) {
+if (typeof window !== "undefined" && !("IntersectionObserver" in window)) {
   class FakeIntersectionObserver {
     observe() {}
     unobserve() {}

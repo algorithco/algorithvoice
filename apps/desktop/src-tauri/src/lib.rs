@@ -186,12 +186,14 @@ fn store_session(
         .ok_or_else(|| AppError::session("missing access token"))?;
     let (token, email) = validate_session_input(&token, &email)?;
     let refresh = refreshToken
-        .or(refresh_token)
+        .as_ref()
+        .or(refresh_token.as_ref())
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
         .filter(|value| value.len() <= 8192);
     if refreshToken
-        .or(refresh_token)
+        .as_ref()
+        .or(refresh_token.as_ref())
         .is_some_and(|v| v.trim().len() > 8192)
     {
         return Err(AppError::session("refresh token too long"));
