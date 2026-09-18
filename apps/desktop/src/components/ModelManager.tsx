@@ -10,10 +10,12 @@ import {
   deleteModel,
   downloadModel,
   getHardwareInfo,
+  getModelCompatibilities,
   getModelStatus,
   getTranscriptionStatus,
   type HardwareInfo,
   listAvailableModels,
+  type ModelCompatibility,
   onDownloadProgress,
   onModelLoadProgress,
   onModelStatusChanged,
@@ -75,13 +77,13 @@ function statusTone(s: ModelStatusInfo["status"]): string {
     case "ready":
       return "bg-black text-white dark:bg-white dark:text-black";
     case "downloading":
-      return "bg-gray-900 text-white dark:bg-white dark:text-black";
+      return "bg-black text-white dark:bg-white dark:text-black";
     case "verifying":
       return "bg-amber-500 text-black";
     case "error":
       return "bg-red-600 text-white";
     default:
-      return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
+      return "bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-300";
   }
 }
 
@@ -100,6 +102,9 @@ export function ModelManager({
     Record<string, DownloadProgress>
   >({});
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
+  const [compatMap, setCompatMap] = useState<
+    Record<string, ModelCompatibility>
+  >({});
   const [workerStatus, setWorkerStatus] = useState<WorkerStatus | null>(null);
   const [loadStage, setLoadStage] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -126,10 +131,16 @@ export function ModelManager({
       const next: Record<string, ModelStatusInfo> = {};
       for (const e of entries) if (e) next[e[0]] = e[1];
       setStatusMap(next);
-      // hardware + worker
+      // hardware + compat + worker
       try {
         const hw = await getHardwareInfo();
         setHardware(hw);
+      } catch {}
+      try {
+        const comp = await getModelCompatibilities();
+        const cmap: Record<string, ModelCompatibility> = {};
+        for (const c of comp) cmap[c.id] = c;
+        setCompatMap(cmap);
       } catch {}
       try {
         const ws = await getTranscriptionStatus();
@@ -285,7 +296,7 @@ export function ModelManager({
 
   if (!isTauri()) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-500 dark:border-gray-700">
+      <div className="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-500 dark:border-white/15">
         Model manager is available in the desktop app. Open the app to download
         and manage on-device models.
       </div>
@@ -317,7 +328,7 @@ export function ModelManager({
   return (
     <div className="flex flex-col gap-6">
       {/* Hardware + active status */}
-      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
           Hardware
         </p>
@@ -325,15 +336,15 @@ export function ModelManager({
           {hardwareSummary ?? "Detecting hardware…"}
         </p>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <span className="rounded-full border border-gray-200 bg-white px-3 py-1 dark:border-gray-700 dark:bg-black">
+          <span className="rounded-full border border-gray-200 bg-white px-3 py-1 dark:border-white/15 dark:bg-black">
             Active: {activeId ?? "none"}
           </span>
-          <span className="rounded-full border border-gray-200 bg-white px-3 py-1 dark:border-gray-700 dark:bg-black">
+          <span className="rounded-full border border-gray-200 bg-white px-3 py-1 dark:border-white/15 dark:bg-black">
             Worker: {workerStatus?.lifecycle ?? "unknown"}
             {workerStatus?.modelId ? ` • ${workerStatus.modelId}` : ""}
             {loadStage ? ` • ${loadStage}` : ""}
           </span>
-          <span className="rounded-full border border-gray-200 bg-white px-3 py-1 dark:border-gray-700 dark:bg-black">
+          <span className="rounded-full border border-gray-200 bg-white px-3 py-1 dark:border-white/15 dark:bg-black">
             Runtime:{" "}
             {hardware?.supportedRuntimes.join(", ") ?? "sherpa-onnx-cpu"}
           </span>
@@ -349,13 +360,13 @@ export function ModelManager({
         </div>
       ) : null}
       {notice ? (
-        <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 dark:border-gray-800 dark:bg-black dark:text-gray-300">
+        <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 dark:border-white/10 dark:bg-black dark:text-gray-300">
           {notice}
         </div>
       ) : null}
 
       {/* Catalog filter for 6-model catalog */}
-      <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-black">
+      <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-white/10 dark:bg-black">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Input
             placeholder="Search 6 models (id, name, language)…"
@@ -368,7 +379,7 @@ export function ModelManager({
             <select
               value={langFilter}
               onChange={(e) => setLangFilter(e.target.value)}
-              className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-black"
+              className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs dark:border-white/15 dark:bg-black"
             >
               {allLanguages.map((l) => (
                 <option key={l} value={l}>
@@ -393,16 +404,25 @@ export function ModelManager({
             const progress = progressMap[m.id];
             const isActive = activeId === m.id;
             const total = totalBytesOf(m);
+            const compat = compatMap[m.id];
+            const level = compat?.level ?? null;
+            const isUnsupported = level === "unsupported";
+            const levelBadge =
+              level === "unsupported"
+                ? "Not compatible"
+                : level === "barely-compatible"
+                  ? "May be slow"
+                  : level === "compatible"
+                    ? "Compatible"
+                    : level === "recommended"
+                      ? "Recommended"
+                      : null;
+            const compatReasons = compat?.reasons?.join(" • ") ?? null;
             const compatWarning =
-              hardware &&
-              m.minRamGb > 0 &&
-              hardware.totalRamBytes < m.minRamGb * 1_000_000_000
-                ? `Needs ${m.minRamGb} GB RAM — this machine has ${(hardware.totalRamBytes / 1_000_000_000).toFixed(1)} GB`
-                : hardware &&
-                    m.minVramGb > 0 &&
-                    (hardware.gpu?.totalVramBytes ?? 0) <
-                      m.minVramGb * 1_000_000_000
-                  ? `Needs ${m.minVramGb} GB VRAM — no sufficient GPU detected`
+              level === "unsupported"
+                ? (compatReasons ?? "Not compatible with this device")
+                : level === "barely-compatible"
+                  ? (compatReasons ?? null)
                   : null;
 
             const pct =
@@ -423,7 +443,7 @@ export function ModelManager({
             return (
               <div
                 key={m.id}
-                className={`rounded-xl border p-5 transition-colors ${isActive ? "border-black bg-white dark:border-white dark:bg-black" : "border-gray-200 bg-white dark:border-gray-800 dark:bg-black"}`}
+                className={`rounded-xl border p-5 transition-colors ${isActive ? "border-black bg-white dark:border-white dark:bg-black" : "border-gray-200 bg-white dark:border-white/10 dark:bg-black"}`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -445,10 +465,27 @@ export function ModelManager({
                       {m.languages.length} languages
                     </p>
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${status ? statusTone(status.status) : "bg-gray-100 text-gray-500"}`}
-                  >
-                    {status ? statusLabel(status.status) : "…"}
+                  <span className="flex items-center gap-1.5">
+                    {levelBadge ? (
+                      <span
+                        className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
+                          level === "unsupported"
+                            ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
+                            : level === "barely-compatible"
+                              ? "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+                              : level === "recommended"
+                                ? "bg-black text-white dark:bg-white dark:text-black"
+                                : "bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300"
+                        }`}
+                      >
+                        {levelBadge}
+                      </span>
+                    ) : null}
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${status ? statusTone(status.status) : "bg-gray-100 text-gray-500"}`}
+                    >
+                      {status ? statusLabel(status.status) : "…"}
+                    </span>
                   </span>
                 </div>
 
@@ -480,9 +517,17 @@ export function ModelManager({
                 </p>
 
                 {compatWarning ? (
-                  <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                  <p
+                    className={`mt-3 rounded-lg px-3 py-2 text-xs ${
+                      level === "unsupported"
+                        ? "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
+                        : "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                    }`}
+                  >
                     {compatWarning}
                   </p>
+                ) : compatReasons && level !== "unsupported" ? (
+                  <p className="mt-2 text-xs text-gray-500">{compatReasons}</p>
                 ) : null}
 
                 {status?.status === "error" && status.errorMessage ? (
@@ -495,7 +540,7 @@ export function ModelManager({
                 {/* Progress */}
                 {status?.status === "downloading" ? (
                   <div className="mt-4">
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-white/10">
                       <div
                         className="h-full bg-black transition-all dark:bg-white"
                         style={{ width: pct != null ? `${pct}%` : "12%" }}
@@ -529,9 +574,18 @@ export function ModelManager({
                     <Button
                       size="sm"
                       onClick={() => void handleDownload(m.id)}
-                      disabled={busy}
+                      disabled={busy || isUnsupported}
+                      title={
+                        isUnsupported
+                          ? (compatReasons ?? "Not compatible")
+                          : undefined
+                      }
                     >
-                      {busy ? "Starting…" : `Download • ${formatBytes(total)}`}
+                      {isUnsupported
+                        ? "Not compatible"
+                        : busy
+                          ? "Starting…"
+                          : `Download • ${formatBytes(total)}`}
                     </Button>
                   )}
                   {status?.status === "downloading" && (
@@ -550,9 +604,18 @@ export function ModelManager({
                         size="sm"
                         variant={isActive ? "secondary" : "primary"}
                         onClick={() => void handleSelect(m.id)}
-                        disabled={busy}
+                        disabled={busy || isUnsupported}
+                        title={
+                          isUnsupported
+                            ? (compatReasons ?? "Not compatible")
+                            : undefined
+                        }
                       >
-                        {isActive ? "Selected" : "Use this model"}
+                        {isUnsupported
+                          ? "Not compatible"
+                          : isActive
+                            ? "Selected"
+                            : "Use this model"}
                       </Button>
                       <Button
                         size="sm"
@@ -600,7 +663,7 @@ export function ModelManager({
                     </>
                   )}
                   {status?.status === "verifying" && (
-                    <span className="inline-flex items-center rounded-full border border-gray-200 px-3 py-2 text-xs dark:border-gray-700">
+                    <span className="inline-flex items-center rounded-full border border-gray-200 px-3 py-2 text-xs dark:border-white/15">
                       Verifying…
                     </span>
                   )}

@@ -248,6 +248,20 @@ async fn fetch_once(
             ))
         })?
         .map_err(|e| map_reqwest_error(&e, timeout))?;
+    // Enforce HTTPS even after redirects (prevents CDN http downgrade/SSRF).
+    {
+        let final_url = response.url();
+        let is_loopback = final_url.scheme() == "http"
+            && matches!(
+                final_url.host_str(),
+                Some("localhost") | Some("127.0.0.1") | Some("::1")
+            );
+        if final_url.scheme() != "https" && !is_loopback {
+            return Err(AppError::model_download_failed(
+                "refusing non-HTTPS redirect target",
+            ));
+        }
+    }
     let status = response.status();
     if status == reqwest::StatusCode::PARTIAL_CONTENT {
         let total = response
@@ -330,6 +344,37 @@ where
         tokio::fs::create_dir_all(parent).await.map_err(|e| {
             AppError::model_download_failed(format!("cannot create model dir: {e}"))
         })?;
+        // Reject symlink parent after creation (prevents Startup folder hijack)
+        if let Ok(meta) = tokio::fs::symlink_metadata(parent).await {
+            if meta.file_type().is_symlink() {
+                return Err(AppError::model_download_failed(
+                    "model directory is a symlink — refusing to write",
+                ));
+            }
+        }
+        // Walk parent components for symlink (defense against nested tokenizer symlink)
+        let mut cur = parent;
+        while let Some(p) = cur.parent() {
+            if p.as_os_str().is_empty() {
+                break;
+            }
+            if let Ok(m) = std::fs::symlink_metadata(p) {
+                if m.file_type().is_symlink() {
+                    return Err(AppError::model_download_failed(
+                        "model path contains symlink — refusing to write",
+                    ));
+                }
+            }
+            cur = p;
+        }
+    }
+    // Refuse to overwrite an existing symlink file
+    if let Ok(meta) = tokio::fs::symlink_metadata(&req.dest_final).await {
+        if meta.file_type().is_symlink() {
+            return Err(AppError::model_download_failed(
+                "destination is a symlink — refusing to overwrite",
+            ));
+        }
     }
     let part = part_path(&req.dest_final);
     let meta_path = meta_path(&req.dest_final);
@@ -592,7 +637,12 @@ impl DownloadManager {
         Self {
             // No global timeout: large model files legitimately take a long
             // time; per-attempt deadlines live on DownloadRequest instead.
-            client: reqwest::Client::new(),
+            // Limit redirects and keep default HTTPS enforcement; final URL
+            // is re-checked in fetch_once to block http downgrades.
+            client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::limited(5))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             tasks: Mutex::new(HashMap::new()),
         }
     }

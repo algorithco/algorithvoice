@@ -12,6 +12,8 @@ import {
   transcribeAndPaste,
 } from "../lib/ptt.js";
 import { isTauri, setTrayState } from "../lib/session.js";
+import { AudioLines } from "./animate-ui/icons/audio-lines.js";
+import { Loader } from "./animate-ui/icons/loader.js";
 import type { Prefs } from "./SettingsView.js";
 
 type PillState = "idle" | "recording" | "processing";
@@ -20,6 +22,8 @@ type PillState = "idle" | "recording" | "processing";
 const MAX_RECORD_MS = 120_000;
 /** Blobs smaller than this carry no speech — discard without billing. */
 const MIN_BLOB_BYTES = 2048;
+/** Blobs larger than this are rejected before decode to avoid OOM (DoS). */
+const MAX_BLOB_BYTES = 15 * 1024 * 1024;
 /** How long pill notices (error / clipboard-fallback) stay visible. */
 const NOTICE_MS = 5000;
 
@@ -44,6 +48,10 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const startingRef = useRef(false);
   const pressTokenRef = useRef(0);
   const discardRef = useRef(false);
+  const prefsRef = useRef(prefs);
+  useEffect(() => {
+    prefsRef.current = prefs;
+  }, [prefs]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -97,14 +105,27 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const finishWithBlob = useCallback(
     async (blob: Blob, pressedMs: number, mimeType: string) => {
       clearTimers();
-      if (
-        discardRef.current ||
-        pressedMs < MIN_PRESS_MS ||
-        blob.size < MIN_BLOB_BYTES
-      ) {
-        // Accidental tap / Esc-cancel / empty take — discard silently.
+      if (discardRef.current) {
         discardRef.current = false;
         setPill("idle");
+        return;
+      }
+      if (pressedMs < MIN_PRESS_MS) {
+        discardRef.current = false;
+        setPill("idle");
+        showNotice("Hold a bit longer — tap was too short.");
+        return;
+      }
+      if (blob.size < MIN_BLOB_BYTES) {
+        discardRef.current = false;
+        setPill("idle");
+        showNotice("No speech detected — try again, speak while holding.");
+        return;
+      }
+      if (blob.size > MAX_BLOB_BYTES) {
+        discardRef.current = false;
+        setPill("idle");
+        showNotice("Recording too long — keep it under 2 minutes.");
         return;
       }
       if (!mountedRef.current) return;
@@ -114,7 +135,13 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         // WAV) because MediaRecorder cannot emit WAV anywhere; the Rust
         // side validates it with the same parser the worker tests cover.
         // Cloud mode keeps sending the original blob untouched.
-        const useLocal = prefs.mode === "local";
+        const curPrefs = prefsRef.current;
+        const useLocal = curPrefs.mode === "local";
+        if (useLocal && !curPrefs.activeModelId) {
+          showNotice("No local model — pick one in Settings → Local.");
+          setPill("idle");
+          return;
+        }
         const base64 = useLocal
           ? await blobToWav16kMono(blob)
           : await blobToBase64(blob);
@@ -124,7 +151,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           useLocal ? "audio/wav" : mimeType,
           undefined,
           useLocal
-            ? { mode: "local", modelId: prefs.activeModelId }
+            ? { mode: "local", modelId: curPrefs.activeModelId }
             : undefined,
         );
         if (!mountedRef.current) return;
@@ -146,14 +173,37 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         }
         setPill("idle");
       } catch (e) {
-        const message =
-          e instanceof Error ? e.message : "Transcription failed.";
+        const raw =
+          e instanceof Error
+            ? e.message
+            : typeof e === "string"
+              ? e
+              : JSON.stringify(e);
+        // Surface actionable guidance for known classes
+        let message = raw;
+        if (
+          raw.includes("model_not_loaded") ||
+          raw.includes("no local model")
+        ) {
+          message = "No local model — download one in Settings → Local.";
+        } else if (
+          raw.includes("web audio") ||
+          raw.includes("offline resampling")
+        ) {
+          message = `${raw} — try Cloud mode in Settings.`;
+        } else if (raw.includes("inference-empty-result")) {
+          message = "No speech detected — speak clearly while holding.";
+        } else if (raw.includes("engine") || raw.includes("out-of-memory")) {
+          message = raw;
+        } else if (!raw || raw === "Transcription failed.") {
+          message = "Transcription failed — check microphone and try again.";
+        }
         showNotice(message);
         if (isTauri()) void emit(PTT_ERROR_EVENT, message);
         setPill("idle");
       }
     },
-    [clearTimers, setPill, showNotice, prefs],
+    [clearTimers, setPill, showNotice],
   );
 
   const stopPress = useCallback(() => {
@@ -298,6 +348,20 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     };
   }, [startPress, stopPress]);
 
+  // Ensure pill window is transparent on Windows/WebView2
+  useEffect(() => {
+    const prevHtml = document.documentElement.style.background;
+    const prevBody = document.body.style.background;
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.documentElement.style.background = prevHtml;
+      document.body.style.background = prevBody;
+      document.body.style.overflow = "";
+    };
+  }, []);
+
   // Esc cancels a recording; unmount tears everything down safely.
   useEffect(() => {
     mountedRef.current = true;
@@ -386,10 +450,14 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
                 ? "border-gray-300 bg-gray-400 text-white motion-safe:animate-pulse dark:border-gray-600"
                 : notice
                   ? "border-amber-300 bg-black text-white dark:bg-white dark:text-black"
-                  : "border-gray-200 bg-black text-white hover:scale-105 active:scale-95 dark:border-gray-700 dark:bg-white dark:text-black",
+                  : "border-gray-200 bg-black text-white hover:scale-105 active:scale-95 dark:border-white/15 dark:bg-white dark:text-black",
           ].join(" ")}
         >
-          {state === "processing" ? <SpinnerIcon /> : <MicIcon />}
+          {state === "processing" ? (
+            <Loader size={22} animation="spin" animate />
+          ) : (
+            <AudioLines size={22} animate={state === "recording"} />
+          )}
         </button>
         {state === "recording" ? (
           <span
@@ -409,46 +477,4 @@ function formatElapsed(ms: number): string {
   const minutes = Math.floor(total / 60);
   const seconds = total % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function MicIcon() {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M10 3a3 3 0 0 0-3 3v4a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3m-1 9a1 1 0 0 1 2 0 4.002 4.002 0 0 1-3.874 4H7a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1h-.126A4.002 4.002 0 0 1 9 12m-1-6a1 1 0 0 1 2 0v4a1 1 0 0 1-2 0z" />
-    </svg>
-  );
-}
-
-function SpinnerIcon() {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-      className="motion-safe:animate-spin"
-    >
-      <circle
-        cx="10"
-        cy="10"
-        r="7"
-        stroke="currentColor"
-        strokeOpacity="0.3"
-        strokeWidth="2"
-      />
-      <path
-        d="M17 10a7 7 0 0 0-7-7"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
 }

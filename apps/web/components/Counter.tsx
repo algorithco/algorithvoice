@@ -48,7 +48,7 @@ export function Counter({
   }, [to]);
 
   return (
-    <span ref={ref}>
+    <span ref={ref} className="tabular-nums">
       {prefix}
       {value.toFixed(decimals)}
       {suffix}

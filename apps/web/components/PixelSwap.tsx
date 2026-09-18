@@ -451,6 +451,12 @@ export function PixelSwap({
         onMouseLeave: () => requestActive(false),
         onFocus: () => requestActive(true),
         onBlur: () => requestActive(false),
+        // Touch screens have no hover — tap toggles instead.
+        onClick: () => {
+          if (window.matchMedia("(hover: none)").matches) {
+            requestActive(!desiredActive);
+          }
+        },
         tabIndex: 0,
       };
     }

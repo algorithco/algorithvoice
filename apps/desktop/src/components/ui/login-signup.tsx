@@ -191,7 +191,7 @@ export default function LoginCardSection({ onDone }: Props) {
                 <a
                   href="https://algorithvoice.com"
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="text-[10px] tracking-[0.14em] text-white/20 transition-colors hover:text-white/40 uppercase"
                 >
                   algorithvoice.com

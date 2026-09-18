@@ -148,6 +148,21 @@ fn decode_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
     } else {
         trimmed
     };
+    // Pre-check estimated decoded size to avoid large allocation before
+    // base64 decode (DoS via 250MB b64 -> 187MB Vec).
+    // Base64 expands by 4/3, so decoded ≈ b64_len * 3 / 4.
+    // Add small headroom for padding, reject early.
+    let est = b64.len().saturating_mul(3) / 4;
+    if est > MAX_AUDIO_BYTES.saturating_add(1024 * 1024) {
+        return Err(AppError::new(
+            "transcribe",
+            "audio too large (Groq limit is 25 MB)",
+        ));
+    }
+    // Also reject obviously huge payloads (100MB b64 string itself)
+    if b64.len() > 40 * 1024 * 1024 {
+        return Err(AppError::new("transcribe", "audio too large"));
+    }
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)

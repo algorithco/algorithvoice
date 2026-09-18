@@ -481,6 +481,13 @@ impl TranscriptionWorker {
                 return Err(AppError::out_of_memory(message));
             }
         }
+        // Re-verify file integrity before touching the engine (defense-in-depth:
+        // downloader verified before rename, but a later symlink/file swap or
+        // disk corruption must not reach the ONNX parser). Blocking, so caller
+        // must be off the async executor (commands.rs uses spawn_blocking).
+        verify_model_files(model, dir).inspect_err(|e| {
+            self.fail(&e.message);
+        })?;
         self.set_lifecycle(WorkerLifecycle::Loading, Some(model.id.clone()), None);
         on_stage(LoadStage::ResolvingFiles);
         on_stage(LoadStage::CreatingEngine);
@@ -667,6 +674,74 @@ fn normalize_language(language: &str) -> String {
         "" | "auto" => String::new(),
         other => other.to_string(),
     }
+}
+
+fn verify_model_files(model: &LocalModel, dir: &Path) -> Result<(), AppError> {
+    use sha2::{Digest, Sha256};
+    use std::fs::File;
+    use std::io::Read;
+    for file in &model.files {
+        let path = dir.join(&file.filename);
+        // Must be a regular file (not symlink-followed dir traversal already blocked by manifest,
+        // but double-check here to avoid loading through a symlink planted after download).
+        let meta = std::fs::symlink_metadata(&path).map_err(|_| {
+            AppError::engine_init_failed(format!(
+                "model {} is missing its {} file; re-download the model",
+                model.id, file.filename
+            ))
+        })?;
+        if meta.file_type().is_symlink() {
+            return Err(AppError::engine_init_failed(format!(
+                "model {} file {} is a symlink — refusing to load; re-download",
+                model.id, file.filename
+            )));
+        }
+        if !meta.is_file() {
+            return Err(AppError::engine_init_failed(format!(
+                "model {} is missing its {} file; re-download the model",
+                model.id, file.filename
+            )));
+        }
+        if file.size_bytes != 0 && meta.len() != file.size_bytes {
+            return Err(AppError::engine_init_failed(format!(
+                "model {} file {} size mismatch (expected {}, got {}); re-download or verify",
+                model.id,
+                file.filename,
+                file.size_bytes,
+                meta.len()
+            )));
+        }
+        // Hash check (blocking). Large files (100MB-1GB) are hashed here once per load;
+        // load is already spawn_blocking, so this does not block the async runtime.
+        let mut f = File::open(&path).map_err(|e| {
+            AppError::engine_init_failed(format!(
+                "cannot open model {} file {}: {e}",
+                model.id, file.filename
+            ))
+        })?;
+        let mut hasher = Sha256::new();
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let n = f.read(&mut buf).map_err(|e| {
+                AppError::engine_init_failed(format!(
+                    "cannot read model {} file {}: {e}",
+                    model.id, file.filename
+                ))
+            })?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
+        let actual = format!("{:x}", hasher.finalize());
+        if actual.to_lowercase() != file.sha256.to_lowercase() {
+            return Err(AppError::engine_init_failed(format!(
+                "model {} file {} checksum mismatch; re-download or verify the model",
+                model.id, file.filename
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Engine file layout under a model dir (paths relative to it).

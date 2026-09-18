@@ -11,6 +11,6 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-  server: { port: 1420, strictPort: true },
+  server: { host: "127.0.0.1", port: 1420, strictPort: true },
   build: { target: "es2022" },
 });

@@ -1,0 +1,68 @@
+.gooey-nav-container {
+  position: relative;
+}
+
+.gooey-nav-container nav {
+  display: flex;
+  position: relative;
+}
+
+.gooey-nav-container nav ul {
+  display: flex;
+  gap: 0.25em;
+  list-style: none;
+  padding: 0 0.2em;
+  margin: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.gooey-nav-container nav ul li {
+  border-radius: 100vw;
+  position: relative;
+  cursor: pointer;
+  transition:
+    color 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  color: #6e6e6e;
+  font-size: 15px;
+  line-height: 24px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.gooey-nav-container nav ul li a {
+  display: inline-block;
+  padding: 0.45em 0.9em;
+  color: inherit;
+  text-decoration: none;
+}
+
+.gooey-nav-container nav ul li.active {
+  background: white;
+  color: black;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.gooey-nav-container nav ul li:not(.active):hover {
+  color: black;
+}
+
+/* Dark mode — keep pill viewable, no blur/contrast heavy filters */
+.dark .gooey-nav-container nav ul li {
+  color: #9a9a9a;
+}
+.dark .gooey-nav-container nav ul li.active {
+  background: white;
+  color: black;
+}
+.dark .gooey-nav-container nav ul li:not(.active):hover {
+  color: white;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .gooey-nav-container nav ul li {
+    transition: none;
+  }
+}

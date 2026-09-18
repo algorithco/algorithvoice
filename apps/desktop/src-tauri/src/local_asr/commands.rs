@@ -489,3 +489,36 @@ pub async fn get_transcription_status(
 pub async fn get_hardware_info() -> AppResult<HardwareInfo> {
     Ok(hardware::detect())
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCompatibility {
+    pub id: String,
+    pub level: compat::Compatibility,
+    pub reasons: Vec<String>,
+}
+
+/// Compatibility for every model in the manifest, evaluated against current hardware + free disk.
+/// Cheap (no I/O beyond disk free), so onboarding can call it every time.
+#[tauri::command]
+pub async fn get_model_compatibilities(app: AppHandle) -> AppResult<Vec<ModelCompatibility>> {
+    let manifest = load_manifest()?;
+    let hardware = hardware::detect();
+    let data = app_data_dir(&app)?;
+    let mut out = Vec::with_capacity(manifest.models.len());
+    for model in &manifest.models {
+        let dir = models::model_dir(&data, &model.id)?;
+        let free = models::free_space_bytes(&dir);
+        let report = compat::evaluate(&compat::CompatInput {
+            hardware: &hardware,
+            free_disk_bytes: free,
+            model,
+        });
+        out.push(ModelCompatibility {
+            id: model.id.clone(),
+            level: report.level,
+            reasons: report.reasons,
+        });
+    }
+    Ok(out)
+}

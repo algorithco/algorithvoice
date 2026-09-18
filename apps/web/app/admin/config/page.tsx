@@ -49,12 +49,12 @@ export default function AdminConfigPage() {
       <h1 className="t-h1">AI Model Config</h1>
       {msg ? <p className="text-sm text-faint">{msg}</p> : null}
       <div className="overflow-auto rounded-lg border border-line">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[560px] text-sm">
           <thead>
             <tr className="bg-surface">
-              <th className="p-2 text-left">Model</th>
-              <th className="p-2 text-left">Active</th>
-              <th className="p-2 text-left">Fallback</th>
+              <th className="whitespace-nowrap p-2 text-left">Model</th>
+              <th className="whitespace-nowrap p-2 text-left">Active</th>
+              <th className="whitespace-nowrap p-2 text-left">Fallback</th>
               <th className="p-2 text-left">Actions</th>
             </tr>
           </thead>
@@ -62,26 +62,34 @@ export default function AdminConfigPage() {
             {configs.map((c) => (
               <tr key={c.modelId} className="border-t border-line">
                 <td className="p-2">
-                  {c.displayName}{" "}
-                  <span className="text-xs text-faint">({c.modelId})</span>
+                  <span className="block">{c.displayName}</span>
+                  <span className="block font-mono text-xs break-all text-faint">
+                    {c.modelId}
+                  </span>
                 </td>
-                <td className="p-2">{c.isActive ? "✓" : ""}</td>
-                <td className="p-2">{c.isFallback ? "✓" : ""}</td>
-                <td className="p-2 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void setActive(c.modelId)}
-                    className="rounded border px-2 py-1 text-xs"
-                  >
-                    Set active
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void setFallback(c.modelId)}
-                    className="rounded border px-2 py-1 text-xs"
-                  >
-                    Set fallback
-                  </button>
+                <td className="whitespace-nowrap p-2">
+                  {c.isActive ? "✓" : ""}
+                </td>
+                <td className="whitespace-nowrap p-2">
+                  {c.isFallback ? "✓" : ""}
+                </td>
+                <td className="p-2">
+                  <div className="flex min-w-[220px] flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={() => void setActive(c.modelId)}
+                      className="inline-flex min-h-[44px] items-center justify-center rounded border px-3 text-xs whitespace-nowrap"
+                    >
+                      Set active
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void setFallback(c.modelId)}
+                      className="inline-flex min-h-[44px] items-center justify-center rounded border px-3 text-xs whitespace-nowrap"
+                    >
+                      Set fallback
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

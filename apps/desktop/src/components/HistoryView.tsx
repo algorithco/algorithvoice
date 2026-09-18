@@ -54,7 +54,7 @@ export function HistoryView() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="mx-auto w-full max-w-[900px] p-8 lg:p-10 2xl:max-w-[1060px]">
         <h1 className="av-display">History</h1>
         <p className="av-small mt-4 text-gray-500">Loading…</p>
       </div>
@@ -63,7 +63,7 @@ export function HistoryView() {
 
   if (entries.length === 0) {
     return (
-      <div className="p-8">
+      <div className="mx-auto w-full max-w-[900px] p-8 lg:p-10 2xl:max-w-[1060px]">
         <h1 className="av-display">History</h1>
         <EmptyState
           title="Nothing dictated yet"
@@ -74,12 +74,12 @@ export function HistoryView() {
   }
 
   return (
-    <div className="p-8">
+    <div className="mx-auto w-full max-w-[900px] p-8 lg:p-10 2xl:max-w-[1060px]">
       <h1 className="av-display">History</h1>
       <p className="av-body mt-2 text-gray-500">
         Stored only on this device. {entries.length} dictations.
       </p>
-      <div className="mt-6 border border-gray-200 dark:border-gray-800">
+      <div className="mt-6 border border-gray-200 dark:border-white/10">
         <HistoryList entries={entries} onCopy={handleCopy} />
       </div>
       {copied ? (
@@ -97,7 +97,7 @@ export function HistoryView() {
         >
           Delete most recent
         </button>
-        <span className="text-gray-200 dark:text-gray-800">·</span>
+        <span className="text-gray-200 dark:text-white/20">·</span>
         <button
           type="button"
           onClick={() => {

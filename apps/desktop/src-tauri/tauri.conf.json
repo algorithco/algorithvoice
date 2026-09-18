@@ -15,18 +15,23 @@
       {
         "label": "main",
         "title": "Algorith Voice",
-        "width": 960,
-        "height": 640
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600,
+        "center": true,
+        "resizable": true,
+        "maximized": true
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src ipc: http://ipc.localhost https://api.algorithvoice.com http://localhost:3001; img-src 'self' asset: blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self' ipc:; connect-src ipc: https://api.algorithvoice.com http://localhost:3001 https://github.com https://api.github.com https://objects.githubusercontent.com; img-src 'self' asset: blob: https://objects.githubusercontent.com; script-src 'self'; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",
@@ -49,12 +54,12 @@
       }
     },
     "updater": {
-      "active": false,
+      "active": true,
       "endpoints": [
         "https://github.com/algorithco/algorithvoice-app/releases/latest/download/latest.json"
       ],
       "dialog": false,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IE1CN2x6V3dIWi9BPT0KdW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBmY3JldAo="
+      "pubkey": "RWTz/UClmt0kHmL24U+TjKNVf2Hj2g5XqyzPJq50IIsi5ZIhaJ6eL78u"
     }
   }
 }

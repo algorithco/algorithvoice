@@ -15,6 +15,7 @@ import {
 } from "../lib/session.js";
 import { ModelManager } from "./ModelManager.js";
 import { OAuthButtons } from "./OAuthButtons.js";
+import { triggerUpdateCheck } from "./UpdateAnnouncement.js";
 
 export interface Prefs {
   hotkey: string;
@@ -47,14 +48,14 @@ function LoginForm({ onDone }: { onDone: (s: SessionInfo) => void }) {
   };
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-black">
+    <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
       <OAuthButtons onDone={onDone} />
       <div className="my-6 flex items-center gap-3" aria-hidden="true">
-        <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
+        <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
         <span className="text-xs uppercase tracking-wide text-gray-500">
           or with email
         </span>
-        <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" />
+        <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
       </div>
       <div className="flex flex-col gap-4">
         <label className="text-sm text-gray-500" htmlFor="av-login-email">
@@ -123,10 +124,19 @@ export function SettingsView({
   const [autostart, setAutostart] = useState(false);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [hotkeyInput, setHotkeyInput] = useState(prefs.hotkey);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   useEffect(() => {
     setHotkeyInput(prefs.hotkey);
   }, [prefs.hotkey]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    void invoke<string>("get_version")
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     void sessionStatus()
@@ -135,8 +145,29 @@ export function SettingsView({
     if (isTauri()) {
       void isEnabled()
         .then(setAutostart)
-        .catch(() => {});
+        .catch(() => {
+          // autostart plugin may not be available in some builds
+        });
     }
+    // Listen for tray refresh (hide->show) so toggles stay in sync
+    let unlisten: (() => void) | undefined;
+    if (isTauri()) {
+      void import("@tauri-apps/api/event").then(({ listen }) =>
+        listen("settings-refresh", () => {
+          void sessionStatus()
+            .then(setSession)
+            .catch(() => {});
+          void isEnabled()
+            .then(setAutostart)
+            .catch(() => {});
+        }).then((fn) => {
+          unlisten = fn;
+        }),
+      );
+    }
+    return () => {
+      if (unlisten) unlisten();
+    };
   }, []);
 
   const toggleAutostart = async () => {
@@ -148,8 +179,9 @@ export function SettingsView({
         await enable();
         setAutostart(true);
       }
-    } catch {
-      // Plugin unavailable in browser preview.
+    } catch (e) {
+      // Surface silently before: now at least log so Settings not silently dead
+      console.warn("autostart toggle failed", e);
     }
   };
 
@@ -157,6 +189,28 @@ export function SettingsView({
     const next = hotkeyInput.trim();
     if (!next) {
       setHotkeyError("Hotkey must not be empty.");
+      return;
+    }
+    if (next.length > 32) {
+      setHotkeyError("Hotkey too long (max 32 characters).");
+      return;
+    }
+    if (!/^[A-Za-z0-9+_ -]+$/.test(next)) {
+      setHotkeyError("Hotkey contains unsupported characters.");
+      return;
+    }
+    const lower = next.toLowerCase();
+    const hasModifier = [
+      "ctrl",
+      "alt",
+      "shift",
+      "super",
+      "meta",
+      "command",
+      "cmd",
+    ].some((m) => lower.includes(m));
+    if (!hasModifier || !lower.includes("+")) {
+      setHotkeyError("Use a modifier + key, e.g. Ctrl+Space.");
       return;
     }
     if (next === prefs.hotkey) {
@@ -169,7 +223,19 @@ export function SettingsView({
         onPrefs({ ...prefs, hotkey: next });
         setHotkeyError(null);
       } catch (e) {
-        setHotkeyError(e instanceof Error ? e.message : String(e));
+        const msg =
+          e instanceof Error
+            ? e.message
+            : typeof e === "string"
+              ? e
+              : (() => {
+                  try {
+                    return JSON.stringify(e);
+                  } catch {
+                    return String(e);
+                  }
+                })();
+        setHotkeyError(msg);
       }
     } else {
       // Browser preview: just save pref
@@ -179,22 +245,22 @@ export function SettingsView({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[900px] p-8">
-      <h1 className="text-2xl font-semibold tracking-tight text-black dark:text-white">
+    <div className="mx-auto w-full max-w-[900px] p-8 lg:p-10 2xl:max-w-[1060px]">
+      <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-white">
         Settings
       </h1>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-2 text-sm text-gray-500 lg:text-[15px]">
         Manage your account and preferences. Changes save automatically.
       </p>
 
-      <section className="mt-8 rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-black">
+      <section className="mt-8 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Account
         </h2>
         <div className="mt-4">
           {session.loggedIn ? (
             <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+              <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <div>
                   <p className="text-sm font-medium text-black dark:text-white">
                     {session.email}
@@ -222,7 +288,7 @@ export function SettingsView({
         </div>
       </section>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Dictation
         </h2>
@@ -300,7 +366,7 @@ export function SettingsView({
         </div>
       </section>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Appearance
         </h2>
@@ -320,7 +386,7 @@ export function SettingsView({
         </p>
       </section>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           System
         </h2>
@@ -338,8 +404,55 @@ export function SettingsView({
         </p>
       </section>
 
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
+          Updates
+        </h2>
+        <div className="mt-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+            <div>
+              <p className="text-sm font-medium text-black dark:text-white">
+                {appVersion ? `v${appVersion}` : "Algorith Voice"}
+              </p>
+              <p className="text-xs text-gray-500">
+                {isTauri()
+                  ? "Installed via Tauri updater"
+                  : "Browser preview — updater disabled"}
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              disabled={checkingUpdate}
+              onClick={() => {
+                if (!isTauri()) return;
+                setCheckingUpdate(true);
+                triggerUpdateCheck();
+                window.setTimeout(() => setCheckingUpdate(false), 2500);
+              }}
+            >
+              {checkingUpdate ? "Checking…" : "Check for updates"}
+            </Button>
+          </div>
+          <p className="text-xs leading-relaxed text-gray-500">
+            When a new version is available you’ll see a banner at the top.
+            Update installs in-app and restarts automatically — no manual
+            download. You can also{" "}
+            <a
+              href="https://github.com/algorithco/algorithvoice/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-4 hover:text-black dark:hover:text-white"
+            >
+              view releases on GitHub
+            </a>
+            .
+          </p>
+        </div>
+      </section>
+
       <p className="mt-8 text-xs text-gray-500">
-        Algorith Voice v0.4.0 • Pure black & white • No fake analytics
+        Algorith Voice {appVersion ? `v${appVersion}` : "v0.4.0"} • Pure black
+        &amp; white • No fake analytics
       </p>
     </div>
   );

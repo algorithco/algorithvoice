@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Aurora } from "../components/Aurora";
 import { BlurText } from "../components/BlurText";
 import { Counter } from "../components/Counter";
 import { Faq } from "../components/Faq";
@@ -92,54 +93,50 @@ export default function LandingPage() {
     <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
       <main>
-        {/* Hero */}
-        <section className="mx-auto max-w-[1200px] px-6 pt-24 pb-16 md:px-16 md:pt-32">
-          <div className="mx-auto max-w-[800px] text-center">
-            <BlurText
-              text="Talk faster. Type never."
-              className="t-hero mt-6 text-balance"
-              delay={180}
-              animateBy="words"
-              direction="top"
-            />
-            <p className="t-lead mx-auto mt-6 max-w-[52ch] text-sub">
-              Push-to-talk dictation for macOS, Windows, and Linux. Hold the
-              hotkey, speak, and text lands at the cursor — in your terminal,
-              your editor, your browser.
-            </p>
-            <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-              <Link href="/download" className="btn btn-primary">
-                Download free
-              </Link>
-              <Link href="/docs" className="btn btn-secondary">
-                Setup guide →
-              </Link>
-            </div>
-          </div>
-
-          <Reveal className="mt-16">
-            <div className="hero-grid rounded-2xl border border-line bg-surface p-8 shadow-[0_8px_24px_rgba(0,0,0,0.4)] md:p-12">
-              <div className="flex items-center justify-between">
-                <p className="t-cap text-sub">Live · Dictation</p>
-                <p className="font-mono text-xs leading-4 font-normal text-faint">
-                  ctrl+space
-                </p>
+        {/* Hero — pulled under the sticky nav (-mt-20 = nav height),
+            so Aurora fills behind the nav pill instead of black. Inner
+            padding compensates +80px, content stays at the same spot. */}
+        <section className="relative -mt-20 overflow-hidden">
+          <Aurora
+            colorStops={["#ffffff", "#81738f", "#9a93b8"]}
+            amplitude={1.0}
+            blend={0.5}
+            speed={1}
+            opacity={0.7}
+          />
+          <div className="relative z-10 mx-auto max-w-[1200px] px-4 pt-44 pb-16 sm:px-6 md:px-16 md:pt-52">
+            <div className="mx-auto max-w-[800px] text-center">
+              <BlurText
+                text="Talk faster. Type never."
+                className="t-hero mt-6 text-balance"
+                delay={180}
+                animateBy="words"
+                direction="top"
+              />
+              <p className="t-lead mx-auto mt-6 max-w-[52ch] text-sub">
+                Push-to-talk dictation for macOS, Windows, and Linux. Hold the
+                hotkey, speak, and text lands at the cursor — in your terminal,
+                your editor, your browser.
+              </p>
+              <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+                <Link href="/download" className="btn btn-primary">
+                  Download free
+                </Link>
+                <Link href="/docs" className="btn btn-secondary">
+                  Setup guide →
+                </Link>
               </div>
-              <Waveform className="mt-8" />
-              <p className="mt-8 font-mono text-sm leading-6 font-normal">
-                <span className="text-faint">&gt; </span>
-                use refresh-token rotation with reuse detection
-              </p>
-              <p className="mt-2 font-mono text-xs leading-4 font-normal text-faint">
-                ✓ injected in 0.6s · local model
-              </p>
             </div>
-          </Reveal>
+
+            <Reveal className="mt-16">
+              <Waveform className="mx-auto max-w-3xl" />
+            </Reveal>
+          </div>
         </section>
 
         {/* Stats */}
         <section className="border-y border-line bg-surface">
-          <dl className="mx-auto grid max-w-[1200px] grid-cols-2 gap-8 px-6 py-12 md:grid-cols-4 md:px-16">
+          <dl className="mx-auto grid max-w-[1200px] grid-cols-2 gap-6 px-4 py-10 sm:gap-8 sm:px-6 sm:py-12 md:grid-cols-4 md:px-16">
             {STATS.map((s) => (
               <div key={s.label}>
                 <dt className="t-h2">
@@ -156,7 +153,7 @@ export default function LandingPage() {
         </section>
 
         {/* Features */}
-        <section className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
+        <section className="mx-auto max-w-[1200px] px-4 py-16 sm:px-6 sm:py-24 md:px-16 md:py-32">
           <Reveal>
             <p className="t-cap text-faint">Why Algorith Voice</p>
             <h2 className="t-h1 mt-4 max-w-[20ch]">
@@ -166,11 +163,11 @@ export default function LandingPage() {
           <div className="mt-12 grid gap-6 md:grid-cols-3">
             {FEATURES.map((f, i) => (
               <Reveal key={f.title} delay={i * 80}>
-                <article className="flex h-full flex-col rounded-lg border border-line bg-surface p-8 transition-all duration-200 ease-app hover:-translate-y-0.5 hover:bg-raised">
+                <article className="flex h-full min-w-0 flex-col rounded-lg border border-line bg-surface p-6 transition-all duration-200 ease-app hover:-translate-y-0.5 hover:bg-raised sm:p-8">
                   <h3 className="t-h2">{f.title}</h3>
                   <p className="t-body mt-4 flex-1 text-sub">{f.copy}</p>
                   {f.demo === "keys" ? (
-                    <p className="mt-6 flex items-center gap-2">
+                    <p className="mt-6 flex flex-wrap items-center gap-2">
                       <kbd className="rounded-md border border-line bg-raised px-3 py-2 font-mono text-[13px] leading-[18px] font-medium">
                         Ctrl
                       </kbd>
@@ -208,7 +205,7 @@ export default function LandingPage() {
 
         {/* Platform */}
         <section className="border-y border-line bg-surface">
-          <div className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
+          <div className="mx-auto max-w-[1200px] px-4 py-16 sm:px-6 sm:py-24 md:px-16 md:py-32">
             <Reveal>
               <p className="t-cap text-faint">Platforms</p>
               <h2 className="t-h1 mt-4">One line to install.</h2>
@@ -216,7 +213,7 @@ export default function LandingPage() {
             <div className="mt-12 grid gap-6 md:grid-cols-3">
               {PLATFORMS.map((p, i) => (
                 <Reveal key={p.os} delay={i * 80} className="min-w-0">
-                  <article className="flex h-full flex-col rounded-lg border border-line bg-canvas p-8">
+                  <article className="flex h-full min-w-0 flex-col rounded-lg border border-line bg-canvas p-6 sm:p-8">
                     <h3 className="t-h2">{p.os}</h3>
                     <pre className="mt-6 flex-1 overflow-x-auto rounded-md border border-line bg-surface p-4 font-mono text-[13px] leading-[18px] font-normal">
                       <code>
@@ -238,9 +235,9 @@ export default function LandingPage() {
         </section>
 
         {/* Pricing teaser */}
-        <section className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
+        <section className="mx-auto max-w-[1200px] px-4 py-16 sm:px-6 sm:py-24 md:px-16 md:py-32">
           <Reveal>
-            <div className="rounded-2xl bg-ink p-8 text-canvas md:p-12">
+            <div className="rounded-2xl bg-ink p-6 text-canvas sm:p-8 md:p-12">
               <p className="t-cap opacity-70">Pricing</p>
               <h2 className="t-h1 mt-4">Free until it earns its keep.</h2>
               <p className="t-lead mt-4 max-w-[52ch] opacity-80">
@@ -258,7 +255,7 @@ export default function LandingPage() {
         </section>
 
         {/* FAQ */}
-        <section className="mx-auto max-w-[1200px] px-6 pb-24 md:px-16 md:pb-32">
+        <section className="mx-auto max-w-[1200px] px-4 pb-16 sm:px-6 sm:pb-24 md:px-16 md:pb-32">
           <Reveal>
             <p className="t-cap text-faint">FAQ</p>
             <h2 className="t-h1 mt-4">Questions, answered.</h2>

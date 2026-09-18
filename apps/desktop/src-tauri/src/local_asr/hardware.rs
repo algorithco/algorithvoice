@@ -79,7 +79,7 @@ pub fn detect() -> HardwareInfo {
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn detect_nvidia_gpu() -> Option<GpuInfo> {
     #[cfg(target_os = "windows")]
-    const CANDIDATES: &[&str] = &["nvml.dll"];
+    const CANDIDATES: &[&str] = &["C:\\Windows\\System32\\nvml.dll"];
     #[cfg(target_os = "linux")]
     const CANDIDATES: &[&str] = &["libnvidia-ml.so.1", "libnvidia-ml.so"];
 

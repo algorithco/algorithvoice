@@ -7,6 +7,15 @@
     {
       "includes": ["**/tokens.css", "**/globals.css", "**/styles.css"],
       "linter": { "rules": { "suspicious": { "noUnknownAtRules": "off" } } }
+    },
+    {
+      "includes": ["**/components/animate-ui/**"],
+      "linter": {
+        "rules": {
+          "a11y": { "noSvgWithoutTitle": "off" },
+          "suspicious": { "noExplicitAny": "off" }
+        }
+      }
     }
   ],
   "assist": { "enabled": true }

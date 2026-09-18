@@ -167,8 +167,13 @@ export async function authRoutes(app: FastifyInstance) {
   // or redirect back to the deep-link with an error so the Tauri shell can complete.
   app.get("/oauth/:provider/start", async (req, reply) => {
     const { provider } = req.params as { provider: string };
-    const query = req.query as { callback?: string; device?: string };
+    const query = req.query as {
+      callback?: string;
+      device?: string;
+      state?: string;
+    };
     const callback = query.callback ?? "algorithvoice://auth-callback";
+    const state = typeof query.state === "string" ? query.state : undefined;
     const allowedProviders = new Set(["google", "github"]);
     if (!allowedProviders.has(provider)) {
       return reply.code(400).send({ error: "unknown_provider" });
@@ -180,6 +185,10 @@ export async function authRoutes(app: FastifyInstance) {
     if (!isValidCallback) {
       return reply.code(400).send({ error: "invalid_callback" });
     }
+    // Validate state format if provided (base64url 16 bytes ~22 chars, allow 16-128)
+    if (state !== undefined && !/^[A-Za-z0-9_-]{16,128}$/.test(state)) {
+      return reply.code(400).send({ error: "invalid_state" });
+    }
     // Phase 3 will redirect to real provider OAuth. Until env is configured,
     // redirect back with error so desktop's auth-callback listener resolves
     // (otherwise openUrl would show a dead 501 page with no deep-link return).
@@ -189,17 +198,18 @@ export async function authRoutes(app: FastifyInstance) {
       provider === "google"
         ? !!env.OAUTH_GOOGLE_CLIENT_ID && !!env.OAUTH_GOOGLE_CLIENT_SECRET
         : !!env.OAUTH_GITHUB_CLIENT_ID && !!env.OAUTH_GITHUB_CLIENT_SECRET;
-    if (!configured) {
+    const buildRedirect = (error: string) => {
       const url = new URL(callback);
-      url.searchParams.set("error", "oauth_not_configured");
+      url.searchParams.set("error", error);
       url.searchParams.set("provider", provider);
-      return reply.redirect(url.toString(), 302);
+      if (state) url.searchParams.set("state", state);
+      return url.toString();
+    };
+    if (!configured) {
+      return reply.redirect(buildRedirect("oauth_not_configured"), 302);
     }
     // Configured but Phase 3 handler not yet wired — return honest stub redirect.
-    const url = new URL(callback);
-    url.searchParams.set("error", "not_implemented");
-    url.searchParams.set("provider", provider);
-    return reply.redirect(url.toString(), 302);
+    return reply.redirect(buildRedirect("not_implemented"), 302);
   });
 
   app.get(

@@ -61,21 +61,21 @@ export default async function DashboardPage() {
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
-      <main className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
+      <main className="mx-auto max-w-[1200px] px-4 py-12 sm:px-6 sm:py-24 md:px-16 md:py-32">
         <Reveal>
           <p className="t-cap text-faint">Dashboard</p>
           <h1 className="t-h1 mt-4">Control deck.</h1>
-          <p className="t-body mt-4 max-w-[68ch] text-sub">
+          <p className="t-body mt-4 max-w-[68ch] break-words text-sub">
             Signed in as {session.user.email} · {session.user.planTier}
           </p>
         </Reveal>
-        <div className="mt-12 grid gap-6 md:grid-cols-3">
+        <div className="mt-8 grid gap-4 sm:mt-12 sm:gap-6 md:grid-cols-3">
           {widgets.map((w, i) => (
-            <Reveal key={w.label} delay={i * 80}>
-              <div className="h-full rounded-lg border border-line bg-surface p-8">
+            <Reveal key={w.label} delay={i * 80} className="min-w-0">
+              <div className="h-full min-w-0 rounded-lg border border-line bg-surface p-6 sm:p-8">
                 <p className="t-cap text-faint">{w.label}</p>
-                <p className="t-h2 mt-4 text-sub">{w.value}</p>
-                <p className="t-body mt-2 text-faint">{w.hint}</p>
+                <p className="t-h2 mt-4 break-words text-sub">{w.value}</p>
+                <p className="t-body mt-2 break-words text-faint">{w.hint}</p>
               </div>
             </Reveal>
           ))}

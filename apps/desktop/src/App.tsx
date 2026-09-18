@@ -1,8 +1,11 @@
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { AppSidebar } from "./components/AppSidebar.js";
 import { AuthView } from "./components/AuthView.js";
+import { ArrowLeft } from "./components/animate-ui/icons/arrow-left.js";
 import { DashboardView } from "./components/DashboardView.js";
 import { DictateView } from "./components/DictateView.js";
 import { FloatingPill } from "./components/FloatingPill.js";
@@ -10,6 +13,7 @@ import { HistoryView } from "./components/HistoryView.js";
 import { OnboardingView } from "./components/OnboardingView.js";
 import ParticleLogoLoader from "./components/ParticleLogoLoader.js";
 import { type Prefs, SettingsView } from "./components/SettingsView.js";
+import { UpdateAnnouncement } from "./components/UpdateAnnouncement.js";
 import {
   DEFAULT_PREFS,
   loadOnboarded,
@@ -18,7 +22,35 @@ import {
   savePrefs,
 } from "./lib/prefs.js";
 import { ensureFloatingPill } from "./lib/ptt.js";
-import { isTauri, type SessionInfo, sessionStatus } from "./lib/session.js";
+import {
+  isTauri,
+  logout,
+  type SessionInfo,
+  sessionStatus,
+} from "./lib/session.js";
+
+function detectWindowLabels(): { isSettings: boolean; isPill: boolean } {
+  try {
+    // Tauri 2 WebviewWindow label is the source of truth for secondary windows.
+    // Fallback to Window label for browser preview / older mocks.
+    let label: string | null = null;
+    try {
+      label = getCurrentWebviewWindow().label;
+    } catch {
+      try {
+        label = getCurrentWindow().label;
+      } catch {
+        label = null;
+      }
+    }
+    return {
+      isSettings: label === "settings",
+      isPill: label === "floating-pill",
+    };
+  } catch {
+    return { isSettings: false, isPill: false };
+  }
+}
 
 type View = "dashboard" | "dictate" | "history" | "settings";
 
@@ -26,21 +58,63 @@ export default function App() {
   const [view, setView] = useState<View>("dashboard");
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [onboarded, setOnboarded] = useState(true);
-  const [isSettingsWindow, setIsSettingsWindow] = useState(false);
-  const [isFloatingPill, setIsFloatingPill] = useState(false);
-  const [ready, setReady] = useState(false);
-  const [session, setSession] = useState<SessionInfo | null>(null);
+  const initialLabels = detectWindowLabels();
+  const [isSettingsWindow, setIsSettingsWindow] = useState(
+    initialLabels.isSettings,
+  );
+  const [isFloatingPill, setIsFloatingPill] = useState(initialLabels.isPill);
+  const [ready, setReady] = useState(
+    initialLabels.isSettings || initialLabels.isPill,
+  );
+  const [session, setSession] = useState<SessionInfo | null>(
+    initialLabels.isSettings || initialLabels.isPill
+      ? { loggedIn: false }
+      : null,
+  );
   const [collapsed, setCollapsed] = useState(false);
-  const [splashDone, setSplashDone] = useState(false);
+  const [splashDone, setSplashDone] = useState(
+    initialLabels.isSettings || initialLabels.isPill,
+  );
+
+  // Tauri injection can be async: re-check label shortly after mount and correct isPill/isSettings if initial was false
+  useEffect(() => {
+    if (isSettingsWindow || isFloatingPill) return;
+    const id = window.setTimeout(() => {
+      const late = detectWindowLabels();
+      if (late.isSettings && !isSettingsWindow) {
+        setIsSettingsWindow(true);
+        setReady(true);
+        setSplashDone(true);
+        setSession({ loggedIn: false });
+      }
+      if (late.isPill && !isFloatingPill) {
+        setIsFloatingPill(true);
+        setReady(true);
+        setSplashDone(true);
+        setSession({ loggedIn: false });
+      }
+    }, 120);
+    return () => clearTimeout(id);
+  }, [isSettingsWindow, isFloatingPill]);
 
   useEffect(() => {
-    try {
-      const label = getCurrentWindow().label;
-      setIsSettingsWindow(label === "settings");
-      setIsFloatingPill(label === "floating-pill");
-    } catch {
-      setIsSettingsWindow(false);
-      setIsFloatingPill(false);
+    // Secondary windows already marked ready synchronously above; main window loads prefs.
+    if (isSettingsWindow || isFloatingPill) {
+      void Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
+        setPrefs(p);
+        setOnboarded(o);
+        setReady(true);
+      });
+      // Refresh prefs when tray reopens hidden settings window (hide->show emits settings-refresh)
+      let unlisten: (() => void) | undefined;
+      void listen("settings-refresh", () => {
+        void loadPrefs().then(setPrefs);
+      }).then((fn) => {
+        unlisten = fn;
+      });
+      return () => {
+        if (unlisten) unlisten();
+      };
     }
     void Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
       setPrefs(p);
@@ -69,13 +143,16 @@ export default function App() {
   }, []);
 
   // Auto-show floating pill once main app is ready (not in pill/settings windows)
+  // Note: pill is usable offline in local mode, so don't gate behind login.
   useEffect(() => {
     if (isFloatingPill || isSettingsWindow) return;
-    if (!ready || !splashDone || !onboarded || !session?.loggedIn) return;
+    if (!ready || !splashDone || !onboarded || session === null) return;
     if (!isTauri()) return;
     // Small delay lets main window finish paint before spawning pill
     const id = window.setTimeout(() => {
-      void ensureFloatingPill().catch(() => {});
+      void ensureFloatingPill().catch((e) => {
+        console.warn("ensureFloatingPill auto-show failed", e);
+      });
     }, 650);
     return () => clearTimeout(id);
   }, [ready, splashDone, onboarded, session, isFloatingPill, isSettingsWindow]);
@@ -84,9 +161,33 @@ export default function App() {
     document.documentElement.classList.toggle("dark", prefs.theme === "dark");
   }, [prefs.theme]);
 
+  // Keep App session in sync with logout from SettingsView or other windows
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    void listen<SessionInfo>("session-changed", (event) => {
+      const payload = event.payload as unknown as SessionInfo;
+      if (payload && typeof payload.loggedIn === "boolean") {
+        setSession(payload);
+        if (!payload.loggedIn) setView("dashboard");
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
   const updatePrefs = (p: Prefs) => {
     setPrefs(p);
     void savePrefs(p);
+  };
+
+  const handleLogout = () => {
+    void logout()
+      .then(() => setSession({ loggedIn: false }))
+      .catch(() => setSession({ loggedIn: false }));
   };
 
   const shell =
@@ -95,6 +196,10 @@ export default function App() {
   if (isFloatingPill) {
     return <FloatingPill prefs={prefs} />;
   }
+
+  // Global in-app updater announcement (fixed top banner, outside splash)
+  const updateBanner =
+    !isSettingsWindow && !isFloatingPill ? <UpdateAnnouncement /> : null;
 
   // Settings runs in its own window: render instantly with defaults and let
   // prefs/session upgrade in place. Never gate it behind the main splash or
@@ -162,12 +267,50 @@ export default function App() {
     );
   }
 
-  // Signed-out users land on the login page first — nothing else renders
-  // before this. (Settings/floating-pill windows return earlier above.)
+  // Signed-out users land on login, but Settings must remain reachable
+  // (in-app Settings was dead when logged out — trap door to configure
+  // hotkey/theme/local model without account).
   if (!session.loggedIn) {
+    if (view === "settings") {
+      return (
+        <main className={shell}>
+          {updateBanner}
+          <div className="flex min-h-screen">
+            <AppSidebar
+              active={view}
+              onSelect={(id) => setView(id as View)}
+              collapsed={collapsed}
+              onCollapsedChange={setCollapsed}
+              email={null}
+              onLogout={handleLogout}
+            />
+            <div className="min-w-0 flex-1 overflow-auto">
+              <SettingsView prefs={prefs} onPrefs={updatePrefs} />
+            </div>
+          </div>
+          <div className="fixed bottom-3 right-3 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-black shadow">
+            <button
+              type="button"
+              onClick={() => setView("dashboard")}
+              className="inline-flex items-center gap-1.5"
+            >
+              <ArrowLeft size={14} animateOnHover />
+              Back to sign in
+            </button>
+          </div>
+        </main>
+      );
+    }
     return (
       <main className="min-h-screen bg-transparent text-white">
         <AuthView onDone={setSession} />
+        <button
+          type="button"
+          onClick={() => setView("settings")}
+          className="fixed bottom-3 right-3 rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/60 hover:bg-white/15 hover:text-white"
+        >
+          Settings
+        </button>
       </main>
     );
   }
@@ -189,6 +332,7 @@ export default function App() {
 
   return (
     <main className={shell}>
+      {updateBanner}
       <div className="flex min-h-screen">
         <AppSidebar
           active={view}
@@ -196,6 +340,7 @@ export default function App() {
           collapsed={collapsed}
           onCollapsedChange={setCollapsed}
           email={session?.email ?? null}
+          onLogout={handleLogout}
         />
         <div className="min-w-0 flex-1 overflow-auto">
           {view === "dashboard" ? (

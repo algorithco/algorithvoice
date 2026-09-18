@@ -2,50 +2,166 @@
 @import "@algorith-voice/ui/styles.css";
 
 @theme {
-  --color-background: #09090b;
-  --color-foreground: #fafafa;
-  --color-card: #18181b;
-  --color-card-foreground: #fafafa;
-  --color-popover: #18181b;
-  --color-popover-foreground: #fafafa;
-  --color-primary: #fafafa;
-  --color-primary-foreground: #18181b;
-  --color-secondary: #27272a;
-  --color-secondary-foreground: #fafafa;
-  --color-muted: #27272a;
-  --color-muted-foreground: #a1a1aa;
-  --color-accent: #27272a;
-  --color-accent-foreground: #fafafa;
+  --color-background: #ffffff;
+  --color-foreground: #000000;
+  --color-card: #ffffff;
+  --color-card-foreground: #000000;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #000000;
+  --color-primary: #000000;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f4f4f4;
+  --color-secondary-foreground: #000000;
+  --color-muted: #f4f4f4;
+  --color-muted-foreground: #6e6e6e;
+  --color-accent: #f4f4f4;
+  --color-accent-foreground: #000000;
   --color-destructive: #ef4444;
-  --color-destructive-foreground: #fafafa;
-  --color-border: #27272a;
-  --color-input: #27272a;
-  --color-ring: #d4d4d8;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e4e4e4;
+  --color-input: #e4e4e4;
+  --color-ring: #000000;
+}
+
+/* Sof qora dark rejim: fon #000, chegaralar neytral oq/10.
+   (Avvalgi zinc ohanglar kulrang-ko'k tus berardi.) */
+.dark {
+  --color-background: #000000;
+  --color-foreground: #ffffff;
+  --color-card: #000000;
+  --color-card-foreground: #ffffff;
+  --color-popover: #000000;
+  --color-popover-foreground: #ffffff;
+  --color-primary: #ffffff;
+  --color-primary-foreground: #000000;
+  --color-secondary: #0a0a0a;
+  --color-secondary-foreground: #ffffff;
+  --color-muted: #0a0a0a;
+  --color-muted-foreground: #a3a3a3;
+  --color-accent: #0a0a0a;
+  --color-accent-foreground: #ffffff;
+  --color-border: #1c1c1c;
+  --color-input: #1c1c1c;
+  --color-ring: #ffffff;
 }
 
 :root {
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  --card: 240 6% 10%;
-  --card-foreground: 0 0% 98%;
-  --popover: 240 10% 3.9%;
-  --popover-foreground: 0 0% 98%;
-  --primary: 0 0% 98%;
-  --primary-foreground: 240 5.9% 10%;
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
+  --background: 0 0% 100%;
+  --foreground: 0 0% 0%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 0%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 0%;
+  --primary: 0 0% 0%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 0%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 43%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 0%;
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 0 0% 98%;
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --ring: 240 4.9% 83.9%;
+  --border: 0 0% 89%;
+  --input: 0 0% 89%;
+  --ring: 0 0% 0%;
+}
+
+.dark {
+  --background: 0 0% 0%;
+  --foreground: 0 0% 100%;
+  --card: 0 0% 0%;
+  --card-foreground: 0 0% 100%;
+  --popover: 0 0% 0%;
+  --popover-foreground: 0 0% 100%;
+  --primary: 0 0% 100%;
+  --primary-foreground: 0 0% 0%;
+  --secondary: 0 0% 4%;
+  --secondary-foreground: 0 0% 100%;
+  --muted: 0 0% 4%;
+  --muted-foreground: 0 0% 64%;
+  --accent: 0 0% 4%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 11%;
+  --input: 0 0% 11%;
+  --ring: 0 0% 100%;
 }
 
 /* Register the shared package as a Tailwind content source: its utilities
    (used by @algorith-voice/ui components) live outside this app and are
    otherwise invisible to automatic content detection. */
 @source "../../../packages/ui/src";
+
+/* ---- Katta ekran tipografiya masshtabi ----
+   Tailwind rem-birlikda ishlaydi, shuning uchun ildiz shriftini
+   kattalashtirish butun UI ni proporsional kattalashtiradi. */
+html {
+  font-size: 16px;
+}
+@media (min-width: 1536px) {
+  html {
+    font-size: 17.5px;
+  }
+}
+@media (min-width: 1920px) {
+  html {
+    font-size: 19px;
+  }
+}
+
+/* px-bazadagi .av-* tiplar uchun katta ekran override lari
+   (shared tokens ga tegmaymiz — faqat desktop). */
+@media (min-width: 1536px) {
+  .av-display {
+    font-size: 38px;
+    line-height: 44px;
+  }
+  .av-h1 {
+    font-size: 28px;
+    line-height: 34px;
+  }
+  .av-h2 {
+    font-size: 20px;
+    line-height: 27px;
+  }
+  .av-body {
+    font-size: 15px;
+    line-height: 22px;
+  }
+  .av-small {
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .av-mono {
+    font-size: 14px;
+    line-height: 20px;
+  }
+}
+@media (min-width: 1920px) {
+  .av-display {
+    font-size: 44px;
+    line-height: 50px;
+  }
+  .av-h1 {
+    font-size: 32px;
+    line-height: 38px;
+  }
+  .av-h2 {
+    font-size: 22px;
+    line-height: 29px;
+  }
+  .av-body {
+    font-size: 16px;
+    line-height: 24px;
+  }
+  .av-small {
+    font-size: 14px;
+    line-height: 19px;
+  }
+  .av-mono {
+    font-size: 15px;
+    line-height: 21px;
+  }
+}

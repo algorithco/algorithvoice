@@ -48,7 +48,7 @@ export default function DesignSystemPage() {
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <SiteNav />
-      <main className="mx-auto max-w-[1200px] px-6 py-24 md:px-16 md:py-32">
+      <main className="mx-auto max-w-[1200px] px-4 py-12 sm:px-6 sm:py-24 md:px-16 md:py-32">
         <p className="t-cap text-faint">Design system</p>
         <h1 className="t-h1 mt-4">Tokens, type, motion.</h1>
         <p className="t-body mt-4 max-w-[68ch] text-sub">
@@ -73,10 +73,10 @@ export default function DesignSystemPage() {
         </Section>
 
         <Section title="Type — Inter, mono accents only">
-          <div className="flex flex-col gap-6 rounded-lg border border-line bg-surface p-8">
-            <p className="t-hero">Hero 72/78</p>
-            <p className="t-h1">H1 44/50</p>
-            <p className="t-h2">H2 28/34</p>
+          <div className="flex min-w-0 flex-col gap-6 overflow-hidden rounded-lg border border-line bg-surface p-6 sm:p-8">
+            <p className="t-hero">Hero fluid</p>
+            <p className="t-h1">H1 fluid</p>
+            <p className="t-h2">H2 fluid</p>
             <p className="t-lead">
               Body large 18/28 — the quick brown fox jumps over the lazy dog.
             </p>
@@ -105,11 +105,11 @@ export default function DesignSystemPage() {
         </Section>
 
         <Section title="Motion specimens">
-          <div className="flex flex-wrap items-center gap-8 rounded-lg border border-line bg-surface p-8">
+          <div className="flex flex-wrap items-center gap-6 rounded-lg border border-line bg-surface p-6 sm:gap-8 sm:p-8">
             <p className="t-h2">
               <Counter to={42} />
             </p>
-            <div className="max-w-[320px] flex-1">
+            <div className="w-full min-w-0 sm:max-w-[320px] sm:flex-1">
               <Faq
                 items={[["Sample question?", "Sample answer in body copy."]]}
               />
@@ -118,7 +118,7 @@ export default function DesignSystemPage() {
         </Section>
 
         <Section title="Brand mark + indicator (desktop truth)">
-          <div className="flex flex-wrap items-center gap-6 rounded-lg border border-line bg-surface p-8">
+          <div className="flex flex-wrap items-center gap-6 rounded-lg border border-line bg-surface p-6 sm:p-8">
             <Logo className="h-6 w-auto text-ink" />
             <WaveformGlyph className="text-ink" />
             <Badge>Badge</Badge>

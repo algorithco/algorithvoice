@@ -34,25 +34,27 @@ export default function AdminUsersPage() {
           setSearch(e.target.value);
           setPage(1);
         }}
-        className="w-full max-w-sm rounded border border-line px-3 py-2 text-sm"
+        className="min-h-[44px] w-full max-w-sm rounded border border-line px-3 py-2 text-base sm:text-sm"
       />
       <div className="overflow-auto rounded-lg border border-line">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[560px] text-sm">
           <thead>
             <tr className="bg-surface">
-              <th className="p-2 text-left">Email</th>
-              <th className="p-2 text-left">Role</th>
-              <th className="p-2 text-left">Plan</th>
-              <th className="p-2 text-left">Created</th>
+              <th className="whitespace-nowrap p-2 text-left">Email</th>
+              <th className="whitespace-nowrap p-2 text-left">Role</th>
+              <th className="whitespace-nowrap p-2 text-left">Plan</th>
+              <th className="whitespace-nowrap p-2 text-left">Created</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id} className="border-t border-line">
-                <td className="p-2">{r.email}</td>
-                <td className="p-2">{r.role}</td>
-                <td className="p-2">{r.planTier}</td>
-                <td className="p-2 text-xs">
+                <td className="max-w-[220px] truncate p-2" title={r.email}>
+                  {r.email}
+                </td>
+                <td className="whitespace-nowrap p-2">{r.role}</td>
+                <td className="whitespace-nowrap p-2">{r.planTier}</td>
+                <td className="whitespace-nowrap p-2 text-xs">
                   {new Date(r.createdAt).toLocaleDateString()}
                 </td>
               </tr>
@@ -65,14 +67,14 @@ export default function AdminUsersPage() {
           type="button"
           disabled={page <= 1}
           onClick={() => setPage((p) => p - 1)}
-          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+          className="min-h-[44px] rounded border px-4 text-sm disabled:opacity-50"
         >
           Prev
         </button>
         <button
           type="button"
           onClick={() => setPage((p) => p + 1)}
-          className="rounded border px-3 py-1 text-sm"
+          className="min-h-[44px] rounded border px-4 text-sm"
         >
           Next
         </button>

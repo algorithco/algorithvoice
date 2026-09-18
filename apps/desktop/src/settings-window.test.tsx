@@ -8,6 +8,9 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: "settings" }),
 }));
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({ label: "settings" }),
+}));
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async () => {
     throw new Error("tauri unavailable in test");
@@ -48,10 +51,9 @@ describe("settings window (white-screen regression)", () => {
   });
 
   it("boots the app bundle in a settings-labelled webview", () => {
-    // Effects do not run under renderToString, so this asserts the splash
-    // gate — i.e. the whole import chain loads and the app starts up
-    // instead of crashing to a blank page.
+    // Settings must render instantly without splash (no black flash).
     const html = renderToString(<App />);
-    expect(html).toContain("Loading");
+    expect(html).toContain("Settings");
+    expect(html).not.toContain("Loading");
   });
 });

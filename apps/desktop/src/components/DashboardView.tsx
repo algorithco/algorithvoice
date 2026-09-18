@@ -5,6 +5,8 @@ import {
   listHistory,
 } from "../lib/history.js";
 import { ensureFloatingPill } from "../lib/ptt.js";
+import { CirclePlus } from "./animate-ui/icons/circle-plus.js";
+import { ClipboardList } from "./animate-ui/icons/clipboard-list.js";
 
 type Props = {
   hotkey: string;
@@ -80,39 +82,47 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
     }
   };
 
+  const avgWords =
+    !loading && stats && stats.total > 0
+      ? Math.round(stats.total_words / stats.total)
+      : 0;
+
   return (
-    <div className="mx-auto w-full max-w-[1100px] p-8">
-      {/* Header */}
+    <div className="mx-auto w-full max-w-[1100px] p-8 lg:p-10 2xl:max-w-[1280px]">
+      {/* Header — status lives here so the hero holds the only CTA */}
       <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-[28px] font-semibold tracking-tight text-black dark:text-white md:text-[32px]">
+          <h1 className="text-3xl font-semibold tracking-tight text-black md:text-4xl dark:text-white 2xl:text-[44px]">
             {greeting()}
             {email ? `, ${email.split("@")[0]}` : ""}
           </h1>
-          <p className="mt-1 text-sm text-gray-500">Your voice workspace</p>
+          <p className="mt-2 text-sm text-gray-500 lg:text-[15px]">
+            Your voice workspace
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={handleStart}
-          className="inline-flex h-10 items-center justify-center rounded-full bg-cyan-400 px-6 text-sm font-semibold text-black shadow-[0_0_20px_rgba(34,211,238,0.3)] transition-all hover:bg-cyan-300 hover:shadow-[0_0_28px_rgba(34,211,238,0.45)]"
-        >
-          Start Dictation
-        </button>
+        <div className="inline-flex h-10 shrink-0 items-center gap-2.5 rounded-full border border-gray-200 bg-white px-5 text-sm text-gray-500 dark:border-white/10 dark:bg-black">
+          <span className="size-2 rounded-full bg-black dark:bg-white" />
+          <span className="font-medium text-black dark:text-white">Ready</span>
+          <span className="text-gray-300 dark:text-white/20">•</span>
+          <span className="font-mono text-[13px]">{hotkey}</span>
+          <span className="text-gray-300 dark:text-white/20">•</span>
+          <span>Cloud</span>
+        </div>
       </div>
 
       {/* Main dictation card */}
       <div className="relative mt-8 overflow-hidden rounded-2xl border border-gray-200 bg-white p-8 dark:border-white/10 dark:bg-black md:p-10">
-        <div className="pointer-events-none absolute -top-24 left-1/2 h-64 w-[720px] -translate-x-1/2 rounded-full bg-cyan-400/10 blur-[80px]" />
+        <div className="pointer-events-none absolute -top-24 left-1/2 h-64 w-[720px] -translate-x-1/2 rounded-full bg-black/5 blur-[80px] dark:bg-white/5" />
         <div className="relative flex flex-col items-center text-center">
-          <div className="grid size-20 place-items-center rounded-full border border-cyan-400/30 bg-cyan-400/10 shadow-[0_0_24px_rgba(34,211,238,0.15)]">
-            <div className="size-3 rounded-full bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
+          <div className="grid size-20 place-items-center rounded-full border border-gray-300 bg-gray-100 dark:border-white/20 dark:bg-white/5">
+            <div className="size-3 rounded-full bg-black dark:bg-white" />
           </div>
           <p className="mt-4 text-sm font-medium text-black dark:text-white">
             Ready to listen
           </p>
           <p className="mt-2 text-sm text-gray-500">
             Hold{" "}
-            <span className="rounded bg-cyan-400/10 px-2 py-0.5 font-mono text-cyan-600 dark:bg-cyan-400/10 dark:text-cyan-400">
+            <span className="rounded bg-black/5 px-2 py-0.5 font-mono text-black dark:bg-white/10 dark:text-white">
               {hotkey}
             </span>{" "}
             to dictate
@@ -120,8 +130,9 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
           <button
             type="button"
             onClick={handleStart}
-            className="mt-6 inline-flex h-11 items-center justify-center rounded-full bg-cyan-400 px-8 text-sm font-semibold text-black shadow-[0_0_20px_rgba(34,211,238,0.25)] transition-all hover:bg-cyan-300 hover:shadow-[0_0_28px_rgba(34,211,238,0.4)]"
+            className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-full bg-black px-8 text-sm font-semibold text-white transition-all hover:bg-black/85 dark:bg-white dark:text-black dark:hover:bg-white/85"
           >
+            <CirclePlus size={16} animateOnHover />
             Start Dictation
           </button>
           <p className="mt-3 text-xs text-gray-500">
@@ -132,12 +143,12 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
 
       {/* Stats */}
       <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:border-cyan-400/20 dark:border-white/10 dark:bg-black dark:hover:border-cyan-400/20">
-          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+        <div className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:border-black/20 dark:border-white/10 dark:bg-black dark:hover:border-white/20">
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-black/30 to-transparent opacity-0 transition-opacity group-hover:opacity-100 dark:via-white/30" />
           <p className="text-xs uppercase tracking-wide text-gray-500">
             Dictations today
           </p>
-          <p className="mt-2 text-2xl font-semibold text-black dark:text-white">
+          <p className="mt-2 text-2xl font-semibold text-black lg:text-3xl dark:text-white">
             {loading ? "—" : (stats?.today ?? 0)}
           </p>
           <p className="mt-1 text-xs text-gray-500">
@@ -148,28 +159,32 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
                 : "No dictations yet"}
           </p>
         </div>
-        <div className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:border-cyan-400/20 dark:border-white/10 dark:bg-black dark:hover:border-cyan-400/20">
-          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+        <div className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:border-black/20 dark:border-white/10 dark:bg-black dark:hover:border-white/20">
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-black/30 to-transparent opacity-0 transition-opacity group-hover:opacity-100 dark:via-white/30" />
           <p className="text-xs uppercase tracking-wide text-gray-500">
             Total words
           </p>
-          <p className="mt-2 text-2xl font-semibold text-cyan-600 dark:text-cyan-400">
+          <p className="mt-2 text-2xl font-semibold text-black lg:text-3xl dark:text-white">
             {loading ? "—" : (stats?.total_words ?? 0).toLocaleString()}
           </p>
           <p className="mt-1 text-xs text-gray-500">
             {loading ? " " : `${stats?.total ?? 0} dictations total`}
           </p>
         </div>
-        <div className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:border-cyan-400/20 dark:border-white/10 dark:bg-black dark:hover:border-cyan-400/20">
-          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent opacity-100" />
+        <div className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:border-black/20 dark:border-white/10 dark:bg-black dark:hover:border-white/20">
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-black/30 to-transparent opacity-100 dark:via-white/30" />
           <p className="flex items-center gap-2 text-xs uppercase tracking-wide text-gray-500">
-            <span className="size-2 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.6)]" />{" "}
-            Status
+            <span className="size-2 rounded-full bg-black dark:bg-white" /> Avg
+            per dictation
           </p>
-          <p className="mt-2 text-2xl font-semibold text-black dark:text-white">
-            Ready
+          <p className="mt-2 text-2xl font-semibold text-black lg:text-3xl dark:text-white">
+            {loading ? "—" : avgWords.toLocaleString()}
           </p>
-          <p className="mt-1 text-xs text-gray-500">Hotkey {hotkey} • Cloud</p>
+          <p className="mt-1 text-xs text-gray-500">
+            {loading || !stats || stats.total === 0
+              ? "No data yet"
+              : "words per dictation"}
+          </p>
         </div>
       </div>
 
@@ -178,13 +193,13 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
         <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-black dark:text-white">
-              <span className="size-1.5 rounded-full bg-cyan-400" /> Recent
-              activity
+              <span className="size-1.5 rounded-full bg-black dark:bg-white" />{" "}
+              Recent activity
             </h2>
             <button
               type="button"
               onClick={() => onNavigate("history")}
-              className="text-xs text-gray-500 hover:text-cyan-600 dark:hover:text-cyan-400"
+              className="text-xs text-gray-500 hover:text-black dark:hover:text-white"
             >
               View all →
             </button>
@@ -193,8 +208,8 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
             <p className="mt-6 text-sm text-gray-500">Loading…</p>
           ) : recent.length === 0 ? (
             <div className="mt-8 flex flex-col items-center py-8 text-center">
-              <div className="grid size-10 place-items-center rounded-full border border-gray-200 dark:border-gray-800">
-                <span className="text-gray-500">◌</span>
+              <div className="grid size-10 place-items-center rounded-full border border-gray-200 text-gray-500 dark:border-white/10">
+                <ClipboardList size={20} animateOnHover />
               </div>
               <p className="mt-3 text-sm font-medium text-black dark:text-white">
                 No dictations yet
@@ -205,7 +220,7 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
               </p>
             </div>
           ) : (
-            <div className="mt-4 divide-y divide-gray-200 dark:divide-gray-800">
+            <div className="mt-4 divide-y divide-gray-200 dark:divide-white/10">
               {recent.map((e) => (
                 <button
                   key={e.id}
@@ -231,34 +246,57 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
 
         <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-black dark:text-white">
-            <span className="size-1.5 rounded-full bg-cyan-400" /> Quick actions
+            <span className="size-1.5 rounded-full bg-black dark:bg-white" />{" "}
+            How it works
           </h2>
-          <div className="mt-4 flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={handleStart}
-              className="inline-flex h-11 items-center justify-center rounded-full bg-cyan-400 text-sm font-semibold text-black shadow-[0_0_16px_rgba(34,211,238,0.25)] hover:bg-cyan-300"
-            >
-              Start Dictation
-            </button>
-            <button
-              type="button"
-              onClick={() => onNavigate("history")}
-              className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 bg-white text-sm font-medium text-black hover:border-cyan-400/30 hover:text-cyan-600 dark:border-white/10 dark:bg-black dark:text-white dark:hover:border-cyan-400/30 dark:hover:text-cyan-400"
-            >
-              View History
-            </button>
-            <button
-              type="button"
-              onClick={() => onNavigate("settings")}
-              className="inline-flex h-11 items-center justify-center rounded-full border border-gray-200 bg-white text-sm font-medium text-black hover:border-cyan-400/30 hover:text-cyan-600 dark:border-white/10 dark:bg-black dark:text-white dark:hover:border-cyan-400/30 dark:hover:text-cyan-400"
-            >
-              Settings
-            </button>
-          </div>
-          <p className="mt-4 text-xs text-gray-500">
-            Shortcuts work in any app. Release to paste.
-          </p>
+          <ol className="mt-4 flex flex-col gap-4">
+            <li className="flex items-start gap-3">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-black font-mono text-[11px] font-semibold text-white dark:bg-white dark:text-black">
+                1
+              </span>
+              <div>
+                <p className="text-sm font-medium text-black dark:text-white">
+                  Hold {hotkey}
+                </p>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Press and hold anywhere to start listening
+                </p>
+              </div>
+            </li>
+            <li className="flex items-start gap-3">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-black font-mono text-[11px] font-semibold text-white dark:bg-white dark:text-black">
+                2
+              </span>
+              <div>
+                <p className="text-sm font-medium text-black dark:text-white">
+                  Speak naturally
+                </p>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Your voice is transcribed in real time
+                </p>
+              </div>
+            </li>
+            <li className="flex items-start gap-3">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-black font-mono text-[11px] font-semibold text-white dark:bg-white dark:text-black">
+                3
+              </span>
+              <div>
+                <p className="text-sm font-medium text-black dark:text-white">
+                  Release to paste
+                </p>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Text lands in the focused app automatically
+                </p>
+              </div>
+            </li>
+          </ol>
+          <button
+            type="button"
+            onClick={() => onNavigate("dictate")}
+            className="mt-5 text-xs text-gray-500 hover:text-black dark:hover:text-white"
+          >
+            Open Dictate view →
+          </button>
         </div>
       </div>
     </div>
