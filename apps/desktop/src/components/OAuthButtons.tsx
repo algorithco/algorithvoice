@@ -1,5 +1,4 @@
 import { Button } from "@algorith-voice/ui";
-import { ExternalLink, LoaderCircle } from "lucide-react";
 import { useRef, useState } from "react";
 import {
   OAUTH_PROVIDERS,
@@ -8,6 +7,8 @@ import {
   type SessionInfo,
   signInWithOAuth,
 } from "../lib/session.js";
+import { Loader } from "./animate-ui/icons/loader.js";
+import { LogIn } from "./animate-ui/icons/log-in.js";
 
 // OAuth entry points. Opens the provider in the system browser; the
 // backend redirects to algorithvoice:// and the Rust shell forwards the
@@ -51,9 +52,9 @@ export function OAuthButtons({ onDone }: { onDone: (s: SessionInfo) => void }) {
             className="gap-2"
           >
             {pending === provider ? (
-              <LoaderCircle size={16} className="animate-spin" />
+              <Loader size={16} animation="spin" animate />
             ) : (
-              <ExternalLink size={16} strokeWidth={1.5} />
+              <LogIn size={16} animateOnHover />
             )}
             Continue with {oauthProviderLabel(provider)}
           </Button>

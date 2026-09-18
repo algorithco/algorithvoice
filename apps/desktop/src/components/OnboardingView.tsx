@@ -3,9 +3,14 @@ import { Button, Logo } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useState } from "react";
 import {
+  downloadModel,
   getHardwareInfo,
+  getModelCompatibilities,
+  getModelStatus,
   type HardwareInfo,
   listAvailableModels,
+  type ModelCompatibility,
+  selectActiveModel,
 } from "../lib/localModels.js";
 import { isTauri } from "../lib/session.js";
 import Particles from "./Particles.js";
@@ -42,10 +47,15 @@ export function OnboardingView({
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
   const [models, setModels] = useState<LocalModel[] | null>(null);
+  const [compat, setCompat] = useState<Record<
+    string,
+    ModelCompatibility
+  > | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [pickedModelId, setPickedModelId] = useState<string | null>(
     () => prefs.activeModelId,
   );
+  const [preparing, setPreparing] = useState(false);
 
   useEffect(() => {
     setHotkeyInput(prefs.hotkey);
@@ -55,7 +65,7 @@ export function OnboardingView({
     setPickedModelId(prefs.activeModelId);
   }, [prefs.activeModelId]);
 
-  // Fetch hardware + catalog when user reaches Model step in local mode
+  // Fetch hardware + catalog + compat when user reaches Model step in local mode
   useEffect(() => {
     if (step !== 2 || cloudOnly) return;
     if (!isTauri()) {
@@ -68,22 +78,54 @@ export function OnboardingView({
     setModelError(null);
     void (async () => {
       try {
-        const [hw, list] = await Promise.all([
+        const [hw, list, comp] = await Promise.all([
           getHardwareInfo().catch(() => null),
           listAvailableModels(),
+          getModelCompatibilities().catch(() => null),
         ]);
         if (cancelled) return;
         if (hw) setHardware(hw);
         setModels(list);
-        // Auto-pick recommended if nothing selected yet
+        if (comp) {
+          const map: Record<string, ModelCompatibility> = {};
+          for (const c of comp) map[c.id] = c;
+          setCompat(map);
+        }
+        // Auto-pick based on real compatibility levels, not hard-coded thresholds
         if (!pickedModelId && list.length > 0) {
-          const ramGb = hw ? hw.totalRamBytes / 1_000_000_000 : 8;
-          let rec = "parakeet-tdt-0.6b-v3";
-          if (ramGb < 4) rec = "whisper-small";
-          else if (ramGb >= 16) rec = "qwen3-asr-1.7b";
-          else if (ramGb >= 12) rec = "whisper-large-v3-turbo";
-          const exists = list.some((m) => m.id === rec) ? rec : list[0].id;
-          setPickedModelId(exists);
+          let rec: string | null = null;
+          if (comp) {
+            const byLevel = (lvl: string) =>
+              list
+                .filter((m) => comp.find((c) => c.id === m.id)?.level === lvl)
+                .sort(
+                  (a, b) =>
+                    a.files.reduce((s, f) => s + f.sizeBytes, 0) -
+                    b.files.reduce((s, f) => s + f.sizeBytes, 0),
+                );
+            const recommended = byLevel("recommended");
+            const compatible = byLevel("compatible");
+            const barely = byLevel("barely-compatible");
+            if (recommended.length > 0) rec = recommended[0].id;
+            else if (compatible.length > 0) rec = compatible[0].id;
+            else if (barely.length > 0) rec = barely[0].id;
+            else
+              rec =
+                list.find(
+                  (m) =>
+                    comp.find((c) => c.id === m.id)?.level !== "unsupported",
+                )?.id ?? null;
+          }
+          if (!rec) {
+            // Fallback to legacy heuristic if compat unavailable
+            const ramGb = hw ? hw.totalRamBytes / 1_000_000_000 : 8;
+            let cand = "parakeet-tdt-0.6b-v3";
+            if (ramGb < 4) cand = "whisper-small";
+            else if (ramGb >= 16) cand = "qwen3-asr-1.7b";
+            else if (ramGb >= 8) cand = "whisper-large-v3-turbo";
+            rec = list.some((m) => m.id === cand) ? cand : list[0].id;
+          }
+          if (rec) setPickedModelId(rec);
         }
       } catch (e) {
         if (!cancelled)
@@ -93,12 +135,34 @@ export function OnboardingView({
     return () => {
       cancelled = true;
     };
-  }, [step, cloudOnly, pickedModelId]);
+  }, [step, cloudOnly]);
 
   const saveHotkey = async (raw: string): Promise<boolean> => {
     const next = raw.trim();
     if (!next) {
       setHotkeyError("Hotkey must not be empty.");
+      return false;
+    }
+    if (next.length > 32) {
+      setHotkeyError("Hotkey too long (max 32 characters).");
+      return false;
+    }
+    if (!/^[A-Za-z0-9+_ -]+$/.test(next)) {
+      setHotkeyError("Hotkey contains unsupported characters.");
+      return false;
+    }
+    const lower = next.toLowerCase();
+    const hasModifier = [
+      "ctrl",
+      "alt",
+      "shift",
+      "super",
+      "meta",
+      "command",
+      "cmd",
+    ].some((m) => lower.includes(m));
+    if (!hasModifier || !lower.includes("+")) {
+      setHotkeyError("Use a modifier + key, e.g. Ctrl+Space.");
       return false;
     }
     if (next === prefs.hotkey) {
@@ -109,8 +173,17 @@ export function OnboardingView({
       await invoke("register_hotkey", { shortcut: next });
     } catch (e) {
       // Browser preview has no Tauri shell — keep the pref locally.
-      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-        setHotkeyError(e instanceof Error ? e.message : String(e));
+      const isShell =
+        typeof window !== "undefined" &&
+        ("__TAURI__" in window || "__TAURI_INTERNALS__" in window);
+      if (isShell) {
+        const msg =
+          e instanceof Error
+            ? e.message
+            : typeof e === "string"
+              ? e
+              : JSON.stringify(e);
+        setHotkeyError(msg);
         return false;
       }
     }
@@ -286,21 +359,55 @@ export function OnboardingView({
             <ModelPickerStep
               hardware={hardware}
               models={models}
+              compat={compat}
               error={modelError}
               pickedId={pickedModelId}
+              busy={preparing}
               onPick={setPickedModelId}
-              onContinue={() => {
-                if (pickedModelId)
+              onContinue={async () => {
+                if (!pickedModelId) {
+                  setModelError("Pick a compatible model or choose Cloud.");
+                  return;
+                }
+                const c = compat?.[pickedModelId];
+                if (c?.level === "unsupported") {
+                  setModelError(c.reasons.join(" "));
+                  return;
+                }
+                setPreparing(true);
+                setModelError(null);
+                try {
+                  // Persist choice immediately so Settings sees it even if download stalls
                   onPrefs({
                     ...prefs,
                     mode: "local",
                     activeModelId: pickedModelId,
                   });
-                else onPrefs({ ...prefs, mode: "local" });
-                setStep(3);
+                  // If model already ready, try to activate worker so first dictation is instant
+                  try {
+                    const st = await getModelStatus(pickedModelId);
+                    if (
+                      st.status === "not-downloaded" ||
+                      st.status === "error"
+                    ) {
+                      await downloadModel(pickedModelId);
+                      setModelError(
+                        `Download started for ${pickedModelId} — track progress in Settings → Local. You can start with Cloud and switch when ready.`,
+                      );
+                      // Don't block onboarding — let user finish while download runs
+                    } else if (st.status === "ready") {
+                      await selectActiveModel(pickedModelId).catch(() => {});
+                    }
+                  } catch {
+                    // Status check is best-effort; download will be available in Settings
+                  }
+                  setStep(3);
+                } finally {
+                  setPreparing(false);
+                }
               }}
               onSkip={() => {
-                onPrefs({ ...prefs, mode: "local", activeModelId: null });
+                onPrefs({ ...prefs, mode: "cloud", activeModelId: null });
                 setStep(3);
               }}
             />
@@ -337,29 +444,49 @@ export function OnboardingView({
 function ModelPickerStep({
   hardware,
   models,
+  compat,
   error,
   pickedId,
+  busy,
   onPick,
   onContinue,
   onSkip,
 }: {
   hardware: HardwareInfo | null;
   models: LocalModel[] | null;
+  compat: Record<string, ModelCompatibility> | null;
   error: string | null;
   pickedId: string | null;
+  busy?: boolean;
   onPick: (id: string) => void;
   onContinue: () => void;
   onSkip: () => void;
 }) {
   const recommendedId = useMemo(() => {
     if (!models || models.length === 0) return null;
+    if (compat) {
+      const pick = (lvl: string) =>
+        models
+          .filter((m) => compat[m.id]?.level === lvl)
+          .sort(
+            (a, b) =>
+              a.files.reduce((s, f) => s + f.sizeBytes, 0) -
+              b.files.reduce((s, f) => s + f.sizeBytes, 0),
+          )[0]?.id ?? null;
+      return (
+        pick("recommended") ??
+        pick("compatible") ??
+        pick("barely-compatible") ??
+        null
+      );
+    }
     const ramGb = hardware ? hardware.totalRamBytes / 1_000_000_000 : 8;
     let rec = "parakeet-tdt-0.6b-v3";
     if (ramGb < 4) rec = "whisper-small";
     else if (ramGb >= 16) rec = "qwen3-asr-1.7b";
-    else if (ramGb >= 12) rec = "whisper-large-v3-turbo";
+    else if (ramGb >= 8) rec = "whisper-large-v3-turbo";
     return models.some((m) => m.id === rec) ? rec : models[0].id;
-  }, [hardware, models]);
+  }, [hardware, models, compat]);
 
   const hardwareLine = useMemo(() => {
     if (!hardware) return "Detecting system…";
@@ -415,19 +542,34 @@ function ModelPickerStep({
           const total = m.files.reduce((a, f) => a + f.sizeBytes, 0);
           const isPicked = pickedId === m.id;
           const isRec = m.id === recommendedId;
-          const needRam = m.minRamGb;
-          const ramGb = hardware ? hardware.totalRamBytes / 1_000_000_000 : 99;
-          const blocked = needRam > 0 && ramGb < needRam;
+          const c = compat?.[m.id];
+          const level = c?.level ?? null;
+          const blocked = level === "unsupported";
+          const levelLabel =
+            level === "unsupported"
+              ? "Not compatible"
+              : level === "barely-compatible"
+                ? "May be slow"
+                : level === "compatible"
+                  ? "Compatible"
+                  : level === "recommended"
+                    ? "Recommended"
+                    : null;
+          const reasons = c?.reasons?.slice(0, 1).join(" ") ?? "";
           return (
             <button
               key={m.id}
               type="button"
-              onClick={() => onPick(m.id)}
+              disabled={blocked}
+              aria-disabled={blocked}
+              onClick={() => {
+                if (!blocked) onPick(m.id);
+              }}
               className={`flex w-full flex-col rounded-md border px-3 py-2.5 text-left transition-colors ${
                 isPicked
                   ? "border-white bg-white text-black"
                   : "border-white/10 bg-transparent text-white hover:bg-white/[0.06]"
-              } ${blocked ? "opacity-60" : ""}`}
+              } ${blocked ? "opacity-40 cursor-not-allowed" : ""}`}
             >
               <span className="flex w-full items-center justify-between gap-2">
                 <span className="text-[13px] font-medium leading-tight">
@@ -439,6 +581,25 @@ function ModelPickerStep({
                       className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${isPicked ? "bg-black text-white" : "bg-white text-black"}`}
                     >
                       Tavsiya
+                    </span>
+                  ) : null}
+                  {levelLabel ? (
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] ${
+                        level === "unsupported"
+                          ? isPicked
+                            ? "bg-red-600 text-white"
+                            : "bg-red-500/20 text-red-300"
+                          : level === "barely-compatible"
+                            ? isPicked
+                              ? "bg-amber-600 text-white"
+                              : "bg-amber-500/20 text-amber-300"
+                            : isPicked
+                              ? "bg-black/10 text-black"
+                              : "bg-white/10 text-white/70"
+                      }`}
+                    >
+                      {levelLabel}
                     </span>
                   ) : null}
                   <span
@@ -455,37 +616,45 @@ function ModelPickerStep({
                 {m.languages.length} langs • {m.license}
               </span>
               <span
-                className={`mt-0.5 text-[11px] ${isPicked ? "text-black/50" : "text-white/30"}`}
+                className={`mt-0.5 text-[11px] ${isPicked ? "text-black/50" : "text-white/40"}`}
               >
                 RAM {m.minRamGb}→{m.recommendedRamGb} GB
                 {m.minVramGb > 0
                   ? ` • VRAM ${m.minVramGb}→${m.recommendedVramGb} GB`
                   : ""}{" "}
-                {blocked ? "• Not enough RAM" : ""}
+                {reasons ? `• ${reasons}` : ""}
               </span>
             </button>
           );
         })}
       </div>
       <p className="mt-2 max-w-[560px] text-xs text-white/25">
-        You can change or download later in Settings → Local. Parakeet 25 langs
-        is default for most PCs.
+        Verified against your system (RAM, GPU, disk). Unsupported models are
+        disabled. You can change or download later in Settings → Local.
       </p>
+      {error ? (
+        <p className="mt-3 max-w-[560px] text-sm text-amber-300">{error}</p>
+      ) : null}
       <div className="mt-6 flex w-full justify-center gap-3">
         <Button
           onClick={onContinue}
-          disabled={!pickedId}
+          disabled={
+            !pickedId ||
+            busy ||
+            (pickedId ? compat?.[pickedId]?.level === "unsupported" : false)
+          }
           className="h-[54px] w-[200px] rounded-xl bg-white text-[15px] font-medium text-black hover:bg-white/90 disabled:opacity-40"
         >
-          Continue
+          {busy ? "Preparing…" : "Continue"}
         </Button>
       </div>
       <button
         type="button"
         onClick={onSkip}
-        className="mt-3 text-xs text-white/40 hover:text-white/70"
+        disabled={!!busy}
+        className="mt-3 text-xs text-white/40 hover:text-white/70 disabled:opacity-40"
       >
-        Skip — decide later in Settings
+        Not now — use Cloud
       </button>
       <div className="h-12" />
       <StepProgress current={2} total={4} />

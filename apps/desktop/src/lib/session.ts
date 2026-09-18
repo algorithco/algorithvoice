@@ -4,10 +4,17 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 const API: string =
   (import.meta.env.VITE_API_URL as string | undefined) ??
-  "http://localhost:3001";
+  (import.meta.env.DEV
+    ? "http://localhost:3001"
+    : "https://api.algorithvoice.com");
 
 export function isTauri(): boolean {
-  return "__TAURI_INTERNALS__" in window;
+  // Tauri 2 recommends checking __TAURI__; __TAURI_INTERNALS__ may not be
+  // present in secondary webviews until IPC handshake completes.
+  return (
+    typeof window !== "undefined" &&
+    ("__TAURI__" in window || "__TAURI_INTERNALS__" in window)
+  );
 }
 
 async function tauri<T>(
@@ -37,14 +44,66 @@ export async function sessionStatus(): Promise<SessionInfo> {
     loggedIn: false,
   });
   if (stored.loggedIn) return stored;
-  return readDemoSession() ?? { loggedIn: false };
+  // Demo localStorage bypass was reachable from any XSS — only allow it in
+  // browser preview (isTauri() === false). In the desktop shell the keyring
+  // is the single source of truth.
+  if (!isTauri()) {
+    return readDemoSession() ?? { loggedIn: false };
+  }
+  return { loggedIn: false };
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 10000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+function isAllowedOpenUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    // Allow http localhost only in DEV (Vite + local API)
+    const isLoopback =
+      host === "localhost" || host === "127.0.0.1" || host === "::1";
+    if (isLoopback) {
+      if (
+        import.meta.env.DEV &&
+        (u.protocol === "http:" || u.protocol === "https:")
+      )
+        return true;
+      return false;
+    }
+    if (u.protocol !== "https:") return false;
+    const allowed = ["api.algorithvoice.com", "github.com", "huggingface.co"];
+    if (allowed.some((h) => host === h || host.endsWith(`.${h}`))) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function safeOpenUrl(url: string): Promise<void> {
+  if (!isAllowedOpenUrl(url)) {
+    throw new Error("Blocked opening untrusted URL");
+  }
+  await openUrl(url);
 }
 
 export async function login(
   email: string,
   password: string,
 ): Promise<SessionInfo> {
-  const res = await fetch(`${API}/auth/login`, {
+  const res = await fetchWithTimeout(`${API}/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -66,7 +125,7 @@ export async function signup(
   password: string,
   deviceName: string,
 ): Promise<SessionInfo> {
-  const res = await fetch(`${API}/auth/signup`, {
+  const res = await fetchWithTimeout(`${API}/auth/signup`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password, deviceName }),
@@ -94,7 +153,11 @@ export async function signup(
 export async function logout(): Promise<void> {
   clearDemoSession();
   try {
-    await fetch(`${API}/auth/logout`, { method: "POST" });
+    localStorage.removeItem("algorith-voice-history");
+    localStorage.removeItem("algorith-voice-last-transcript");
+  } catch {}
+  try {
+    await fetchWithTimeout(`${API}/auth/logout`, { method: "POST" }, 5000);
   } catch {
     // Backend logout is best-effort in Phase 1; keyring clear is authoritative.
   }
@@ -173,11 +236,12 @@ export function oauthProviderLabel(provider: OAuthProvider): string {
   return provider === "google" ? "Google" : "GitHub";
 }
 
-function oauthStartUrl(provider: OAuthProvider): string {
+function oauthStartUrl(provider: OAuthProvider, state?: string): string {
   const params = new URLSearchParams({
     callback: "algorithvoice://auth-callback",
     device: "Desktop",
   });
+  if (state) params.set("state", state);
   return `${API}/auth/oauth/${provider}/start?${params.toString()}`;
 }
 
@@ -215,6 +279,8 @@ export function parseOAuthCodeCallback(raw: string): {
     return null;
   }
   if (url.protocol !== "algorithvoice:") return null;
+  if ((url.host || "").toLowerCase() !== "auth-callback") return null;
+  if (url.username || url.password) return null;
   const query = new URLSearchParams(url.search);
   if (url.hash.length > 1) {
     const hash = new URLSearchParams(url.hash.slice(1));
@@ -242,11 +308,15 @@ async function exchangeOAuthCode(
     redirect_uri: redirectUri,
     code_verifier: codeVerifier,
   });
-  const res = await fetch(`${API}/oauth2/token`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
+  const res = await fetchWithTimeout(
+    `${API}/oauth2/token`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    },
+    15000,
+  );
   const data = (await res.json().catch(() => ({}))) as {
     access_token?: string;
     refresh_token?: string;
@@ -265,9 +335,13 @@ async function fetchEmailForAccessToken(
   accessToken: string,
 ): Promise<string | null> {
   try {
-    const res = await fetch(`${API}/auth/me`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    const res = await fetchWithTimeout(
+      `${API}/auth/me`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+      10000,
+    );
     if (!res.ok) return null;
     const data = (await res.json()) as { email?: string };
     return data.email ?? null;
@@ -340,7 +414,7 @@ export async function signInDesktop(): Promise<SessionInfo> {
     }
   });
   try {
-    await openUrl(authorizeUrl);
+    await safeOpenUrl(authorizeUrl);
   } catch {
     unlisten();
     throw new Error("Could not open the system browser.");
@@ -352,7 +426,10 @@ export async function signInDesktop(): Promise<SessionInfo> {
   }
 }
 
-function parseOAuthCallbackUrl(raw: string): {
+function parseOAuthCallbackUrl(
+  raw: string,
+  expectedState?: string,
+): {
   accessToken: string;
   email: string;
 } | null {
@@ -363,6 +440,8 @@ function parseOAuthCallbackUrl(raw: string): {
     return null;
   }
   if (url.protocol !== "algorithvoice:") return null;
+  if ((url.host || "").toLowerCase() !== "auth-callback") return null;
+  if (url.username || url.password) return null;
   const query = new URLSearchParams(url.search);
   // Some platforms deliver deep-link params in the fragment instead.
   if (url.hash.length > 1) {
@@ -370,6 +449,11 @@ function parseOAuthCallbackUrl(raw: string): {
     hash.forEach((value, key) => {
       if (!query.has(key)) query.set(key, value);
     });
+  }
+  // State binding for the legacy OAuth flow (prevents session fixation)
+  if (expectedState !== undefined) {
+    const got = query.get("state");
+    if (got !== expectedState) return null;
   }
   // Surface backend errors as readable messages so the Promise can reject
   // instead of hanging forever when OAuth is not configured.
@@ -391,6 +475,9 @@ function parseOAuthCallbackUrl(raw: string): {
     query.get("accessToken") ?? query.get("access_token") ?? query.get("token");
   const email = query.get("email");
   if (!accessToken || !email) return null;
+  // Basic email sanity (full validation happens server-side)
+  if (email.length > 320 || !email.includes("@")) return null;
+  if (accessToken.length > 16384) return null;
   return { accessToken, email };
 }
 
@@ -404,7 +491,8 @@ function parseOAuthCallbackUrl(raw: string): {
 export async function signInWithOAuth(
   provider: OAuthProvider,
 ): Promise<SessionInfo> {
-  const startUrl = oauthStartUrl(provider);
+  const state = randomBase64Url(16);
+  const startUrl = oauthStartUrl(provider, state);
   if (!isTauri()) {
     // Browser preview: the deep-link can't return to this tab.
     window.open(startUrl, "_blank", "noopener");
@@ -421,7 +509,7 @@ export async function signInWithOAuth(
   const unlisten = await listen<string[]>("auth-callback", (event) => {
     for (const raw of event.payload ?? []) {
       try {
-        const parsed = parseOAuthCallbackUrl(raw);
+        const parsed = parseOAuthCallbackUrl(raw, state);
         if (!parsed) continue;
         void tauri("store_session", {
           accessToken: parsed.accessToken,
@@ -440,15 +528,21 @@ export async function signInWithOAuth(
       }
     }
   });
+  // Auto-reject if no valid callback within 5 minutes (prevents hanging)
+  const timeout = window.setTimeout(() => {
+    rejectSession(new Error("OAuth timed out — please try again."));
+  }, 300_000);
   try {
-    await openUrl(startUrl);
+    await safeOpenUrl(startUrl);
   } catch {
+    clearTimeout(timeout);
     unlisten();
     throw new Error("Could not open the system browser.");
   }
   try {
     return await completed;
   } finally {
+    clearTimeout(timeout);
     unlisten();
   }
 }

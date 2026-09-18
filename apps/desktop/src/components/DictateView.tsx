@@ -98,25 +98,25 @@ export function DictateView({ hotkey }: { hotkey: string }) {
   }, []);
 
   return (
-    <div className="mx-auto w-full max-w-[900px] p-8">
-      <h1 className="text-2xl font-semibold tracking-tight text-black dark:text-white">
+    <div className="mx-auto w-full max-w-[900px] p-8 lg:p-10 2xl:max-w-[1060px]">
+      <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-white">
         Dictate
       </h1>
-      <p className="mt-2 text-sm text-gray-500">
+      <p className="mt-2 text-sm text-gray-500 lg:text-[15px]">
         Hold{" "}
         <span className="font-mono text-black dark:text-white">{hotkey}</span>{" "}
         to talk. Release to inject text into the focused app.
       </p>
 
-      <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-black">
+      <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-8 dark:border-white/10 dark:bg-black">
         <div className="flex flex-col items-center text-center">
           <div
             className={`grid size-20 place-items-center rounded-full border transition-colors ${
               tray === "recording"
                 ? "border-black bg-black dark:border-white dark:bg-white"
                 : tray === "processing"
-                  ? "border-gray-300 bg-gray-50 dark:border-gray-700 dark:bg-white/5"
-                  : "border-gray-200 bg-white dark:border-gray-800 dark:bg-black"
+                  ? "border-gray-300 bg-gray-50 dark:border-white/15 dark:bg-white/5"
+                  : "border-gray-200 bg-white dark:border-white/10 dark:bg-black"
             }`}
           >
             <WaveformGlyph
@@ -143,7 +143,7 @@ export function DictateView({ hotkey }: { hotkey: string }) {
           </p>
         </div>
 
-        <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+        <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
           <p className="text-xs uppercase tracking-wide text-gray-500">
             Preview
           </p>
@@ -162,7 +162,7 @@ export function DictateView({ hotkey }: { hotkey: string }) {
       </div>
 
       {lastTranscript ? (
-        <div className="mt-6 border border-gray-200 p-4 dark:border-gray-800">
+        <div className="mt-6 border border-gray-200 p-4 dark:border-white/10">
           <p className="av-small mb-2 text-gray-500">Last transcript</p>
           <p className="av-mono">{lastTranscript}</p>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -193,7 +193,7 @@ export function DictateView({ hotkey }: { hotkey: string }) {
         </div>
       ) : null}
 
-      <div className="mt-6 border border-gray-200 p-4 dark:border-gray-800">
+      <div className="mt-6 border border-gray-200 p-4 dark:border-white/10">
         <p className="av-small mb-2 text-gray-500">
           Floating pill (frameless always-on-top, drag edges to move)
         </p>
@@ -248,7 +248,7 @@ export function DictateView({ hotkey }: { hotkey: string }) {
             placeholder="gsk_…"
             autoComplete="off"
             spellCheck={false}
-            className="av-mono min-w-0 flex-1 border border-gray-200 bg-transparent px-2 py-1 text-sm dark:border-gray-800"
+            className="av-mono min-w-0 flex-1 border border-gray-200 bg-transparent px-2 py-1 text-sm dark:border-white/10"
           />
           <Button
             variant="secondary"

@@ -49,6 +49,18 @@ export interface HardwareInfo {
   supportedRuntimes: string[];
 }
 
+export type CompatibilityLevel =
+  | "unsupported"
+  | "barely-compatible"
+  | "compatible"
+  | "recommended";
+
+export interface ModelCompatibility {
+  id: string;
+  level: CompatibilityLevel;
+  reasons: string[];
+}
+
 export type LoadStage = "resolving-files" | "creating-engine" | "ready";
 
 export interface LoadProgress {
@@ -122,6 +134,11 @@ export async function getTranscriptionStatus(): Promise<WorkerStatus> {
 export async function getHardwareInfo(): Promise<HardwareInfo> {
   requireTauri();
   return invoke<HardwareInfo>("get_hardware_info");
+}
+
+export async function getModelCompatibilities(): Promise<ModelCompatibility[]> {
+  requireTauri();
+  return invoke<ModelCompatibility[]>("get_model_compatibilities");
 }
 
 export function onDownloadProgress(

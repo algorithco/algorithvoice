@@ -236,33 +236,51 @@ async function wavBase64FromMono(
   // a SharedArrayBuffer typing that copyToChannel/encode reject.
   let mono: Float32Array<ArrayBuffer> = Float32Array.from(samples);
   if (sampleRate !== LOCAL_SAMPLE_RATE) {
-    const OfflineClass = window.OfflineAudioContext;
+    const OfflineClass =
+      window.OfflineAudioContext ??
+      (
+        window as unknown as {
+          webkitOfflineAudioContext?: typeof OfflineAudioContext;
+        }
+      ).webkitOfflineAudioContext;
     if (!OfflineClass) {
-      throw new Error("offline resampling is unavailable");
+      // No offline resampler: pack at original rate and let Rust linear resample.
+      // Better than hard failure—audio.rs to_mono_16k handles arbitrary rates.
+      const wav = encodeWavPCM16(mono, sampleRate);
+      return blobToBase64(wav);
     }
-    const length = Math.max(
-      1,
-      Math.round((samples.length * LOCAL_SAMPLE_RATE) / sampleRate),
-    );
-    const offline = new OfflineClass(1, length, LOCAL_SAMPLE_RATE);
-    const source = offline.createBufferSource();
-    const buffer = offline.createBuffer(1, mono.length, sampleRate);
-    buffer.copyToChannel(mono, 0);
-    source.buffer = buffer;
-    source.connect(offline.destination);
-    source.start();
-    const rendered = await offline.startRendering();
-    mono = Float32Array.from(rendered.getChannelData(0));
+    try {
+      const length = Math.max(
+        1,
+        Math.round((samples.length * LOCAL_SAMPLE_RATE) / sampleRate),
+      );
+      const offline = new OfflineClass(1, length, LOCAL_SAMPLE_RATE);
+      const source = offline.createBufferSource();
+      const buffer = offline.createBuffer(1, mono.length, sampleRate);
+      buffer.copyToChannel(mono, 0);
+      source.buffer = buffer;
+      source.connect(offline.destination);
+      source.start();
+      const rendered = await offline.startRendering();
+      mono = Float32Array.from(rendered.getChannelData(0));
+    } catch {
+      // Fallback to original rate on any offline failure (e.g. 1-sample render)
+      const wav = encodeWavPCM16(mono, sampleRate);
+      return blobToBase64(wav);
+    }
   }
   const wav = encodeWavPCM16(mono, LOCAL_SAMPLE_RATE);
   return blobToBase64(wav);
 }
 
 // ---- Last-transcript safety net (survives paste failures) ----
-
+// Only used in browser preview; in Tauri the history DB is the safety net
+// and we avoid plaintext localStorage duplication of sensitive transcripts.
 const LAST_TRANSCRIPT_KEY = "algorith-voice-last-transcript";
 
 export function saveLastTranscript(text: string): void {
+  if (isTauri()) return;
+  if (typeof text !== "string" || text.length > 100_000) return;
   try {
     localStorage.setItem(LAST_TRANSCRIPT_KEY, text);
   } catch {
@@ -271,9 +289,16 @@ export function saveLastTranscript(text: string): void {
 }
 
 export function loadLastTranscript(): string | null {
+  if (isTauri()) return null;
   try {
     return localStorage.getItem(LAST_TRANSCRIPT_KEY);
   } catch {
     return null;
   }
+}
+
+export function clearLastTranscript(): void {
+  try {
+    localStorage.removeItem(LAST_TRANSCRIPT_KEY);
+  } catch {}
 }
