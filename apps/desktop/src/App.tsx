@@ -150,8 +150,8 @@ export default function App() {
     if (!isTauri()) return;
     // Small delay lets main window finish paint before spawning pill
     const id = window.setTimeout(() => {
-      void ensureFloatingPill().catch((e) => {
-        console.warn("ensureFloatingPill auto-show failed", e);
+      void ensureFloatingPill().catch((e: unknown) => {
+        console.error("algorith-voice: ensureFloatingPill failed", e);
       });
     }, 650);
     return () => clearTimeout(id);

@@ -559,7 +559,7 @@ pub fn ensure_floating_pill(app: AppHandle) -> AppResult<()> {
         win.show().map_err(|e| AppError::window(e.to_string()))?;
         return Ok(());
     }
-    let win = tauri::WebviewWindowBuilder::new(
+    let mut builder = tauri::WebviewWindowBuilder::new(
         &app,
         FLOATING_LABEL,
         WebviewUrl::App("index.html".into()),
@@ -576,9 +576,31 @@ pub fn ensure_floating_pill(app: AppHandle) -> AppResult<()> {
     .visible_on_all_workspaces(true)
     .skip_taskbar(true)
     .focused(false)
-    .focusable(false)
-    .build()
-    .map_err(|e| AppError::window(e.to_string()))?;
+    .focusable(false);
+    // Explicit position: some platforms (esp. Windows, on multi-monitor /
+    // recently-rearranged setups) compute a bad default position for a
+    // frameless undecorated window and it lands off-screen even though
+    // is_visible() reports true. Pin it to the primary monitor's
+    // bottom-right corner, clear of the taskbar.
+    if let Ok(Some(monitor)) = app.primary_monitor() {
+        let scale = monitor.scale_factor();
+        let m_pos = monitor.position();
+        let m_size = monitor.size();
+        let logical_x = m_pos.x as f64 / scale;
+        let logical_y = m_pos.y as f64 / scale;
+        let logical_w = m_size.width as f64 / scale;
+        let logical_h = m_size.height as f64 / scale;
+        const PILL: f64 = 72.0;
+        const MARGIN_RIGHT: f64 = 24.0;
+        const MARGIN_BOTTOM: f64 = 96.0;
+        builder = builder.position(
+            logical_x + logical_w - PILL - MARGIN_RIGHT,
+            logical_y + logical_h - PILL - MARGIN_BOTTOM,
+        );
+    }
+    let win = builder
+        .build()
+        .map_err(|e| AppError::window(e.to_string()))?;
     let _ = win.show();
     Ok(())
 }
