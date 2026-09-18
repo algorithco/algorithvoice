@@ -2,6 +2,32 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { redis } from "../../queues/connection.js";
 
+// Redis is a best-effort cache here, never load-bearing: when it is down
+// (local dev without Docker) fall through to Postgres instead of 500ing.
+async function cacheGet(key: string): Promise<string | null> {
+  try {
+    return await redis.get(key);
+  } catch {
+    return null;
+  }
+}
+
+async function cacheSet(key: string, value: string, ttlSec: number) {
+  try {
+    await redis.set(key, value, "EX", ttlSec);
+  } catch {
+    // Cache miss is fine — the DB remains the source of truth.
+  }
+}
+
+async function cacheDel(key: string) {
+  try {
+    await redis.del(key);
+  } catch {
+    // Stale cache entry expires on its own TTL.
+  }
+}
+
 // Admin guard — checks DB role, never trusts JWT alone.
 async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
   try {
@@ -55,7 +81,7 @@ export async function adminRoutes(app: FastifyInstance) {
       app as unknown as { prisma: import("@prisma/client").PrismaClient }
     ).prisma;
     const cacheKey = `admin:overview:${from.toISOString()}:${to.toISOString()}`;
-    const cached = await redis.get(cacheKey);
+    const cached = await cacheGet(cacheKey);
     if (cached) return JSON.parse(cached);
     const [total, failed, costAgg] = await Promise.all([
       prisma.aiRequestLog.count({
@@ -82,7 +108,7 @@ export async function adminRoutes(app: FastifyInstance) {
       totalCostUsd:
         costAgg._sum.costUsd?.toNumber?.() ?? Number(costAgg._sum.costUsd ?? 0),
     };
-    await redis.set(cacheKey, JSON.stringify(result), "EX", 60);
+    await cacheSet(cacheKey, JSON.stringify(result), 60);
     return result;
   });
 
@@ -136,7 +162,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const prisma = (
       app as unknown as { prisma: import("@prisma/client").PrismaClient }
     ).prisma;
-    const cached = await redis.get("admin:ai-config");
+    const cached = await cacheGet("admin:ai-config");
     if (cached) return JSON.parse(cached);
     const configs = await prisma.aiModelConfig.findMany({
       orderBy: { createdAt: "desc" },
@@ -144,7 +170,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const active = configs.find((c) => c.isActive) ?? null;
     const fallback = configs.find((c) => c.isFallback) ?? null;
     const result = { active, fallback, all: configs };
-    await redis.set("admin:ai-config", JSON.stringify(result), "EX", 30);
+    await cacheSet("admin:ai-config", JSON.stringify(result), 30);
     return result;
   });
 
@@ -201,7 +227,7 @@ export async function adminRoutes(app: FastifyInstance) {
         }),
       ]);
     }
-    await redis.del("admin:ai-config");
+    await cacheDel("admin:ai-config");
     const configs = await prisma.aiModelConfig.findMany();
     return { ok: true, configs };
   });

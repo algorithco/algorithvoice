@@ -117,11 +117,16 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error(`Invalid env: ${JSON.stringify(fields)}`);
   }
   const env = parsed.data;
-  if (!env.OPENROUTER_API_KEY) {
-    console.warn("[env] OPENROUTER_API_KEY missing — cloud STT will 503");
-  }
-  if (!env.STRIPE_SECRET_KEY) {
-    console.warn("[env] STRIPE_* missing — billing will 501");
+  // loadEnv runs once per importing module (server, app, queues…) — warn
+  // only on the first call so boot logs stay readable.
+  if (!warnedOnce) {
+    warnedOnce = true;
+    if (!env.OPENROUTER_API_KEY) {
+      console.warn("[env] OPENROUTER_API_KEY missing — cloud STT will 503");
+    }
+    if (!env.STRIPE_SECRET_KEY) {
+      console.warn("[env] STRIPE_* missing — billing will 501");
+    }
   }
   return env;
 }
@@ -129,6 +134,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
 // Validated-env singleton: parsed once at boot (app.ts / worker.ts),
 // read everywhere else. Never touch process.env directly in routes.
 let cached: Env | null = null;
+let warnedOnce = false;
 
 export function setAppEnv(env: Env): Env {
   cached = env;

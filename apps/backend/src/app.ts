@@ -9,7 +9,7 @@ import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import websocket from "@fastify/websocket";
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
 import {
   hasZodFastifySchemaValidationErrors,
   jsonSchemaTransform,
@@ -27,7 +27,7 @@ import { sttRoutes } from "./modules/stt/stt.routes.js";
 import { usageRoutes } from "./modules/usage/usage.routes.js";
 import jwtPlugin from "./plugins/jwt.js";
 import prismaPlugin from "./plugins/prisma.js";
-import { redis } from "./queues/connection.js";
+import { pingRedis } from "./queues/connection.js";
 
 export function buildApp() {
   const env = setAppEnv(loadEnv());
@@ -41,6 +41,9 @@ export function buildApp() {
         "req.body.byokKey",
       ],
     },
+    // The onResponse hook below already logs completions (and skips
+    // /health + /ready); the built-in line would duplicate it.
+    logController: new LogController({ disableRequestLogging: true }),
     trustProxy: true,
     genReqId: () => randomUUID(),
   }).withTypeProvider<ZodTypeProvider>();
@@ -135,8 +138,7 @@ export function buildApp() {
       checks.db = "down";
     }
     try {
-      const pong = await redis.ping();
-      checks.redis = pong === "PONG" ? "ok" : "down";
+      checks.redis = (await pingRedis(1000)) ? "ok" : "down";
     } catch {
       checks.redis = "down";
     }
@@ -171,6 +173,16 @@ export function buildApp() {
       }
       if (err.code === "P2025") {
         return reply.code(404).send({ error: "not_found" });
+      }
+      // Redis down (local dev without Docker, failover gap, …): fail the
+      // request fast with a clear 503 instead of a generic 500. Matches
+      // ioredis closed-connection errors and our ping timeout.
+      const msg = err.message ?? "";
+      if (
+        err.code === "ECONNREFUSED" ||
+        /connection is closed|redis.*unavailable|redis ping timeout/i.test(msg)
+      ) {
+        return reply.code(503).send({ error: "redis_unavailable" });
       }
       const status =
         err.statusCode && err.statusCode < 500 ? err.statusCode : 500;
