@@ -300,13 +300,23 @@ pub(crate) async fn transcribe_local(
         ));
     }
     // Lazy model switch: load only when the worker doesn't already hold
-    // this exact model ready. Loading blocks for seconds (hundreds of MB
-    // of weights), so it runs on a blocking thread, never the executor.
-    if !worker.is_ready_for(&model.id) {
+    // this exact model ready — or when a Whisper model is ready but baked
+    // for a different language (the recognizer takes `language` at creation
+    // only, so a language change is a reload; multilingual transducer/Qwen3
+    // engines never trigger this branch). Loading blocks for seconds
+    // (hundreds of MB of weights), so it runs on a blocking thread, never
+    // the executor.
+    let want = crate::local_asr::worker::normalize_language(language.unwrap_or("auto"));
+    let want_opt = if want.is_empty() {
+        None
+    } else {
+        Some(want.as_str())
+    };
+    if !worker.is_ready_for(&model.id) || worker.language_mismatch(&model.id, want_opt) {
         let dir = crate::local_asr::models::model_dir(app_data, &model.id)?;
         let w = Arc::clone(worker);
         let m = model.clone();
-        tokio::task::spawn_blocking(move || w.load(&m, &dir, |_| {}))
+        tokio::task::spawn_blocking(move || w.load_in(&m, &dir, &want, |_| {}))
             .await
             .map_err(|e| AppError::engine_init_failed(format!("local load task failed: {e}")))??;
     }

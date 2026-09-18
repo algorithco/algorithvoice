@@ -182,7 +182,8 @@ fn decode_f32(data: &[u8], channels: u16) -> AppResult<Vec<f32>> {
     Ok(out)
 }
 
-/// Downmix (channel average) + resample (linear) to 16 kHz mono.
+/// Downmix (channel average) + resample (anti-aliased low-pass + linear)
+/// to 16 kHz mono.
 pub fn to_mono_16k(interleaved: &[f32], channels: u16, sample_rate: u32) -> Vec<f32> {
     let channels = usize::from(channels.max(1));
     let frames = interleaved.len() / channels;
@@ -200,13 +201,26 @@ pub fn to_mono_16k(interleaved: &[f32], channels: u16, sample_rate: u32) -> Vec<
     if sample_rate == TARGET_SAMPLE_RATE {
         return mono;
     }
-    resample_linear(&mono, sample_rate, TARGET_SAMPLE_RATE)
+    resample_antialiased(&mono, sample_rate, TARGET_SAMPLE_RATE)
 }
 
-fn resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+/// Resample with an anti-aliasing low-pass FIR stage.
+///
+/// Naive linear interpolation folds everything above the output Nyquist
+/// back into the speech band (e.g. a 12 kHz tone at 48 kHz lands on 4 kHz
+/// at 16 kHz) — and the mic path always arrives at 44.1/48 kHz, so this is
+/// the hot path, not a fallback. The FIR (windowed sinc, Hann, 64 taps,
+/// cutoff at 0.45 × the lower Nyquist) removes stop-band energy first;
+/// linear interpolation then only moves baseband samples to new positions.
+fn resample_antialiased(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     if input.is_empty() || from_rate == to_rate {
         return input.to_vec();
     }
+    let filtered = lowpass_fir(
+        input,
+        f64::from(from_rate),
+        0.45 * f64::from(from_rate.min(to_rate)),
+    );
     let ratio = f64::from(from_rate) / f64::from(to_rate);
     let out_len = ((input.len() as f64 / ratio).round() as usize).max(1);
     let mut out = Vec::with_capacity(out_len);
@@ -214,9 +228,57 @@ fn resample_linear(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
         let pos = i as f64 * ratio;
         let lo = pos.floor() as usize;
         let frac = (pos - lo as f64) as f32;
-        let a = input.get(lo).copied().unwrap_or(0.0);
-        let b = input.get(lo + 1).copied().unwrap_or(a);
+        let a = filtered.get(lo).copied().unwrap_or(0.0);
+        let b = filtered.get(lo + 1).copied().unwrap_or(a);
         out.push(a + (b - a) * frac);
+    }
+    out
+}
+
+/// Taps for the anti-alias stage: sinc kernel windowed by Hann, DC gain
+/// normalized to exactly 1 so silence and loudness survive untouched.
+const FIR_TAPS: usize = 64;
+
+fn lowpass_taps(sample_rate_hz: f64, cutoff_hz: f64) -> Vec<f32> {
+    let m = FIR_TAPS as f64 - 1.0;
+    let fc = cutoff_hz / sample_rate_hz;
+    let mut taps = Vec::with_capacity(FIR_TAPS);
+    for n in 0..FIR_TAPS {
+        let x = n as f64 - m / 2.0;
+        // sinc(2·fc·x), with the x = 0 limit handled explicitly.
+        let sinc = if x.abs() < 1e-9 {
+            1.0
+        } else {
+            (2.0 * std::f64::consts::PI * fc * x).sin() / (2.0 * std::f64::consts::PI * fc * x)
+        };
+        // Hann window: zero at both ends, no sharp truncation ringing.
+        let window = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * n as f64 / m).cos();
+        taps.push((2.0 * fc * sinc * window) as f32);
+    }
+    // Exact unity DC gain (kills filter droop on vowels/silence floors).
+    let sum: f32 = taps.iter().sum();
+    if sum != 0.0 {
+        for t in &mut taps {
+            *t /= sum;
+        }
+    }
+    taps
+}
+
+/// Direct-form FIR with clamped edges (no zero-padding thump at the
+/// utterance start/end, which VAD-adjacent trimming would otherwise keep).
+fn lowpass_fir(input: &[f32], sample_rate_hz: f64, cutoff_hz: f64) -> Vec<f32> {
+    let taps = lowpass_taps(sample_rate_hz, cutoff_hz);
+    let half = FIR_TAPS / 2;
+    let mut out = Vec::with_capacity(input.len());
+    for i in 0..input.len() {
+        let mut acc = 0.0f32;
+        for (k, tap) in taps.iter().enumerate() {
+            let j = i as isize + k as isize - half as isize;
+            let clamped = j.clamp(0, input.len() as isize - 1) as usize;
+            acc += input[clamped] * tap;
+        }
+        out.push(acc);
     }
     out
 }
@@ -432,6 +494,70 @@ mod tests {
         rumble.extend(vec![0.9f32; 100]);
         let kept = trim_silence(&rumble, 0.01, 5.0, sr);
         assert_eq!(kept.len(), 100);
+    }
+
+    /// Single-bin DFT magnitude (Goertzel): how much of `freq_hz` is in
+    /// `samples`, normalized so a full-scale sine reads ~0.5.
+    fn goertzel(samples: &[f32], sample_rate: u32, freq_hz: f32) -> f32 {
+        let n = samples.len() as f32;
+        let omega = 2.0 * std::f32::consts::PI * freq_hz / sample_rate as f32;
+        let (mut s0, mut s1, mut s2) = (0.0f32, 0.0f32, 0.0f32);
+        for &x in samples {
+            s0 = x + 2.0 * omega.cos() * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        ((s1 * s1 + s2 * s2 - s1 * s2 * 2.0 * omega.cos()).sqrt()) / n
+    }
+
+    fn sine_at(sample_rate: u32, freq_hz: f32, secs: f32, amp: f32) -> Vec<f32> {
+        let n = (f64::from(sample_rate) * f64::from(secs)).round() as usize;
+        (0..n)
+            .map(|i| {
+                amp * (2.0 * std::f32::consts::PI * freq_hz * i as f32 / sample_rate as f32).sin()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn downsample_kills_alias_foldover() {
+        // 12 kHz at 48 kHz is above the 16 kHz Nyquist (8 kHz): naive
+        // linear resampling folds it onto 4 kHz at nearly full energy.
+        // The anti-alias stage must attenuate that bin by ~40 dB+.
+        let input = sine_at(48_000, 12_000.0, 1.0, 0.9);
+        let out = resample_antialiased(&input, 48_000, TARGET_SAMPLE_RATE);
+        assert_eq!(out.len(), TARGET_SAMPLE_RATE as usize);
+        let folded = goertzel(&out, TARGET_SAMPLE_RATE, 4000.0);
+        assert!(
+            folded < 0.005,
+            "12 kHz folded onto 4 kHz at magnitude {folded}"
+        );
+    }
+
+    #[test]
+    fn downsample_preserves_passband_and_level() {
+        // Speech-band tone survives; DC gain is unity (no loudness shift).
+        let tone = sine_at(48_000, 440.0, 1.0, 0.9);
+        let out = resample_antialiased(&tone, 48_000, TARGET_SAMPLE_RATE);
+        let peak = out.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+        assert!(peak > 0.7, "440 Hz attenuated to peak {peak}");
+        let dc = vec![0.5f32; 48_000];
+        let dc_out = resample_antialiased(&dc, 44_100, TARGET_SAMPLE_RATE);
+        let mean: f32 = dc_out.iter().sum::<f32>() / dc_out.len() as f32;
+        assert!((mean - 0.5).abs() < 0.005, "DC level shifted to {mean}");
+    }
+
+    #[test]
+    fn upsample_keeps_tone_and_length() {
+        let input = sine_at(8000, 1000.0, 0.5, 0.8);
+        let out = resample_antialiased(&input, 8000, TARGET_SAMPLE_RATE);
+        assert_eq!(out.len(), 8000);
+        let peak = out.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+        assert!(peak > 0.5, "1 kHz lost in upsample, peak {peak}");
+        // Empty and same-rate inputs are passthrough, never empty output.
+        assert!(resample_antialiased(&[], 48_000, 16_000).is_empty());
+        let same = resample_antialiased(&input, 8000, 8000);
+        assert_eq!(same, input);
     }
 
     #[test]
