@@ -12,10 +12,28 @@ const env = loadEnv();
 const log = pino({ level: env.LOG_LEVEL });
 
 function makeWorkerRedis() {
-  return new Redis(env.REDIS_URL, {
+  const client = new Redis(env.REDIS_URL, {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
+    retryStrategy: (times) => Math.min(times * 100, 2000),
   });
+  // Same guard as the API process: without an 'error' listener ioredis
+  // emits "Unhandled error event" on every reconnect and floods the log.
+  let lastWarn = 0;
+  client.on("error", (err: Error) => {
+    const now = Date.now();
+    if (now - lastWarn > 30_000) {
+      lastWarn = now;
+      log.warn(
+        {
+          err: (err as Error & { code?: string }).code ?? err.message,
+          url: env.REDIS_URL,
+        },
+        "worker redis unavailable — retrying in background",
+      );
+    }
+  });
+  return client;
 }
 
 function observe(name: string, worker: Worker) {

@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/server.ts",
     "worker": "tsx src/queues/worker.ts",
+    "redis:wsl": "powershell -ExecutionPolicy Bypass -File scripts/redis-wsl.ps1",
     "start": "node dist/server.js",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",

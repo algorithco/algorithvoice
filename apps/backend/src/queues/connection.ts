@@ -5,21 +5,91 @@ import { loadEnv } from "../config/env.js";
 
 // Single validated Redis connection for queues. No localhost fallback:
 // a missing REDIS_URL must fail boot loudly, never silently queue nowhere.
+//
+// Local dev without Docker: Redis may simply not be running yet. Every
+// client gets an error guard (otherwise ioredis emits "Unhandled error
+// event" per retry and floods the log), retries quietly in the background,
+// and auto-heals when Redis appears. The shared API client fails fast
+// (enableOfflineQueue: false) so /ready and routes 503 quickly instead
+// of hanging. Production (Docker/Fly) is unchanged — same URL, same queues.
 const env = loadEnv();
 
-function makeRedis() {
-  return new Redis(env.REDIS_URL, {
-    maxRetriesPerRequest: null,
-    enableReadyCheck: false,
-    retryStrategy: (times) => Math.min(times * 100, 2000),
+// Throttle reconnect warnings: one line per client per interval, not one
+// per retry. Without any 'error' listener ioredis throws "Unhandled error
+// event" on every failed reconnect.
+function guardRedis(client: Redis, label: string) {
+  let lastWarn = 0;
+  client.on("error", (err: Error) => {
+    const now = Date.now();
+    if (now - lastWarn > 30_000) {
+      lastWarn = now;
+      const detail =
+        (err as Error & { code?: string }).code ?? err.message ?? String(err);
+      console.warn(
+        `[redis:${label}] Redis unavailable at ${env.REDIS_URL} [${detail}]. ` +
+          `API keeps running; queue/auth-code features 503 until Redis is back. ` +
+          `Start it with: pnpm redis:wsl (no Docker needed)`,
+      );
+    }
   });
+  return client;
+}
+
+/** Plain-Redis client factory (fast-fail tuned for the API process). */
+export function makeApiRedis() {
+  return guardRedis(
+    new Redis(env.REDIS_URL, {
+      // Fail commands immediately while disconnected so HTTP handlers
+      // 503 fast instead of queueing forever.
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+      enableReadyCheck: false,
+      connectTimeout: 5000,
+      retryStrategy: (times) => Math.min(times * 100, 2000),
+    }),
+    "api",
+  );
+}
+
+/** BullMQ client factory (BullMQ requires maxRetriesPerRequest: null). */
+export function makeQueueRedis(label: string) {
+  return guardRedis(
+    new Redis(env.REDIS_URL, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      retryStrategy: (times) => Math.min(times * 100, 2000),
+    }),
+    label,
+  );
+}
+
+function makeRedis() {
+  return makeQueueRedis("queue");
 }
 
 /** Shared by API process (enqueue + /ready ping). Workers use their own. */
-export const redis = makeRedis();
+export const redis = makeApiRedis();
+
+/** Ping with a hard timeout so /ready 503s fast when Redis is down. */
+export async function pingRedis(timeoutMs = 1000): Promise<boolean> {
+  try {
+    const pong = await Promise.race([
+      redis.ping(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("redis ping timeout")), timeoutMs),
+      ),
+    ]);
+    return pong === "PONG";
+  } catch {
+    return false;
+  }
+}
 
 export function closeRedis() {
-  return redis.quit();
+  // quit() hangs/rejects when never connected — fall back to disconnect.
+  return redis.quit().catch(() => {
+    redis.disconnect();
+  });
 }
 
 const queueDefaults: JobsOptions = {
@@ -54,7 +124,9 @@ export const QUEUES = {
 } as const;
 
 export function closeQueues() {
-  return Promise.all(Object.values(QUEUES).map((q) => q.close()));
+  return Promise.all(
+    Object.values(QUEUES).map((q) => q.close().catch(() => {})),
+  );
 }
 
 const MeteringJob = z
