@@ -125,7 +125,7 @@ jobs:
           python3 apps/desktop/src-tauri/scripts/sign-manifest.py check \
             --manifest apps/desktop/src-tauri/src/local_asr/default_manifest.json \
             --pubkey apps/desktop/src-tauri/src/local_asr/manifest_signing_pubkey.hex
-      - name: cargo audit (native surface: sherpa-onnx/keyring/rusqlite/enigo)
+      - name: "cargo audit (native surface: sherpa-onnx/keyring/rusqlite/enigo)"
         working-directory: apps/desktop/src-tauri
         run: |
           cargo install cargo-audit --locked || true
