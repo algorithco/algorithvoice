@@ -1,10 +1,61 @@
+# ------------------------------------------------------------------
+# Algorith Voice — Docker build context exclusions.
+# Keep images small, reproducible, and secret-free.
+# NOTE: `**/.env*` patterns are intentional: apps/backend/.env holds
+# local dev secrets and must never leak into any image.
+# ------------------------------------------------------------------
+
+# Dependencies / build outputs
 node_modules
+**/node_modules
 dist
+**/dist
 .next
+**/.next
+out
+.turbo
+**/.turbo
+coverage
+**/coverage
+*.tsbuildinfo
+
+# Version control / CI
 .git
+.gitignore
+.github
+
+# Environment & secrets — never bake into images.
+# Compose / Fly inject these at runtime.
 .env
-.env.local
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
 *.pem
 *.key
+*.p12
+*.pfx
+secrets
+
+# Local tooling / OS noise
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Desktop native artifacts (never part of server images)
 src-tauri/target
-coverage
+apps/desktop/src-tauri/target
+apps/desktop/dist
+*.dmg
+*.msi
+*.AppImage
+*.deb
+
+# Docs / specs not needed at runtime
+*-prompt.md
+assets

@@ -42,7 +42,7 @@ Offline transcription via `sherpa-onnx` (no Python). All models are `int8` and d
 
 Manage in **Settings → Transcription mode → Local (offline)**: search, language filter, hardware check (RAM/VRAM/disk), download progress (bytes/s, ETA), verify, delete, and `Active` selection. `Settings → System` + `ModelManager` shows `sherpa-onnx-cpu` runtime, compatibility (`minRamGb`/`minVramGb` gates), and load progress (`resolving-files`→`creating-engine`→`ready`).
 
-### Quickstart
+### Quickstart (native dev)
 
 ```bash
 cp .env.example .env
@@ -51,6 +51,18 @@ pnpm install
 pnpm db:generate && pnpm db:migrate
 pnpm dev
 ```
+
+### Full stack in Docker
+
+```bash
+cp .env.example .env  # set real JWT_ACCESS_SECRET / JWT_REFRESH_PEPPER / ENCRYPTION_KEK
+docker compose -f infra/docker-compose.yml up -d --build
+```
+
+Migrations run automatically (`migrate` one-shot service); backend gates on
+it. Web http://127.0.0.1:3000 · API http://127.0.0.1:3001/health —
+use `127.0.0.1` (not `localhost`) so cookies/CORS line up with the
+container `APP_URL` (production validation rejects `localhost`).
 
 | Service | URL |
 | ------- | --- |
@@ -66,7 +78,7 @@ apps/web              Next.js 16 marketing + dashboard
 apps/backend          Fastify 5 API + WebSocket
 packages/shared-types Zod contracts (single source of truth)
 packages/ui           Monochrome React components
-infra/                docker-compose + Prisma
+infra/                compose stack (postgres/redis/migrate/backend/worker/web) + Prisma + Fly
 .github/workflows/    CI, releases, desktop builds
 ```
 
