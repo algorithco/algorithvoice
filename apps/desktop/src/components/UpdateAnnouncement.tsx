@@ -2,7 +2,7 @@ import { Button } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isTauri } from "../lib/session.js";
+import { isTauri } from "../lib/session/env.js";
 
 type UpdateStatus =
   | "idle"

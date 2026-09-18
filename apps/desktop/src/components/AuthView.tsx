@@ -1,4 +1,4 @@
-import type { SessionInfo } from "../lib/session.js";
+import type { SessionInfo } from "../lib/session/types.js";
 import LoginCardSection from "./ui/login-signup.js";
 
 // First screen of the app when signed out — full-screen animated login/signup.

@@ -501,9 +501,9 @@ mod tests {
     fn goertzel(samples: &[f32], sample_rate: u32, freq_hz: f32) -> f32 {
         let n = samples.len() as f32;
         let omega = 2.0 * std::f32::consts::PI * freq_hz / sample_rate as f32;
-        let (mut s0, mut s1, mut s2) = (0.0f32, 0.0f32, 0.0f32);
+        let (mut s1, mut s2) = (0.0f32, 0.0f32);
         for &x in samples {
-            s0 = x + 2.0 * omega.cos() * s1 - s2;
+            let s0 = x + 2.0 * omega.cos() * s1 - s2;
             s2 = s1;
             s1 = s0;
         }

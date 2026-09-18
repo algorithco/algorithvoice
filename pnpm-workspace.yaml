@@ -9,3 +9,15 @@ catalog:
   vitest: ^3.2.4
   react: 19.2.0
   react-dom: 19.2.0
+
+# pnpm blocks postinstall scripts by default. These packages NEED theirs:
+# argon2 (native binding — auth breaks without it), Prisma (engines/CLI),
+# esbuild + msgpackr-extract (native bits used by tests/queues).
+# Keep this list tight — every entry runs code at install time.
+onlyBuiltDependencies:
+  - "@prisma/client"
+  - "@prisma/engines"
+  - argon2
+  - esbuild
+  - msgpackr-extract
+  - prisma

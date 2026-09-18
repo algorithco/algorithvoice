@@ -52,6 +52,12 @@ sysinfo = "0.39"
 # Dynamic NVML probe for NVIDIA GPUs (no link-time dep: machines without a
 # driver behave identically minus GPU fields). Reuses the locked 0.7.x.
 libloading = "0.7"
+# Manifest signing (Ed25519 over canonical models JSON). Verifies
+# default_manifest.json before trusting URLs/checksums; fails closed when a
+# signature is present and invalid. See manifest.rs.
+# NEEDS PRODUCT INPUT: signing key provisioning + release pipeline.
+ed25519-dalek = "2"
+hex = "0.4"
 
 [features]
 default = ["custom-protocol"]

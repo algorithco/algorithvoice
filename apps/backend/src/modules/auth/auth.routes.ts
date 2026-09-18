@@ -174,9 +174,79 @@ export async function authRoutes(app: FastifyInstance) {
     };
     const callback = query.callback ?? "algorithvoice://auth-callback";
     const state = typeof query.state === "string" ? query.state : undefined;
+    const device = typeof query.device === "string" ? query.device : undefined;
     const allowedProviders = new Set(["google", "github"]);
     if (!allowedProviders.has(provider)) {
       return reply.code(400).send({ error: "unknown_provider" });
+    }
+    // Validate state format if provided (base64url 16 bytes ~22 chars, allow 16-128)
+    if (state !== undefined && !/^[A-Za-z0-9_-]{16,128}$/.test(state)) {
+      return reply.code(400).send({ error: "invalid_state" });
+    }
+    // Web browser flow (device=web): the web app navigates a full browser
+    // tab here, so accept an absolute http(s) callback to the web origin
+    // (or a same-origin path resolved against APP_URL) instead of an
+    // algorithvoice:// deep link. Redirects carry the same honest error
+    // shape (?error=&provider=[&state=]) so the login/register pages can
+    // show an inline notice. Real Google/GitHub app registration
+    // (OAUTH_*_CLIENT_ID/SECRET) is out of scope — the token exchange
+    // below stays an oauth_not_configured stub until then.
+    // TODO(web-oauth): wire real provider authorize redirect + callback
+    // (/api/auth/oauth/:provider/callback) that sets the session cookie
+    // and redirects to /dashboard once OAUTH_*_* env is configured.
+    if (device === "web") {
+      const { getAppEnv } = await import("../../config/env.js");
+      const env = getAppEnv();
+      const allowedOrigins = new Set<string>();
+      try {
+        allowedOrigins.add(new URL(env.APP_URL).origin);
+      } catch {
+        // APP_URL is validated at boot — unreachable in practice.
+      }
+      // Local-dev loopback (web :3000, backend :3001, same machine).
+      for (const o of [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+      ]) {
+        allowedOrigins.add(o);
+      }
+      const raw = (query.callback ?? "").trim();
+      let callbackUrl: URL | null = null;
+      try {
+        callbackUrl =
+          raw === ""
+            ? new URL("/login", env.APP_URL)
+            : raw.startsWith("/") && !raw.startsWith("//")
+              ? new URL(raw, env.APP_URL)
+              : new URL(raw);
+      } catch {
+        callbackUrl = null;
+      }
+      if (
+        !callbackUrl ||
+        (callbackUrl.protocol !== "http:" &&
+          callbackUrl.protocol !== "https:") ||
+        !allowedOrigins.has(callbackUrl.origin)
+      ) {
+        return reply.code(400).send({ error: "invalid_callback" });
+      }
+      const configured =
+        provider === "google"
+          ? !!env.OAUTH_GOOGLE_CLIENT_ID && !!env.OAUTH_GOOGLE_CLIENT_SECRET
+          : !!env.OAUTH_GITHUB_CLIENT_ID && !!env.OAUTH_GITHUB_CLIENT_SECRET;
+      const buildWebRedirect = (error: string) => {
+        callbackUrl.searchParams.set("error", error);
+        callbackUrl.searchParams.set("provider", provider);
+        if (state) callbackUrl.searchParams.set("state", state);
+        return callbackUrl.toString();
+      };
+      if (!configured) {
+        return reply.redirect(buildWebRedirect("oauth_not_configured"), 302);
+      }
+      // Configured but Phase 3 handler not yet wired — honest stub redirect.
+      return reply.redirect(buildWebRedirect("not_implemented"), 302);
     }
     // Validate callback scheme — must be algorithvoice:// to avoid open redirect.
     const isValidCallback =
@@ -184,10 +254,6 @@ export async function authRoutes(app: FastifyInstance) {
       callback.toLowerCase().startsWith("algorithvoice:");
     if (!isValidCallback) {
       return reply.code(400).send({ error: "invalid_callback" });
-    }
-    // Validate state format if provided (base64url 16 bytes ~22 chars, allow 16-128)
-    if (state !== undefined && !/^[A-Za-z0-9_-]{16,128}$/.test(state)) {
-      return reply.code(400).send({ error: "invalid_state" });
     }
     // Phase 3 will redirect to real provider OAuth. Until env is configured,
     // redirect back with error so desktop's auth-callback listener resolves

@@ -5,7 +5,7 @@ import type {
 } from "@algorith-voice/shared-types";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { isTauri } from "./session.js";
+import { isTauri } from "./session/env.js";
 
 // Typed wrappers for the local-model Tauri commands (local_asr). Every
 // function below calls a real backend command — no stubs. Shapes mirror

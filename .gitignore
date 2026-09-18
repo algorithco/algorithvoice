@@ -5,6 +5,7 @@ dist/
 out/
 target/
 src-tauri/target/
+**/src-tauri/gen/
 *.log
 .env
 .env.local
@@ -16,6 +17,12 @@ __pycache__/
 *.pyc
 *.pem
 *.key
+# Manifest signing seed (Ed25519, 32-byte hex). Lives outside the repo /
+# in the MANIFEST_SIGN_KEY_HEX CI secret — must never be committed.
+*-seed.hex
+manifest-signing-seed.hex
+# tauri-driver E2E screenshots (local review only)
+apps/desktop/e2e/screenshots/
 # Prompt specs live alongside the repo locally but are never pushed
 *-prompt.md
 *-prompt-v2.md

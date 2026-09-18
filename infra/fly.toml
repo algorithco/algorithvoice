@@ -2,12 +2,18 @@ app = "algorith-voice-api"
 primary_region = "fra"
 
 [build]
+  # Path is relative to the REPO ROOT: deploy with
+  #   flyctl deploy --config infra/fly.toml
+  # run from the repo root so the monorepo (pnpm workspace +
+  # shared-types) is the Docker build context.
   dockerfile = "apps/backend/Dockerfile"
 
 [deploy]
   # Migrations run before machines swap — a schema change can never
-  # boot against a stale database.
-  release_command = "npx prisma migrate deploy --schema infra/prisma/schema.prisma"
+  # boot against a stale database. `prisma` is installed globally in
+  # the image (runner stage); the schema + migrations ship at
+  # /app/infra/prisma. Replaces CMD, keeps ENTRYPOINT (tini).
+  release_command = "prisma migrate deploy --schema infra/prisma/schema.prisma"
 
 [http_service]
   internal_port = 3001
@@ -27,6 +33,7 @@ primary_region = "fra"
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1gb"
+  kill_signal = "SIGTERM"
   kill_timeout = 15
 
 [env]

@@ -60,7 +60,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
-      <SiteNav />
+      <SiteNav signedIn />
       <main className="mx-auto max-w-[1200px] px-4 py-12 sm:px-6 sm:py-24 md:px-16 md:py-32">
         <Reveal>
           <p className="t-cap text-faint">Dashboard</p>

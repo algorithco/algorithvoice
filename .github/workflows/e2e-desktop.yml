@@ -1,0 +1,58 @@
+name: e2e-desktop
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*.*.*", "v*.*.*-*"]
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    # Heavier than unit tests; only on dispatch / releases, not every PR
+    # (see apps/desktop/e2e/README.md). Windows is the primary release target;
+    # Linux would additionally need xvfb + WebKit deps, macOS needs signing.
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pynacl --quiet
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @algorith-voice/shared-types build
+      - run: pnpm --filter @algorith-voice/ui build
+      # Manifest signature fast gate (no Rust build needed)
+      - name: model-manifest signature check
+        run: python apps/desktop/src-tauri/scripts/sign-manifest.py check --manifest apps/desktop/src-tauri/src/local_asr/default_manifest.json --pubkey apps/desktop/src-tauri/src/local_asr/manifest_signing_pubkey.hex
+      # Debug binary is enough for E2E (faster than --release) and avoids
+      # signing/notarization. WebView2 + Edge are preinstalled on windows-latest.
+      - name: build desktop (debug)
+        run: cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+      - name: install tauri-driver
+        run: cargo install tauri-driver --locked
+      - name: run tauri-driver E2E
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+        run: pnpm --filter @algorith-voice/desktop e2e
+      - name: upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots-windows
+          path: apps/desktop/e2e/screenshots/
+          if-no-files-found: warn

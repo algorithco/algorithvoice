@@ -10,6 +10,11 @@ pnpm --filter @algorith-voice/backend db:migrate
 pnpm dev
 ```
 
+Full stack in Docker instead: `docker compose -f infra/docker-compose.yml up -d --build`
+(migrations run automatically; Web :3000, API :3001). Backend/worker share
+`apps/backend/Dockerfile` (API default CMD, worker override); web uses
+`apps/web/Dockerfile` (Next standalone). All builds run from the repo root.
+
 ## Branching
 
 ```

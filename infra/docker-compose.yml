@@ -1,31 +1,203 @@
+# ------------------------------------------------------------------
+# Algorith Voice — local / self-host stack.
+#
+# Two supported workflows (same file):
+#
+#   1. Native dev (default) — only infra in Docker, code on the host:
+#        cp .env.example .env
+#        docker compose -f infra/docker-compose.yml up -d postgres redis
+#        pnpm install && pnpm db:generate && pnpm db:migrate && pnpm dev
+#
+#   2. Full stack in Docker — everything containerized:
+#        cp .env.example .env   # then set real JWT_*/ENCRYPTION_KEK
+#        docker compose -f infra/docker-compose.yml up -d --build
+#        Web http://127.0.0.1:3000 · API http://127.0.0.1:3001/health
+#
+# Loopback uses 127.0.0.1 (NOT localhost) on purpose: the backend refuses
+# `localhost` APP_URL with NODE_ENV=production, and CORS allows exactly
+# APP_URL — so browse the stack at http://127.0.0.1:3000 for cookies/CORS
+# to line up. Override with a real domain via environment when self-hosting.
+#
+# Env: service-to-service URLs below default to Compose DNS
+# (postgres/redis/backend). Secrets come from the repo-root `.env`
+# (env_file). Build-time NEXT_PUBLIC_* come from your SHELL environment
+# (export NEXT_PUBLIC_API_URL=... before `up --build`); root `.env` values
+# do NOT reach build args. Never commit `.env` — see `.env.example`.
+# Run all commands from the REPO ROOT.
+# ------------------------------------------------------------------
+name: algorith-voice
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+networks:
+  app:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+
 services:
   postgres:
     image: postgres:16-alpine
+    networks: [app]
+    logging: *default-logging
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
     environment:
-      POSTGRES_USER: algorith
-      POSTGRES_PASSWORD: algorith
-      POSTGRES_DB: algorith_voice
+      POSTGRES_USER: ${POSTGRES_USER:-algorith}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-algorith}
+      POSTGRES_DB: ${POSTGRES_DB:-algorith_voice}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U algorith"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-algorith} -d ${POSTGRES_DB:-algorith_voice}"]
       interval: 5s
+      timeout: 5s
       retries: 10
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
+    networks: [app]
+    logging: *default-logging
+    restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
+      timeout: 5s
       retries: 10
+      start_period: 10s
 
-volumes:
-  pgdata:
-  redisdata:
+  # One-shot schema migration. Re-runs safely on every `up` (migrate
+  # deploy is idempotent); backend/worker gate on its success.
+  migrate:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    # Tagged so prebuilt images can run without rebuilding:
+    #   docker compose build && docker compose up -d --no-build
+    image: algorith-voice-backend:local
+    networks: [app]
+    logging: *default-logging
+    restart: "no"
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-algorith}:${POSTGRES_PASSWORD:-algorith}@postgres:5432/${POSTGRES_DB:-algorith_voice}?schema=public
+    command: ["prisma", "migrate", "deploy", "--schema", "infra/prisma/schema.prisma"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    image: algorith-voice-backend:local
+    networks: [app]
+    logging: *default-logging
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-algorith}:${POSTGRES_PASSWORD:-algorith}@postgres:5432/${POSTGRES_DB:-algorith_voice}?schema=public
+      REDIS_URL: redis://redis:6379
+      APP_URL: ${APP_URL:-http://127.0.0.1:3000}
+      API_URL: ${API_URL:-http://127.0.0.1:3001}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${BACKEND_PORT:-3001}:3001"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    image: algorith-voice-backend:local
+    networks: [app]
+    logging: *default-logging
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-algorith}:${POSTGRES_PASSWORD:-algorith}@postgres:5432/${POSTGRES_DB:-algorith_voice}?schema=public
+      REDIS_URL: redis://redis:6379
+      APP_URL: ${APP_URL:-http://127.0.0.1:3000}
+      API_URL: ${API_URL:-http://127.0.0.1:3001}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    # Same image, different process (see apps/backend/src/queues/worker.ts).
+    command: ["node", "apps/backend/dist/queues/worker.js"]
+    # No HTTP listener here — the image HEALTHCHECK targets :3001 (API).
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://127.0.0.1:3000}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:3001}
+        NEXT_PUBLIC_STRIPE_PRICE_PRO: ${NEXT_PUBLIC_STRIPE_PRICE_PRO:-}
+        NEXT_PUBLIC_GITHUB_REPO: ${NEXT_PUBLIC_GITHUB_REPO:-algorithco/algorithvoice}
+    image: algorith-voice-web:local
+    networks: [app]
+    logging: *default-logging
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      PORT: 3000
+      # Server-side BFF proxy target (Compose DNS — NOT localhost).
+      API_URL: http://backend:3001
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

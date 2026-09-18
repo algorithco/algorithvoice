@@ -1,3 +1,4 @@
+mod db;
 mod error;
 mod history;
 /// Local speech recognition (manifest, downloads, worker, audio).
@@ -5,8 +6,10 @@ mod history;
 /// engine and pipeline; the Tauri command surface stays curated in
 /// `invoke_handler` below regardless of what is reachable here.
 pub mod local_asr;
+mod logging;
 mod push_to_talk;
 mod state;
+mod window;
 
 use error::{AppError, AppResult};
 use state::{AppState, Db, LicenseStatus, SessionStatus, TrayState};
@@ -31,13 +34,25 @@ fn get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Licensing/entitlement probe (currently unimplemented).
+///
+/// FAIL-CLOSED CONTRACT: this command returns `Err(not-implemented)` until a
+/// real entitlement source exists. Any future frontend gate MUST treat `Err`
+/// as "not licensed — block the feature", never as "unknown — allow".
+/// (Verified 2026-09: zero call sites exist yet, so nothing can fail open
+/// today; this comment binds future callers.)
 #[tauri::command]
-fn license_status() -> LicenseStatus {
-    // Phase 1 stub — Phase 3 binds real license JWT + offline grace.
-    LicenseStatus {
-        valid: false,
-        next: "phase-3",
-    }
+fn license_status() -> AppResult<LicenseStatus> {
+    // NEEDS PRODUCT INPUT: no licensing/entitlement backend is defined for
+    // this release (no subscription endpoint, no local license file format).
+    // Returning a silent fake `{valid:false}` would look like a real check;
+    // fail loudly instead so callers and QA cannot mistake it for enforcement.
+    // When the product defines the source (e.g. api.algorithvoice.com
+    // subscription check or local license JWT + offline grace), implement it
+    // here and remove this error. See CHANGELOG (P4.14).
+    Err(AppError::not_implemented(
+        "licensing is not configured for this release — no entitlement source defined",
+    ))
 }
 
 // ---- Tray ---------------------------------------------------------------
@@ -103,7 +118,7 @@ fn show_main_window(app: &tauri::AppHandle) -> AppResult<()> {
 }
 
 #[tauri::command]
-fn open_settings(app: tauri::AppHandle) -> AppResult<()> {
+async fn open_settings(app: tauri::AppHandle) -> AppResult<()> {
     if let Some(win) = app.get_webview_window("settings") {
         let _ = win.unminimize();
         win.show().map_err(|e| AppError::window(e.to_string()))?;
@@ -113,19 +128,22 @@ fn open_settings(app: tauri::AppHandle) -> AppResult<()> {
         let _ = win.emit("settings-refresh", ());
         return Ok(());
     }
-    // Static window defined in tauri.conf.json with visible:false should have
-    // been found above; fallback builder covers dev without config rebuild.
-    let window = tauri::WebviewWindowBuilder::new(
-        &app,
-        "settings",
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title("Algorith Voice — Settings")
-    .inner_size(440.0, 600.0)
-    .min_inner_size(360.0, 480.0)
-    .center()
-    .focused(true)
-    .build()
+    // Window creation must happen on the main thread (see window.rs);
+    // building from the command worker deadlocks the webview at about:blank.
+    let window = crate::window::build_on_main_thread(&app, |handle| {
+        tauri::WebviewWindowBuilder::new(
+            &handle,
+            "settings",
+            tauri::WebviewUrl::App("index.html".into()),
+        )
+        .title("Algorith Voice — Settings")
+        .inner_size(440.0, 600.0)
+        .min_inner_size(360.0, 480.0)
+        .center()
+        .focused(true)
+        .build()
+    })
+    .await
     .map_err(|e| AppError::window(format!("create settings window: {e}")))?;
     window
         .set_focus()
@@ -134,23 +152,123 @@ fn open_settings(app: tauri::AppHandle) -> AppResult<()> {
 }
 
 // ---- Device session (refresh/access token lives in OS keyring, never on disk) ----
+// Linux headless/minimal-DE fallback: when the Secret Service backend is
+// unavailable (no gnome-keyring/kwallet), session persists in an explicitly
+// flagged 0600 fallback file instead of crashing. The fallback is
+// less-secure by design and labelled as such on disk + in logs.
 
 fn keyring_entry() -> AppResult<keyring::Entry> {
-    keyring::Entry::new(SERVICE, ACCOUNT).map_err(|e| AppError::session(e.to_string()))
+    keyring::Entry::new(SERVICE, ACCOUNT).map_err(|e| AppError::session(keyring_guidance(&e)))
 }
 
-fn read_session_email() -> Option<String> {
-    keyring_entry()
-        .ok()?
-        .get_password()
+fn keyring_guidance(e: &keyring::Error) -> String {
+    let base = e.to_string();
+    #[cfg(target_os = "linux")]
+    {
+        format!(
+            "{base} — no Secret Service provider found. Install and unlock gnome-keyring or kwallet for secure storage, or set a fallback (see session.fallback.README.txt). Logging out and back in after installing a provider migrates back to the keyring."
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        base
+    }
+}
+
+fn is_keyring_unavailable(e: &keyring::Error) -> bool {
+    !matches!(e, keyring::Error::NoEntry)
+}
+
+fn fallback_session_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager as _;
+    app.path()
+        .app_data_dir()
         .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|value| {
-            value
-                .get("email")
-                .and_then(|email| email.as_str())
-                .map(str::to_owned)
-        })
+        .map(|d| d.join("session.fallback.json"))
+}
+
+fn write_fallback_readme(dir: &std::path::Path) {
+    let readme = dir.join("session.fallback.README.txt");
+    if readme.exists() {
+        return;
+    }
+    let _ = std::fs::write(
+        &readme,
+        "LESS-SECURE SESSION FALLBACK — Algorith Voice\n\
+         This file exists because no OS keyring provider (Secret Service /\n\
+         gnome-keyring / kwallet on Linux) was available when you signed in.\n\
+         Your session is stored in session.fallback.json with 0600 permissions\n\
+         instead of the OS keyring. Install + unlock gnome-keyring or kwallet,\n\
+         then log out and back in to migrate to secure storage.\n",
+    );
+}
+
+fn read_fallback_payload(app: &tauri::AppHandle) -> Option<serde_json::Value> {
+    let path = fallback_session_path(app)?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn write_fallback_payload(app: &tauri::AppHandle, payload: &serde_json::Value) -> AppResult<()> {
+    use tauri::Manager as _;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::session(e.to_string()))?;
+    std::fs::create_dir_all(&dir).map_err(|e| AppError::session(e.to_string()))?;
+    write_fallback_readme(&dir);
+    let path = dir.join("session.fallback.json");
+    std::fs::write(&path, payload.to_string())
+        .map_err(|e| AppError::session(format!("fallback session write failed: {e}")))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    logging::log_event(
+        app,
+        "auth",
+        "keyring-fallback-write",
+        "session stored in less-secure fallback file (no Secret Service provider)",
+    );
+    Ok(())
+}
+
+fn delete_fallback_payload(app: &tauri::AppHandle) {
+    if let Some(path) = fallback_session_path(app) {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+fn read_session_email(app: &tauri::AppHandle) -> Option<String> {
+    match keyring_entry() {
+        Ok(entry) => match entry.get_password() {
+            Ok(raw) => serde_json::from_str::<serde_json::Value>(&raw)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("email")
+                        .and_then(|email| email.as_str())
+                        .map(str::to_owned)
+                }),
+            Err(keyring::Error::NoEntry) => {
+                // No keyring credential — check for a fallback from an
+                // earlier headless session before reporting logged-out.
+                read_fallback_payload(app).and_then(|v| v.get("email")?.as_str().map(str::to_owned))
+            }
+            Err(e) if is_keyring_unavailable(&e) => {
+                eprintln!(
+                    "algorith-voice: keyring read failed, trying fallback: {}",
+                    keyring_guidance(&e)
+                );
+                read_fallback_payload(app).and_then(|v| v.get("email")?.as_str().map(str::to_owned))
+            }
+            Err(_) => None,
+        },
+        Err(_) => {
+            read_fallback_payload(app).and_then(|v| v.get("email")?.as_str().map(str::to_owned))
+        }
+    }
 }
 
 fn validate_session_input(token: &str, email: &str) -> AppResult<(String, String)> {
@@ -202,9 +320,32 @@ fn store_session(
     if let Some(value) = refresh {
         payload["refresh_token"] = serde_json::Value::String(value);
     }
-    keyring_entry()?
-        .set_password(&payload.to_string())
-        .map_err(|e| AppError::session(e.to_string()))?;
+    match keyring_entry().and_then(|entry| {
+        entry
+            .set_password(&payload.to_string())
+            .map_err(|e| AppError::session(keyring_guidance(&e)))
+    }) {
+        Ok(()) => {
+            delete_fallback_payload(&app);
+        }
+        Err(e) => {
+            // Keyring backend unavailable (Linux headless): fall back to the
+            // flagged file instead of failing sign-in. Any other error is real.
+            let msg = e.to_string();
+            let unavailable = msg.contains("Secret Service")
+                || msg.contains("PlatformFailure")
+                || msg.contains("NoStorageAccess")
+                || cfg!(target_os = "linux");
+            if unavailable {
+                eprintln!("algorith-voice: keyring unavailable, using fallback: {e}");
+                write_fallback_payload(&app, &payload)?;
+            } else {
+                logging::log_event(&app, "auth", "store-session-failed", &msg);
+                return Err(e);
+            }
+        }
+    }
+    logging::log_event(&app, "auth", "store-session", "session stored");
     let _ = app.emit(
         "session-changed",
         serde_json::json!({ "loggedIn": true, "email": email }),
@@ -213,8 +354,8 @@ fn store_session(
 }
 
 #[tauri::command]
-fn session_status() -> SessionStatus {
-    match read_session_email() {
+fn session_status(app: tauri::AppHandle) -> SessionStatus {
+    match read_session_email(&app) {
         Some(email) => SessionStatus::logged_in(email),
         None => SessionStatus::logged_out(),
     }
@@ -222,13 +363,18 @@ fn session_status() -> SessionStatus {
 
 #[tauri::command]
 fn clear_session(app: tauri::AppHandle) -> AppResult<()> {
+    delete_fallback_payload(&app);
     let entry = keyring_entry()?;
     // Missing entry == already logged out; don't error.
     match entry.delete_credential() {
         Ok(()) => {}
         Err(keyring::Error::NoEntry) => {}
-        Err(e) => return Err(AppError::session(e.to_string())),
+        Err(e) if is_keyring_unavailable(&e) => {
+            eprintln!("algorith-voice: keyring delete failed (backend unavailable, fallback already cleared): {}", keyring_guidance(&e));
+        }
+        Err(e) => return Err(AppError::session(keyring_guidance(&e))),
     }
+    logging::log_event(&app, "auth", "clear-session", "session cleared");
     let _ = app.emit("session-changed", serde_json::json!({ "loggedIn": false }));
     Ok(())
 }
@@ -291,9 +437,13 @@ fn swap_hotkey(app: &tauri::AppHandle, previous: &str, next: &str) -> AppResult<
             // Best effort: old binding may already be gone after restart.
             let _ = shortcuts.unregister(previous);
         }
-        shortcuts
-            .register(next)
-            .map_err(|e| AppError::shortcut(format!("cannot register {next}: {e}")))?;
+        shortcuts.register(next).map_err(|e| {
+            let msg = format!(
+                "cannot register {next} ({e}) — it may be owned by the OS or another app. Pick a different hotkey in Settings."
+            );
+            logging::log_event(app, "hotkey", "register-failed", &msg);
+            AppError::shortcut(msg)
+        })?;
     }
     #[cfg(not(desktop))]
     {
@@ -326,7 +476,18 @@ fn register_hotkey(
     if previous == next {
         return Ok(());
     }
-    swap_hotkey(&app, &previous, &next)?;
+    if let Err(e) = swap_hotkey(&app, &previous, &next) {
+        // Surface to the user via notification AND settings-page error text
+        // (the frontend shows both). The previous hotkey stays active.
+        logging::log_event(&app, "hotkey", "register-failed", &e.to_string());
+        return Err(e);
+    }
+    logging::log_event(
+        &app,
+        "hotkey",
+        "registered",
+        &format!("hotkey set to {next}"),
+    );
     state
         .hotkey
         .write()
@@ -360,27 +521,65 @@ fn unregister_hotkey(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -
 // ---- Local persistence (SQLite ready, no UI dependency) ----
 
 fn init_db(app: &tauri::AppHandle) -> AppResult<Db> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::store(e.to_string()))?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| AppError::store(e.to_string()))?;
+    let data_dir = app.path().app_data_dir().map_err(|e| {
+        logging::log_event(app, "db", "init-failed", &e.to_string());
+        AppError::store(e.to_string())
+    })?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| {
+        logging::log_event(app, "db", "init-failed", &e.to_string());
+        AppError::store(e.to_string())
+    })?;
     let db_path = data_dir.join("algorith-voice.db");
-    let conn = rusqlite::Connection::open(&db_path).map_err(|e| AppError::store(e.to_string()))?;
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         CREATE TABLE IF NOT EXISTS history (
-           id TEXT PRIMARY KEY,
-           created_at TEXT NOT NULL,
-           transcript TEXT NOT NULL
-         );
-         CREATE TABLE IF NOT EXISTS kv (
-           key TEXT PRIMARY KEY,
-           value TEXT NOT NULL
-         );",
-    )
-    .map_err(|e| AppError::store(e.to_string()))?;
+    let mut conn = rusqlite::Connection::open(&db_path).map_err(|e| {
+        logging::log_event(app, "db", "open-failed", &e.to_string());
+        AppError::store(e.to_string())
+    })?;
+    // Ordered migrations (current schema is v1) so future changes never drop
+    // user history. See src/db.rs.
+    if let Err(e) = db::run_migrations(&mut conn) {
+        logging::log_event(app, "db", "migration-failed", &e.to_string());
+        return Err(e);
+    }
     Ok(Db(Mutex::new(conn)))
+}
+
+// ---- Diagnostics / logging (P6) ----
+
+#[tauri::command]
+fn get_log_dir(app: tauri::AppHandle) -> String {
+    logging::log_dir(&app).to_string_lossy().into_owned()
+}
+
+#[tauri::command]
+fn read_recent_logs(app: tauri::AppHandle, max_bytes: Option<u64>) -> String {
+    logging::read_recent_logs(&app, max_bytes.unwrap_or(200_000))
+}
+
+#[tauri::command]
+fn log_frontend_error(
+    app: tauri::AppHandle,
+    kind: String,
+    message: String,
+    stack: Option<String>,
+    url: Option<String>,
+) -> AppResult<()> {
+    let kind = kind.chars().take(64).collect::<String>();
+    let message = message.chars().take(2000).collect::<String>();
+    let mut detail = format!("kind={kind} message={message}");
+    if let Some(url) = url {
+        detail.push_str(&format!(
+            " url={}",
+            url.chars().take(500).collect::<String>()
+        ));
+    }
+    if let Some(stack) = stack {
+        detail.push_str(&format!(
+            " stack={}",
+            stack.chars().take(6000).collect::<String>()
+        ));
+    }
+    logging::log_event(&app, "frontend", &kind, &detail);
+    Ok(())
 }
 
 // ---- Tray / deep-link / single-instance ----
@@ -403,10 +602,15 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 }
             }
             "settings" => {
-                if let Err(e) = open_settings(app.clone()) {
-                    eprintln!("algorith-voice: open_settings failed: {e}");
-                    let _ = app.emit("settings-error", e.to_string());
-                }
+                // open_settings is async (window creation bounces to the
+                // main thread); the menu handler itself is sync, so spawn.
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = open_settings(handle.clone()).await {
+                        eprintln!("algorith-voice: open_settings failed: {e}");
+                        let _ = handle.emit("settings-error", e.to_string());
+                    }
+                });
             }
             "quit" => {
                 // 1) Remember the intent so CloseRequested below lets the
@@ -660,7 +864,11 @@ pub fn run() {
             local_asr::commands::stop_inference_worker,
             local_asr::commands::get_transcription_status,
             local_asr::commands::get_hardware_info,
-            local_asr::commands::get_model_compatibilities
+            local_asr::commands::get_model_compatibilities,
+            // Diagnostics / logging (Settings → Diagnostics).
+            get_log_dir,
+            read_recent_logs,
+            log_frontend_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running Algorith Voice");

@@ -23,7 +23,7 @@ import {
   verifyModel,
   type WorkerStatus,
 } from "../lib/localModels.js";
-import { isTauri } from "../lib/session.js";
+import { isTauri } from "../lib/session/env.js";
 import type { Prefs } from "./SettingsView.js";
 
 function formatBytes(bytes: number): string {

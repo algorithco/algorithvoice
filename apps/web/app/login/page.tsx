@@ -4,7 +4,13 @@ import { loginSchema } from "@algorith-voice/shared-types";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { AuthShell, Field, Input } from "../../components/AuthShell";
+import {
+  AuthShell,
+  Field,
+  Input,
+  OAuthButtons,
+  OAuthDivider,
+} from "../../components/AuthShell";
 import { MorphButton } from "../../components/MorphButton";
 import { Reveal } from "../../components/Reveal";
 
@@ -25,6 +31,7 @@ function LoginInner() {
   const returnTo = safeReturnTo(searchParams.get("returnTo"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -69,50 +76,76 @@ function LoginInner() {
   return (
     <Reveal>
       <AuthShell
-        title="Welcome back."
+        title="Sign in to Algorith Voice"
         subtitle="Login"
+        description="Continue to your workspace"
         footer={
           <>
             No account?{" "}
             <Link
               href={"/register" as never}
-              className="underline hover:text-ink"
+              className="text-ink underline decoration-line underline-offset-4 transition-colors hover:decoration-ink"
             >
               Create one
             </Link>
-            {" · "}
-            <Link href="/" className="underline hover:text-ink">
+            <span className="mx-2 text-faint">·</span>
+            <Link
+              href="/"
+              className="underline decoration-line underline-offset-4 transition-colors hover:text-ink hover:decoration-ink"
+            >
               Home
             </Link>
           </>
         }
       >
-        <form onSubmit={submit} className="flex flex-col gap-5">
-          <Field label="Email">
-            <Input
-              type="email"
-              autoComplete="email"
-              placeholder="you@algorithvoice.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </Field>
-          <Field label="Password">
-            <Input
-              type="password"
-              autoComplete="current-password"
-              placeholder="••••••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </Field>
-          {err ? <p className="t-cap normal-case text-red-400">{err}</p> : null}
-          <MorphButton type="submit" disabled={busy} className="w-full">
-            {busy ? "Signing in…" : "Sign in"}
-          </MorphButton>
-        </form>
+        <div className="flex flex-col gap-6">
+          <OAuthButtons mode="login" />
+          <OAuthDivider text="OR CONTINUE WITH EMAIL" />
+          <form onSubmit={submit} className="flex flex-col gap-5">
+            <Field label="Email or phone">
+              <Input
+                type="email"
+                autoComplete="email"
+                placeholder="Email or phone number"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </Field>
+            <Field label="Password">
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  placeholder="••••••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pr-20"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-pressed={showPassword}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="t-cap absolute top-1/2 right-2 -translate-y-1/2 rounded px-2 py-1.5 text-faint transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/50"
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+            </Field>
+            {err ? (
+              <p className="t-cap normal-case text-red-400">{err}</p>
+            ) : null}
+            <MorphButton
+              type="submit"
+              disabled={busy}
+              className="min-h-[52px] w-full text-base active:translate-y-px"
+            >
+              {busy ? "Signing in…" : "Sign in"}
+            </MorphButton>
+          </form>
+        </div>
       </AuthShell>
     </Reveal>
   );

@@ -67,10 +67,14 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
-      - run: docker build -f apps/backend/Dockerfile .
+      # Repo-root context is required (monorepo workspace + shared-types).
+      - run: docker build -f apps/backend/Dockerfile -t algorith-voice-backend:ci .
+      - run: docker build -f apps/web/Dockerfile -t algorith-voice-web:ci .
+      # Fails on invalid compose (bad env interpolation, missing files).
+      - run: docker compose -f infra/docker-compose.yml config --quiet
 
   secret-scan:
     runs-on: ubuntu-latest
@@ -109,4 +113,20 @@ jobs:
       # Tauri's build script checks frontendDist exists — create a stub for clippy
       - run: mkdir -p apps/desktop/dist && echo '<!doctype html><title>stub</title>' > apps/desktop/dist/index.html
       - run: cargo fmt --check --manifest-path apps/desktop/src-tauri/Cargo.toml
-      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
+      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+      - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      # Fast fail-closed gate for the model-manifest signature (no Rust build
+      # needed). The release build enforces the same structurally via
+      # src-tauri/build.rs, and `cargo test` above proves cryptographic
+      # validity (`bundled_manifest_verifies_against_baked_pubkey`).
+      - name: model-manifest signature check
+        run: |
+          pip install pynacl --quiet
+          python3 apps/desktop/src-tauri/scripts/sign-manifest.py check \
+            --manifest apps/desktop/src-tauri/src/local_asr/default_manifest.json \
+            --pubkey apps/desktop/src-tauri/src/local_asr/manifest_signing_pubkey.hex
+      - name: cargo audit (native surface: sherpa-onnx/keyring/rusqlite/enigo)
+        working-directory: apps/desktop/src-tauri
+        run: |
+          cargo install cargo-audit --locked || true
+          cargo audit || echo "cargo audit reported advisories — see log; triage in CHANGELOG"
