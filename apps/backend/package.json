@@ -30,7 +30,7 @@
     "@fastify/oauth2": "^8.3.0",
     "@fastify/rate-limit": "^11.0.0",
     "@fastify/swagger": "^9.4.2",
-    "@fastify/swagger-ui": "^5.2.3",
+    "@fastify/swagger-ui": "^6.1.1",
     "@fastify/websocket": "^11.2.0",
     "@prisma/client": "^6.19.0",
     "argon2": "^0.44.0",
@@ -45,7 +45,6 @@
   },
   "devDependencies": {
     "@types/node": "22.0.0",
-    "autocannon": "^8.0.0",
     "prisma": "^6.19.0",
     "tsx": "^4.19.2",
     "typescript": "catalog:",
