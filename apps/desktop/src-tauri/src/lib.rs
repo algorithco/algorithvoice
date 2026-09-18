@@ -474,10 +474,10 @@ fn is_deep_link(raw: &str) -> bool {
     // Require host `auth-callback` (covers `algorithvoice://auth-callback`)
     // Tauri on Windows may deliver `algorithvoice://auth-callback?code=...`
     // which url crate parses with host = Some("auth-callback").
-    match url.host_str() {
-        Some(host) if host.eq_ignore_ascii_case("auth-callback") => true,
-        _ => false,
-    }
+    matches!(
+        url.host_str(),
+        Some(host) if host.eq_ignore_ascii_case("auth-callback")
+    )
 }
 
 fn handle_argv_deep_links(handle: &tauri::AppHandle, argv: &[String]) {

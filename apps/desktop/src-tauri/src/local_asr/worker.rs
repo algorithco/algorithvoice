@@ -485,9 +485,8 @@ impl TranscriptionWorker {
         // downloader verified before rename, but a later symlink/file swap or
         // disk corruption must not reach the ONNX parser). Blocking, so caller
         // must be off the async executor (commands.rs uses spawn_blocking).
-        verify_model_files(model, dir).map_err(|e| {
+        verify_model_files(model, dir).inspect_err(|e| {
             self.fail(&e.message);
-            e
         })?;
         self.set_lifecycle(WorkerLifecycle::Loading, Some(model.id.clone()), None);
         on_stage(LoadStage::ResolvingFiles);
