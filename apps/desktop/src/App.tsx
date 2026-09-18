@@ -1,161 +1,69 @@
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { AppSidebar } from "./components/AppSidebar.js";
 import { AuthView } from "./components/AuthView.js";
 import { ArrowLeft } from "./components/animate-ui/icons/arrow-left.js";
 import { DashboardView } from "./components/DashboardView.js";
 import { DictateView } from "./components/DictateView.js";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { FloatingPill } from "./components/FloatingPill.js";
 import { HistoryView } from "./components/HistoryView.js";
-import { OnboardingView } from "./components/OnboardingView.js";
 import ParticleLogoLoader from "./components/ParticleLogoLoader.js";
 import { type Prefs, SettingsView } from "./components/SettingsView.js";
 import { UpdateAnnouncement } from "./components/UpdateAnnouncement.js";
-import {
-  DEFAULT_PREFS,
-  loadOnboarded,
-  loadPrefs,
-  saveOnboarded,
-  savePrefs,
-} from "./lib/prefs.js";
+import { useAuthGate } from "./hooks/useAuthGate.js";
+import { useOnboardingGate } from "./hooks/useOnboardingGate.js";
+import { useSplashSequence } from "./hooks/useSplashSequence.js";
+import { useWindowLabel } from "./hooks/useWindowLabel.js";
+import { saveOnboarded, savePrefs } from "./lib/prefs.js";
 import { ensureFloatingPill } from "./lib/ptt.js";
-import {
-  isTauri,
-  logout,
-  type SessionInfo,
-  sessionStatus,
-} from "./lib/session.js";
+import { logout } from "./lib/session/auth.js";
+import { isTauri } from "./lib/session/env.js";
+import type { SessionInfo } from "./lib/session/types.js";
 
-function detectWindowLabels(): { isSettings: boolean; isPill: boolean } {
-  try {
-    // Tauri 2 WebviewWindow label is the source of truth for secondary windows.
-    // Fallback to Window label for browser preview / older mocks.
-    let label: string | null = null;
-    try {
-      label = getCurrentWebviewWindow().label;
-    } catch {
-      try {
-        label = getCurrentWindow().label;
-      } catch {
-        label = null;
-      }
-    }
-    return {
-      isSettings: label === "settings",
-      isPill: label === "floating-pill",
-    };
-  } catch {
-    return { isSettings: false, isPill: false };
-  }
-}
+// Code-split heavy, rarely-needed bundles so the floating-pill and settings
+// windows don't pay for onboarding/model-management on first paint.
+const OnboardingView = lazy(() =>
+  import("./components/OnboardingView.js").then((m) => ({
+    default: m.OnboardingView,
+  })),
+);
 
 type View = "dashboard" | "dictate" | "history" | "settings";
 
 export default function App() {
   const [view, setView] = useState<View>("dashboard");
-  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
-  const [onboarded, setOnboarded] = useState(true);
-  const initialLabels = detectWindowLabels();
-  const [isSettingsWindow, setIsSettingsWindow] = useState(
-    initialLabels.isSettings,
-  );
-  const [isFloatingPill, setIsFloatingPill] = useState(initialLabels.isPill);
-  const [ready, setReady] = useState(
-    initialLabels.isSettings || initialLabels.isPill,
-  );
-  const [session, setSession] = useState<SessionInfo | null>(
-    initialLabels.isSettings || initialLabels.isPill
-      ? { loggedIn: false }
-      : null,
-  );
+  const { isSettings, isPill } = useWindowLabel();
+  const {
+    prefs,
+    setPrefs,
+    onboarded,
+    setOnboarded,
+    ready,
+    session,
+    setSession,
+    splashDone,
+  } = useSplashSequence({
+    isSettingsWindow: isSettings,
+    isFloatingPill: isPill,
+  });
   const [collapsed, setCollapsed] = useState(false);
-  const [splashDone, setSplashDone] = useState(
-    initialLabels.isSettings || initialLabels.isPill,
-  );
-
-  // Tauri injection can be async: re-check label shortly after mount and correct isPill/isSettings if initial was false
-  useEffect(() => {
-    if (isSettingsWindow || isFloatingPill) return;
-    const id = window.setTimeout(() => {
-      const late = detectWindowLabels();
-      if (late.isSettings && !isSettingsWindow) {
-        setIsSettingsWindow(true);
-        setReady(true);
-        setSplashDone(true);
-        setSession({ loggedIn: false });
-      }
-      if (late.isPill && !isFloatingPill) {
-        setIsFloatingPill(true);
-        setReady(true);
-        setSplashDone(true);
-        setSession({ loggedIn: false });
-      }
-    }, 120);
-    return () => clearTimeout(id);
-  }, [isSettingsWindow, isFloatingPill]);
-
-  useEffect(() => {
-    // Secondary windows already marked ready synchronously above; main window loads prefs.
-    if (isSettingsWindow || isFloatingPill) {
-      void Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
-        setPrefs(p);
-        setOnboarded(o);
-        setReady(true);
-      });
-      // Refresh prefs when tray reopens hidden settings window (hide->show emits settings-refresh)
-      let unlisten: (() => void) | undefined;
-      void listen("settings-refresh", () => {
-        void loadPrefs().then(setPrefs);
-      }).then((fn) => {
-        unlisten = fn;
-      });
-      return () => {
-        if (unlisten) unlisten();
-      };
-    }
-    void Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
-      setPrefs(p);
-      setOnboarded(o);
-      setReady(true);
-    });
-    // Session must never block splash forever — 3s fallback to logged-out
-    let settled = false;
-    void sessionStatus()
-      .then((s) => {
-        settled = true;
-        setSession(s);
-      })
-      .catch(() => {
-        settled = true;
-        setSession({ loggedIn: false });
-      });
-    const fallback = window.setTimeout(() => {
-      if (!settled) setSession({ loggedIn: false });
-    }, 3000);
-    const t = setTimeout(() => setSplashDone(true), 3800);
-    return () => {
-      clearTimeout(t);
-      clearTimeout(fallback);
-    };
-  }, []);
+  const { showAuth, loggedIn } = useAuthGate(session);
+  const showOnboarding = useOnboardingGate({ loggedIn, onboarded });
 
   // Auto-show floating pill once main app is ready (not in pill/settings windows)
-  // Note: pill is usable offline in local mode, so don't gate behind login.
   useEffect(() => {
-    if (isFloatingPill || isSettingsWindow) return;
+    if (isPill || isSettings) return;
     if (!ready || !splashDone || !onboarded || session === null) return;
     if (!isTauri()) return;
-    // Small delay lets main window finish paint before spawning pill
     const id = window.setTimeout(() => {
       void ensureFloatingPill().catch((e: unknown) => {
         console.error("algorith-voice: ensureFloatingPill failed", e);
       });
     }, 650);
     return () => clearTimeout(id);
-  }, [ready, splashDone, onboarded, session, isFloatingPill, isSettingsWindow]);
+  }, [ready, splashDone, onboarded, session, isPill, isSettings]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", prefs.theme === "dark");
@@ -177,11 +85,13 @@ export default function App() {
     return () => {
       if (unlisten) unlisten();
     };
-  }, []);
+  }, [setSession]);
 
   const updatePrefs = (p: Prefs) => {
     setPrefs(p);
-    void savePrefs(p);
+    void savePrefs(p).catch((e: unknown) => {
+      console.error("algorith-voice: savePrefs failed", e);
+    });
   };
 
   const handleLogout = () => {
@@ -193,23 +103,23 @@ export default function App() {
   const shell =
     "min-h-screen bg-white text-black dark:bg-black dark:text-white";
 
-  if (isFloatingPill) {
-    return <FloatingPill prefs={prefs} />;
+  if (isPill) {
+    return (
+      <ErrorBoundary>
+        <FloatingPill prefs={prefs} />
+      </ErrorBoundary>
+    );
   }
 
-  // Global in-app updater announcement (fixed top banner, outside splash)
-  const updateBanner =
-    !isSettingsWindow && !isFloatingPill ? <UpdateAnnouncement /> : null;
+  const updateBanner = !isSettings && !isPill ? <UpdateAnnouncement /> : null;
 
-  // Settings runs in its own window: render instantly with defaults and let
-  // prefs/session upgrade in place. Never gate it behind the main splash or
-  // session flow — the window must show UI even if those stall in a second
-  // webview.
-  if (isSettingsWindow) {
+  if (isSettings) {
     return (
-      <main className={shell}>
-        <SettingsView prefs={prefs} onPrefs={updatePrefs} />
-      </main>
+      <ErrorBoundary>
+        <main className={shell}>
+          <SettingsView prefs={prefs} onPrefs={updatePrefs} />
+        </main>
+      </ErrorBoundary>
     );
   }
 
@@ -267,96 +177,103 @@ export default function App() {
     );
   }
 
-  // Signed-out users land on login, but Settings must remain reachable
-  // (in-app Settings was dead when logged out — trap door to configure
-  // hotkey/theme/local model without account).
-  if (!session.loggedIn) {
+  if (showAuth) {
     if (view === "settings") {
       return (
-        <main className={shell}>
-          {updateBanner}
-          <div className="flex min-h-screen">
-            <AppSidebar
-              active={view}
-              onSelect={(id) => setView(id as View)}
-              collapsed={collapsed}
-              onCollapsedChange={setCollapsed}
-              email={null}
-              onLogout={handleLogout}
-            />
-            <div className="min-w-0 flex-1 overflow-auto">
-              <SettingsView prefs={prefs} onPrefs={updatePrefs} />
+        <ErrorBoundary>
+          <main className={shell}>
+            {updateBanner}
+            <div className="flex min-h-screen">
+              <AppSidebar
+                active={view}
+                onSelect={(id) => setView(id as View)}
+                collapsed={collapsed}
+                onCollapsedChange={setCollapsed}
+                email={null}
+                onLogout={handleLogout}
+              />
+              <div className="min-w-0 flex-1 overflow-auto">
+                <SettingsView prefs={prefs} onPrefs={updatePrefs} />
+              </div>
             </div>
-          </div>
-          <div className="fixed bottom-3 right-3 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-black shadow">
-            <button
-              type="button"
-              onClick={() => setView("dashboard")}
-              className="inline-flex items-center gap-1.5"
-            >
-              <ArrowLeft size={14} animateOnHover />
-              Back to sign in
-            </button>
-          </div>
-        </main>
+            <div className="fixed bottom-3 right-3 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-black shadow">
+              <button
+                type="button"
+                onClick={() => setView("dashboard")}
+                className="inline-flex items-center gap-1.5"
+              >
+                <ArrowLeft size={14} animateOnHover />
+                Back to sign in
+              </button>
+            </div>
+          </main>
+        </ErrorBoundary>
       );
     }
     return (
-      <main className="min-h-screen bg-transparent text-white">
-        <AuthView onDone={setSession} />
-        <button
-          type="button"
-          onClick={() => setView("settings")}
-          className="fixed bottom-3 right-3 rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/60 hover:bg-white/15 hover:text-white"
-        >
-          Settings
-        </button>
-      </main>
+      <ErrorBoundary>
+        <main className="min-h-screen bg-transparent text-white">
+          <AuthView onDone={setSession} />
+          <button
+            type="button"
+            onClick={() => setView("settings")}
+            className="fixed bottom-3 right-3 rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/60 hover:bg-white/15 hover:text-white"
+          >
+            Settings
+          </button>
+        </main>
+      </ErrorBoundary>
     );
   }
 
-  if (!onboarded) {
+  if (showOnboarding) {
     return (
-      <main className={shell}>
-        <OnboardingView
-          prefs={prefs}
-          onPrefs={updatePrefs}
-          onDone={() => {
-            setOnboarded(true);
-            void saveOnboarded();
-          }}
-        />
-      </main>
+      <ErrorBoundary>
+        <main className={shell}>
+          <Suspense fallback={<div className="p-8 text-sm">Loading…</div>}>
+            <OnboardingView
+              prefs={prefs}
+              onPrefs={updatePrefs}
+              onDone={() => {
+                setOnboarded(true);
+                void saveOnboarded();
+              }}
+            />
+          </Suspense>
+        </main>
+      </ErrorBoundary>
     );
   }
 
   return (
-    <main className={shell}>
-      {updateBanner}
-      <div className="flex min-h-screen">
-        <AppSidebar
-          active={view}
-          onSelect={(id) => setView(id as View)}
-          collapsed={collapsed}
-          onCollapsedChange={setCollapsed}
-          email={session?.email ?? null}
-          onLogout={handleLogout}
-        />
-        <div className="min-w-0 flex-1 overflow-auto">
-          {view === "dashboard" ? (
-            <DashboardView
-              hotkey={prefs.hotkey}
-              email={session?.email ?? null}
-              onNavigate={setView}
-            />
-          ) : null}
-          {view === "dictate" ? <DictateView hotkey={prefs.hotkey} /> : null}
-          {view === "history" ? <HistoryView /> : null}
-          {view === "settings" ? (
-            <SettingsView prefs={prefs} onPrefs={updatePrefs} />
-          ) : null}
+    <ErrorBoundary>
+      <main className={shell}>
+        {updateBanner}
+        <div className="flex min-h-screen">
+          <AppSidebar
+            active={view}
+            onSelect={(id) => setView(id as View)}
+            collapsed={collapsed}
+            onCollapsedChange={setCollapsed}
+            email={session?.email ?? null}
+            onLogout={handleLogout}
+          />
+          <div className="min-w-0 flex-1 overflow-auto">
+            {view === "dashboard" ? (
+              <DashboardView
+                hotkey={prefs.hotkey}
+                email={session?.email ?? null}
+                onNavigate={setView}
+              />
+            ) : null}
+            {view === "dictate" ? <DictateView hotkey={prefs.hotkey} /> : null}
+            {view === "history" ? <HistoryView /> : null}
+            {view === "settings" ? (
+              <SettingsView prefs={prefs} onPrefs={updatePrefs} />
+            ) : null}
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </ErrorBoundary>
   );
 }
