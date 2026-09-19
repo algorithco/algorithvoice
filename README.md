@@ -1,12 +1,12 @@
 <div align="center">
   <img src="assets/logo.svg" width="88" alt="Algorith Voice logo" />
   <h1>Algorith Voice</h1>
-  <p><strong>Talk faster. Type never.</strong><br />Push-to-talk voice dictation for macOS, Windows &amp; Linux.<br />Hold a hotkey, speak, text appears in the focused app.</p>
+  <p><strong>Talk faster. Type never.</strong><br />Push-to-talk voice dictation for Windows &amp; Linux (Tauri + Rust).<br />macOS ships as a separate Swift app.<br />Hold a hotkey, speak, text appears in the focused app.</p>
   <p>
     <a href="https://github.com/algorithco/algorithvoice/actions/workflows/ci.yml"><img src="https://github.com/algorithco/algorithvoice/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
     <a href="https://github.com/algorithco/algorithvoice/releases"><img src="https://img.shields.io/github/v/release/algorithco/algorithvoice?style=flat&label=release" alt="Release" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/algorithco/algorithvoice?style=flat" alt="License: GPL-3.0-or-later" /></a>
-    <img src="https://img.shields.io/badge/platform-macOS_%7C_Windows_%7C_Linux-black?style=flat" alt="macOS, Windows, Linux" />
+    <img src="https://img.shields.io/badge/platform-Windows_%7C_Linux-black?style=flat" alt="Windows, Linux (Tauri); macOS via Swift" />
   </p>
 </div>
 
@@ -21,8 +21,9 @@
 ### How it works
 
 ```text
-Desktop (Tauri 2 + Rust)  <── WS / REST ──>  Backend (Fastify 5)  <── BFF ──>  Web (Next.js 16)
-  sherpa-onnx, offline-first                   Voxtral + Parakeet                  marketing + dashboard
+Desktop (Tauri 2 + Rust, Windows & Linux)  <── WS / REST ──>  Backend (Fastify 5)  <── BFF ──>  Web (Next.js 16)
+  sherpa-onnx, offline-first                                  Voxtral + Parakeet                  marketing + dashboard
+macOS: separate native Swift app in apps/desktop-swift (not Tauri).
 ```
 
 Monochrome by design (`#000` / `#FFF`), offline-first, privacy-respecting.
@@ -73,7 +74,8 @@ container `APP_URL` (production validation rejects `localhost`).
 ### Monorepo
 
 ```text
-apps/desktop          Tauri 2 desktop app (Rust + React)
+apps/desktop-tauri    Tauri 2 desktop app — Windows & Linux (Rust + React)
+apps/desktop-swift    Native macOS app (Swift/SwiftUI, separate from Tauri)
 apps/web              Next.js 16 marketing + dashboard
 apps/backend          Fastify 5 API + WebSocket
 packages/shared-types Zod contracts (single source of truth)

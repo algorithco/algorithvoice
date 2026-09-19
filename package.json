@@ -4,7 +4,7 @@
   "private": true,
   "license": "GPL-3.0-or-later",
   "packageManager": "pnpm@10.29.3",
-  "description": "Algorith Voice — push-to-talk voice dictation platform (Tauri desktop + Fastify backend + Next.js web)",
+  "description": "Algorith Voice — push-to-talk voice dictation platform (Tauri desktop Windows/Linux + Fastify backend + Next.js web; macOS is a separate Swift app)",
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
