@@ -31,9 +31,19 @@ import { Builder } from "selenium-webdriver";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)));
 const SHOTS = join(ROOT, "screenshots");
+// TAURI_APP_PATH env wins; else derive from CARGO_TARGET_DIR (CI sets both
+// to ${{ runner.temp }}/cargo-target); else legacy hardcoded dev-machine path.
 const APP =
   process.env.TAURI_APP_PATH ??
-  "D:\\cargo-target\\desktop\\debug\\algorith-voice-desktop.exe";
+  (process.env.CARGO_TARGET_DIR
+    ? join(
+        process.env.CARGO_TARGET_DIR,
+        "debug",
+        process.platform === "win32"
+          ? "algorith-voice-desktop.exe"
+          : "algorith-voice-desktop",
+      )
+    : "D:\\cargo-target\\desktop\\debug\\algorith-voice-desktop.exe");
 const DRIVER = process.env.TAURI_DRIVER ?? "tauri-driver";
 const PORT = process.env.TAURI_DRIVER_PORT ?? "4444";
 
