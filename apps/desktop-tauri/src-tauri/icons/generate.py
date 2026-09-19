@@ -1,7 +1,7 @@
 """Generate strictly-monochrome Algorith Voice icons (black/white/gray only).
 
 WARNING: the shipped bundle icons (32x32.png, 64x64.png, 128x128.png,
-128x128@2x.png, icon.png, icon.ico, icon.icns) are generated from the real
+128x128@2x.png, icon.png, icon.ico) are generated from the real
 product artwork via `tauri icon`, NOT by this script:
   source : assets/transparent_logo_1024x1024.png (1024x1024, alpha)
   master : assets/app-icon-tile-1024.png (black rounded tile + alpha
@@ -12,9 +12,9 @@ placeholder — only re-run it if you intend to revert to that design.
 Safe use: `python icons/generate.py` solely to refresh tray-*.png glyphs
 (then `git checkout` the bundle icons if they were clobbered).
 
-Run:  python icons/generate.py   (from apps/desktop/src-tauri/)
-Outputs the Tauri-expected set: 32x32.png, 128x128.png, 128x128@2x.png,
-icon.png (512), icon.ico (multi-size), icon.icns, plus tray states.
+Run:  python icons/generate.py   (from apps/desktop-tauri/src-tauri/)
+Outputs the Windows-expected set: 32x32.png, 128x128.png, 128x128@2x.png,
+icon.png (512), icon.ico (multi-size), plus tray states.
 """
 from PIL import Image, ImageDraw
 
@@ -89,10 +89,6 @@ def main() -> None:
     app_icon(128).save(os.path.join(HERE, "128x128.png"))
     app_icon(256).save(os.path.join(HERE, "128x128@2x.png"))
     app_icon(256).save(os.path.join(HERE, "icon.ico"), sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-    try:
-        app_icon(512).save(os.path.join(HERE, "icon.icns"))
-    except Exception as exc:  # Pillow icns writer may be unavailable; bundler needs it on macOS CI
-        print(f"icns skipped: {exc}")
     for state in ("idle", "recording", "processing"):
         tray(state).save(os.path.join(HERE, f"tray-{state}.png"))
     print("icons written to", HERE)

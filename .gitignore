@@ -22,7 +22,7 @@ __pycache__/
 *-seed.hex
 manifest-signing-seed.hex
 # tauri-driver E2E screenshots (local review only)
-apps/desktop/e2e/screenshots/
+apps/desktop-tauri/e2e/screenshots/
 # Prompt specs live alongside the repo locally but are never pushed
 *-prompt.md
 *-prompt-v2.md

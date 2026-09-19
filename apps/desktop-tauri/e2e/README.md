@@ -72,5 +72,5 @@ Screenshots land in `e2e/screenshots/` (gitignored) for human review.
 `.github/workflows/e2e-desktop.yml` runs this on `windows-latest` — on
 `workflow_dispatch` and release tags only, NOT on every PR: a native build +
 boot is an order of magnitude slower than unit tests, and Windows runners
-are the project's primary release target (Linux would additionally need
-xvfb + WebKit deps; macOS needs signing identity handling).
+are the project's release target (Linux would additionally need
+xvfb + WebKit deps).

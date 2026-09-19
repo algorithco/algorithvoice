@@ -23,7 +23,7 @@ pub struct GpuInfo {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HardwareInfo {
-    /// `std::env::consts::OS`: `"windows"`, `"macos"`, `"linux"`, ...
+    /// `std::env::consts::OS`: `"windows"`, `"linux"`, ...
     pub os: String,
     /// `std::env::consts::ARCH`: `"x86_64"`, `"aarch64"`, ...
     pub arch: String,
@@ -212,8 +212,7 @@ unsafe fn detect_nvidia_gpu_inner(lib: &libloading::Library) -> Option<GpuInfo> 
 
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn detect_nvidia_gpu() -> Option<GpuInfo> {
-    // No NVIDIA driver model on other OSes (Apple Silicon is unified
-    // memory; CPU inference is the supported path there).
+    // No NVIDIA driver model on other OSes.
     None
 }
 
