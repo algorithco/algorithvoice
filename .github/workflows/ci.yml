@@ -109,12 +109,12 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libappindicator3-dev patchelf
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/desktop/src-tauri -> target
+          workspaces: apps/desktop-tauri/src-tauri -> target
       # Tauri's build script checks frontendDist exists — create a stub for clippy
-      - run: mkdir -p apps/desktop/dist && echo '<!doctype html><title>stub</title>' > apps/desktop/dist/index.html
-      - run: cargo fmt --check --manifest-path apps/desktop/src-tauri/Cargo.toml
-      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-      - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - run: mkdir -p apps/desktop-tauri/dist && echo '<!doctype html><title>stub</title>' > apps/desktop-tauri/dist/index.html
+      - run: cargo fmt --check --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml
+      - run: cargo clippy --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+      - run: cargo test --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml
       # Fast fail-closed gate for the model-manifest signature (no Rust build
       # needed). The release build enforces the same structurally via
       # src-tauri/build.rs, and `cargo test` above proves cryptographic
@@ -122,11 +122,11 @@ jobs:
       - name: model-manifest signature check
         run: |
           pip install pynacl --quiet
-          python3 apps/desktop/src-tauri/scripts/sign-manifest.py check \
-            --manifest apps/desktop/src-tauri/src/local_asr/default_manifest.json \
-            --pubkey apps/desktop/src-tauri/src/local_asr/manifest_signing_pubkey.hex
+          python3 apps/desktop-tauri/src-tauri/scripts/sign-manifest.py check \
+            --manifest apps/desktop-tauri/src-tauri/src/local_asr/default_manifest.json \
+            --pubkey apps/desktop-tauri/src-tauri/src/local_asr/manifest_signing_pubkey.hex
       - name: "cargo audit (native surface: sherpa-onnx/keyring/rusqlite/enigo)"
-        working-directory: apps/desktop/src-tauri
+        working-directory: apps/desktop-tauri/src-tauri
         run: |
           cargo install cargo-audit --locked || true
           cargo audit || echo "cargo audit reported advisories — see log; triage in CHANGELOG"

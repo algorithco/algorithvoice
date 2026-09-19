@@ -14,8 +14,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 25
     # Heavier than unit tests; only on dispatch / releases, not every PR
-    # (see apps/desktop/e2e/README.md). Windows is the primary release target;
-    # Linux would additionally need xvfb + WebKit deps, macOS needs signing.
+    # (see apps/desktop-tauri/e2e/README.md). Windows is the release target;
+    # Linux would additionally need xvfb + WebKit deps.
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -26,7 +26,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/desktop/src-tauri -> target
+          workspaces: apps/desktop-tauri/src-tauri -> target
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -36,11 +36,11 @@ jobs:
       - run: pnpm --filter @algorith-voice/ui build
       # Manifest signature fast gate (no Rust build needed)
       - name: model-manifest signature check
-        run: python apps/desktop/src-tauri/scripts/sign-manifest.py check --manifest apps/desktop/src-tauri/src/local_asr/default_manifest.json --pubkey apps/desktop/src-tauri/src/local_asr/manifest_signing_pubkey.hex
-      # Debug binary is enough for E2E (faster than --release) and avoids
-      # signing/notarization. WebView2 + Edge are preinstalled on windows-latest.
+        run: python apps/desktop-tauri/src-tauri/scripts/sign-manifest.py check --manifest apps/desktop-tauri/src-tauri/src/local_asr/default_manifest.json --pubkey apps/desktop-tauri/src-tauri/src/local_asr/manifest_signing_pubkey.hex
+      # Debug binary is enough for E2E (faster than --release).
+      # WebView2 + Edge are preinstalled on windows-latest.
       - name: build desktop (debug)
-        run: cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml
+        run: cargo build --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
       - name: install tauri-driver
@@ -54,5 +54,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-screenshots-windows
-          path: apps/desktop/e2e/screenshots/
+          path: apps/desktop-tauri/e2e/screenshots/
           if-no-files-found: warn

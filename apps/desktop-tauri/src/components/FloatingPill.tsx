@@ -163,7 +163,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           pasted: result.pasted,
         });
         if (!result.pasted) {
-          // Auto-paste unavailable (Wayland / macOS permission) — leave
+          // Auto-paste failed — leave
           // the text on the clipboard so one Ctrl+V finishes the job.
           try {
             await navigator.clipboard.writeText(result.text);

@@ -8,7 +8,7 @@
 //! thread via [`tauri::AppHandle::run_on_main_thread`] fixes it. Callers
 //! must be `async` (a blocking `recv` here is only safe off the UI thread).
 //!
-//! Regression cover: `apps/desktop/e2e/tauri.e2e.js` (pill geometry test
+//! Regression cover: `apps/desktop-tauri/e2e/tauri.e2e.js` (pill geometry test
 //! fails without this — the pill invoke hangs and the window stays blank).
 
 use crate::error::{AppError, AppResult};

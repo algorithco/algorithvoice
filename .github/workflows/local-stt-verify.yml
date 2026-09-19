@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 env:
-  MANIFEST_DIR: apps/desktop/src-tauri
+  MANIFEST_DIR: apps/desktop-tauri/src-tauri
   FIXTURE_DIR: parakeet-fixture
   FIXTURE_REPO: csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8
 
@@ -35,15 +35,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/desktop/src-tauri -> target
+          workspaces: apps/desktop-tauri/src-tauri -> target
 
       # Tauri's build script checks frontendDist exists — create a stub
       # (same as ci.yml rust-check; the Rust gates don't need a real bundle).
       - name: Stub frontendDist for tauri-build
         shell: bash
         run: |
-          mkdir -p apps/desktop/dist
-          echo '<!doctype html><title>stub</title>' > apps/desktop/dist/index.html
+          mkdir -p apps/desktop-tauri/dist
+          echo '<!doctype html><title>stub</title>' > apps/desktop-tauri/dist/index.html
 
       - name: Restore Parakeet fixture
         id: fixture-cache

@@ -22,7 +22,7 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json turbo.json ./
 COPY tsconfig.base.json biome.json ./
 COPY apps/backend/package.json apps/backend/
 COPY apps/web/package.json apps/web/
-COPY apps/desktop/package.json apps/desktop/
+COPY apps/desktop-tauri/package.json apps/desktop-tauri/
 COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/ui/package.json packages/ui/
 COPY infra/prisma/package.json infra/prisma/

@@ -10,7 +10,7 @@
 //!    dep needed) and sends base64 audio to `transcribe_audio`.
 //! 3. `paste_text` (or the `transcribe_and_paste` convenience combo)
 //!    injects the transcript into the previously focused app via
-//!    clipboard + Ctrl/Cmd+V (`arboard` + `enigo`).
+//!    clipboard + Ctrl+V (`arboard` + `enigo`).
 //!
 //! Groq key resolution order (never hardcoded):
 //! explicit arg → `GROQ_API_KEY` env → OS keyring (`set_groq_api_key`).
@@ -382,7 +382,7 @@ pub async fn transcribe_audio(
 // ---- Transcript → focused app (clipboard + paste keystroke) ----
 
 /// Copy `text` to the clipboard and synthesize the OS paste shortcut
-/// (Ctrl+V on Windows/Linux, Cmd+V on macOS).
+/// (Ctrl+V on Windows).
 ///
 /// When `restore_clipboard` is true (default), the previous clipboard
 /// text — if any — is restored ~350 ms after pasting so the user's
@@ -437,9 +437,7 @@ fn paste_keystroke() -> AppResult<()> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| AppError::new("paste", format!("enigo: {e}")))?;
-    #[cfg(target_os = "macos")]
-    let modifier = Key::Meta;
-    #[cfg(not(target_os = "macos"))]
+    // Windows-only: Ctrl+V. (macOS Cmd+V lives in the Swift app.)
     let modifier = Key::Control;
     enigo
         .key(modifier, Direction::Press)
@@ -496,7 +494,7 @@ pub async fn transcribe_and_paste(
         Err(e) => {
             // Transcription (the billable part) succeeded — never lose it.
             // Report `pasted: false` so the frontend falls back to
-            // clipboard + manual paste (Wayland / macOS permission cases).
+            // clipboard + manual paste (e.g. when the keystroke is blocked).
             eprintln!("algorith-voice: auto-paste failed: {e}");
             Ok(TranscribeResult {
                 text: result.text,
@@ -527,7 +525,7 @@ pub fn get_foreground_info() -> AppResult<ForegroundInfo> {
              into the app that was focused before pressing."
                 .to_owned(),
         )
-    } else if platform == "windows" || platform == "macos" {
+    } else if platform == "windows" {
         (
             true,
             "Pill keeps focus (focused:false), so the previously active app \
@@ -559,15 +557,15 @@ pub fn get_foreground_info() -> AppResult<ForegroundInfo> {
 /// skip_taskbar, non-resizable 72x72, `focused(false)` + `focusable(false)`
 /// so it never steals focus, `visible_on_all_workspaces` where supported.
 ///
-/// NOTE: `.transparent()` on macOS requires the `macos-private-api`
-/// Cargo feature on `tauri` (see Cargo.toml) — without it the method
-/// does not exist on that target and the release build fails (E0599).
+/// NOTE: Windows needs no private-API opt-in for `.transparent()` — the
+/// old `macos-private-api` Cargo feature / `macOSPrivateApi` config were
+/// macOS-only and have been removed (macOS lives in the Swift app).
 pub(crate) const PILL_SIZE: f64 = 72.0;
 pub(crate) const PILL_MARGIN_RIGHT: f64 = 24.0;
 pub(crate) const PILL_MARGIN_BOTTOM: f64 = 96.0;
 
 /// Bottom-right pill position for a monitor's logical geometry.
-/// Pure so unit tests and the WebDriver E2E suite (`apps/desktop/e2e`)
+/// Pure so unit tests and the WebDriver E2E suite (`apps/desktop-tauri/e2e`)
 /// assert the same numbers the builder uses.
 pub(crate) fn pill_position(
     logical_x: f64,

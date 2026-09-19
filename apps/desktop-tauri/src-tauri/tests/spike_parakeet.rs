@@ -16,7 +16,7 @@
 //! #    huggingface-cli download csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8 `
 //! #      --local-dir C:\models\parakeet-v3-int8
 //! $env:SHERPA_PARAKEET_MODEL_DIR = 'C:\models\parakeet-v3-int8'
-//! cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --test spike_parakeet -- --nocapture
+//! cargo test --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml --test spike_parakeet -- --nocapture
 //! ```
 
 use algorith_voice_desktop_lib::local_asr::audio::decode_wav;
