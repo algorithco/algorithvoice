@@ -49,8 +49,8 @@ pnpm-debug.log*
 
 # Desktop native artifacts (never part of server images)
 src-tauri/target
-apps/desktop/src-tauri/target
-apps/desktop/dist
+apps/desktop-tauri/src-tauri/target
+apps/desktop-tauri/dist
 *.dmg
 *.msi
 *.AppImage

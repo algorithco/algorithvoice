@@ -20,7 +20,7 @@ main thread via `src-tauri/src/window.rs`. Rebuild after pulling.
   manual `PATH` setup). Override with `EDGE_DRIVER` if needed.
 - `tauri-driver` 2.x: `cargo install tauri-driver --locked` (puts
   `tauri-driver.exe` on PATH via `~/.cargo/bin`).
-- A debug binary: `cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml`
+- A debug binary: `cargo build --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml`
   with `CARGO_TARGET_DIR` set if C: is tight on space (the E2E `before` hook
   also `taskkill`s a leftover debug binary so the single-instance lock does
   not make the new launch exit instantly).

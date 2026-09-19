@@ -565,7 +565,7 @@ pub(crate) const PILL_MARGIN_RIGHT: f64 = 24.0;
 pub(crate) const PILL_MARGIN_BOTTOM: f64 = 96.0;
 
 /// Bottom-right pill position for a monitor's logical geometry.
-/// Pure so unit tests and the WebDriver E2E suite (`apps/desktop/e2e`)
+/// Pure so unit tests and the WebDriver E2E suite (`apps/desktop-tauri/e2e`)
 /// assert the same numbers the builder uses.
 pub(crate) fn pill_position(
     logical_x: f64,
