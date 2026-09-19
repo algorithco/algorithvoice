@@ -37,6 +37,11 @@ jobs:
       # Manifest signature fast gate (no Rust build needed)
       - name: model-manifest signature check
         run: python apps/desktop-tauri/src-tauri/scripts/sign-manifest.py check --manifest apps/desktop-tauri/src-tauri/src/local_asr/default_manifest.json --pubkey apps/desktop-tauri/src-tauri/src/local_asr/manifest_signing_pubkey.hex
+      # Real frontend is required: the debug binary serves frontendDist and
+      # tauri's generate_context! fails the compile when dist/ is missing.
+      # The WebDriver suite then drives the real multi-window UI.
+      - name: build desktop frontend
+        run: pnpm --filter @algorith-voice/desktop build
       # Debug binary is enough for E2E (faster than --release).
       # WebView2 + Edge are preinstalled on windows-latest.
       - name: build desktop (debug)
