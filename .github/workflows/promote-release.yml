@@ -49,13 +49,13 @@ jobs:
               node -e "let p=require('./$f'); p.version='$VER'; require('fs').writeFileSync('./$f', JSON.stringify(p,null,2)+'\n')"
             fi
           done
-          # Tauri version
-          if [ -f apps/desktop/src-tauri/tauri.conf.json ]; then
-            node -e "let c=require('./apps/desktop/src-tauri/tauri.conf.json'); c.version='$VER'; require('fs').writeFileSync('./apps/desktop/src-tauri/tauri.conf.json', JSON.stringify(c,null,2)+'\n')"
+          # Tauri version (Windows desktop)
+          if [ -f apps/desktop-tauri/src-tauri/tauri.conf.json ]; then
+            node -e "let c=require('./apps/desktop-tauri/src-tauri/tauri.conf.json'); c.version='$VER'; require('fs').writeFileSync('./apps/desktop-tauri/src-tauri/tauri.conf.json', JSON.stringify(c,null,2)+'\n')"
           fi
-          if [ -f apps/desktop/src-tauri/Cargo.toml ]; then
+          if [ -f apps/desktop-tauri/src-tauri/Cargo.toml ]; then
             # naive bump version = "x.y.z"
-            sed -i -E "s/^version = \".*\"/version = \"$VER\"/" apps/desktop/src-tauri/Cargo.toml || true
+            sed -i -E "s/^version = \".*\"/version = \"$VER\"/" apps/desktop-tauri/src-tauri/Cargo.toml || true
           fi
           git add -A
           if git diff --cached --quiet; then

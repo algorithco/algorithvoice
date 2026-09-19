@@ -94,5 +94,5 @@ jobs:
       - name: Summary
         run: |
           echo "✓ Release ${{ steps.ver.outputs.tag }} created"
-          echo "  Desktop builds (release-desktop) will trigger on this tag and attach .dmg/.msi/.AppImage"
+          echo "  Desktop builds (release-desktop) will trigger on this tag and attach .msi/.AppImage/.deb (Windows + Linux; macOS is the separate Swift app)"
           echo "  Backend deploys are paused (deploy-backend is manual-only)"

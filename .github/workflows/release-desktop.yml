@@ -20,10 +20,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
           - os: ubuntu-22.04
@@ -52,17 +48,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Unsigned CI builds: empty APPLE_SIGNING_IDENTITY would override
-          # tauri.conf's ad-hoc "-" (env wins over config), so default to "-".
-          # Set the APPLE_SIGNING_IDENTITY secret for real signed releases.
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-          # NOTE: APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID are intentionally
-          # NOT set here. Tauri attempts notarization whenever these env vars
-          # exist (even empty) and fails on the empty Team ID. Re-add all three
-          # together when real Apple Developer credentials are available.
         with:
-          projectPath: apps/desktop
+          projectPath: apps/desktop-tauri
           tagName: v__VERSION__
           releaseName: "Algorith Voice v__VERSION__"
-          releaseBody: "Desktop app — see attached .dmg (macOS), .msi (Windows), .AppImage/.deb (Linux). Public downloads: https://github.com/algorithco/algorithvoice-app/releases/latest"
+          releaseBody: "Desktop app (Windows) — see attached .msi/.exe (Windows), .AppImage/.deb (Linux). Public downloads: https://github.com/algorithco/algorithvoice-app/releases/latest"
           args: --target ${{ matrix.target }}
