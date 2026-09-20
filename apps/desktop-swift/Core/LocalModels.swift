@@ -124,9 +124,9 @@ public enum ModelManifestValidation {
     /// Shape + security validation. Transport trust is NOT established here.
     public static func validate(_ manifest: ModelManifest) throws {
         guard manifest.manifestVersion == modelManifestVersion else {
-            throw AppError.internalError(
-                "unsupported model manifest version \(manifest.manifestVersion), this build understands \(modelManifestVersion)"
-            )
+            let detail = "unsupported model manifest version \(manifest.manifestVersion), "
+                + "this build understands \(modelManifestVersion)"
+            throw AppError.internalError(detail)
         }
         guard !manifest.models.isEmpty else {
             throw AppError.internalError("model manifest contains no models")
@@ -141,18 +141,32 @@ public enum ModelManifestValidation {
     }
 
     static func validateModel(_ model: LocalModel) throws {
+        try validateModelIdentity(model)
+        try validateModelFiles(model)
+        try validateModelMemory(model)
+        try validateModelRequirements(model)
+    }
+
+    /// Identity fields: safe slug, display name, semver, quantization label.
+    static func validateModelIdentity(_ model: LocalModel) throws {
         guard isSafeSlug(model.id) else {
             throw AppError.internalError("model id is not a safe slug: \(model.id)")
         }
-        guard !model.name.trimmingCharacters(in: .whitespaces).isEmpty, model.name.count <= 120 else {
+        let name = model.name.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, model.name.count <= 120 else {
             throw AppError.internalError("model \(model.id) has an invalid display name")
         }
         guard isSemver(model.version) else {
             throw AppError.internalError("model \(model.id) version is not semver x.y.z: \(model.version)")
         }
-        guard !model.quantization.trimmingCharacters(in: .whitespaces).isEmpty, model.quantization.count <= 32 else {
+        let quantization = model.quantization.trimmingCharacters(in: .whitespaces)
+        guard !quantization.isEmpty, model.quantization.count <= 32 else {
             throw AppError.internalError("model \(model.id) has an invalid quantization label")
         }
+    }
+
+    /// File list: non-empty, unique safe names, HTTPS URLs, SHA-256 shape.
+    static func validateModelFiles(_ model: LocalModel) throws {
         guard !model.files.isEmpty else {
             throw AppError.internalError("model \(model.id) lists no files")
         }
@@ -170,15 +184,23 @@ public enum ModelManifestValidation {
                 throw AppError.internalError("model \(model.id) file \(file.filename) has a malformed sha256")
             }
         }
-        guard !model.languages.isEmpty, model.languages.allSatisfy(isLanguageCode) else {
-            throw AppError.internalError("model \(model.id) has invalid languages")
-        }
+    }
+
+    /// Memory expectations: recommended floors at minimum, no negatives.
+    static func validateModelMemory(_ model: LocalModel) throws {
         guard model.recommendedRamGb >= model.minRamGb,
               model.recommendedVramGb >= model.minVramGb,
               model.minRamGb >= 0,
               model.minVramGb >= 0
         else {
             throw AppError.internalError("model \(model.id) has inconsistent memory requirements")
+        }
+    }
+
+    /// Remaining contract fields: languages, supported OS/arch, attribution.
+    static func validateModelRequirements(_ model: LocalModel) throws {
+        guard !model.languages.isEmpty, model.languages.allSatisfy(isLanguageCode) else {
+            throw AppError.internalError("model \(model.id) has invalid languages")
         }
         guard !model.supportedOs.isEmpty, !model.supportedArch.isEmpty else {
             throw AppError.internalError("model \(model.id) supports no OS/arch")

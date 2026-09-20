@@ -36,7 +36,7 @@ let package = Package(
             name: "AlgorithVoiceCore",
             path: "Core",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v5)
             ]
         ),
         .executableTarget(
@@ -46,7 +46,7 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v5),
                 // SE-0466: single-threaded UI code by default.
-                .defaultIsolation(MainActor.self),
+                .defaultIsolation(MainActor.self)
             ]
         ),
         .testTarget(
@@ -54,8 +54,8 @@ let package = Package(
             dependencies: ["AlgorithVoiceCore"],
             path: "Tests",
             swiftSettings: [
-                .swiftLanguageMode(.v5),
+                .swiftLanguageMode(.v5)
             ]
-        ),
+        )
     ]
 )

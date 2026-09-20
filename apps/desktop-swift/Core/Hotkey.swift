@@ -21,7 +21,7 @@ public enum HotkeyValidator: Sendable {
         "meta+l",
         "ctrl+q",
         "alt+tab",
-        "super+d",
+        "super+d"
     ]
 
     private static let modifiers = ["ctrl", "alt", "shift", "super", "meta", "command", "cmd"]

@@ -60,7 +60,7 @@ final class HotkeyTests: XCTestCase {
     func testRejectsReservedCombos() {
         let blockedCombos = [
             "Alt+F4", "Ctrl+Alt+Del", "Ctrl+Alt+Delete", "Super+L",
-            "Meta+L", "Ctrl+Q", "Alt+Tab", "Super+D",
+            "Meta+L", "Ctrl+Q", "Alt+Tab", "Super+D"
         ]
         for blocked in blockedCombos {
             XCTAssertThrowsError(try HotkeyValidator.normalize(blocked), "must reject \(blocked)") { error in

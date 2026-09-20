@@ -66,12 +66,12 @@ final class VoiceProtocolTests: XCTestCase {
     func testDecodesRawBackendPayloads() throws {
         // Exact shapes the backend emits (incl. the current
         // `not_implemented` stub on GET /stt/stream).
-        let stub = #"{"type":"error","code":"not_implemented"}"#.data(using: .utf8) ?? Data()
+        let stub = Data(#"{"type":"error","code":"not_implemented"}"#.utf8)
         XCTAssertEqual(
             try JSONDecoder().decode(WsServerMessage.self, from: stub),
             .error(code: "not_implemented", retryAfterMs: nil)
         )
-        let ready = #"{"type":"ready","sessionId":"s1","provider":"voxtral"}"#.data(using: .utf8) ?? Data()
+        let ready = Data(#"{"type":"ready","sessionId":"s1","provider":"voxtral"}"#.utf8)
         XCTAssertEqual(
             try JSONDecoder().decode(WsServerMessage.self, from: ready),
             .ready(sessionId: "s1", provider: "voxtral")
@@ -79,7 +79,7 @@ final class VoiceProtocolTests: XCTestCase {
     }
 
     func testRejectsUnknownMessageType() {
-        let quantum = #"{"type":"quantum","text":"x"}"#.data(using: .utf8) ?? Data()
+        let quantum = Data(#"{"type":"quantum","text":"x"}"#.utf8)
         XCTAssertThrowsError(try JSONDecoder().decode(WsServerMessage.self, from: quantum))
     }
 

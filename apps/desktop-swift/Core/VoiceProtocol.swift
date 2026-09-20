@@ -1,20 +1,20 @@
 import Foundation
 
-/// Voice wire protocol — Swift mirror of
-/// `packages/shared-types/src/schemas/voice.ts`.
-///
-/// The Zod schemas are the normative reference; these `Codable` types must
-/// accept exactly what the backend sends and emit exactly what it expects.
-/// Do not add message types or fields here — the Swift app is a client of an
-/// existing system.
-///
-/// Transport (frozen backend contract, see
-/// `apps/backend/src/modules/stt/stt.routes.ts`):
-/// - `POST /stt/token` mints a short-lived JWT; the socket verifies `?token=`
-///   (long-lived access tokens are never accepted in the URL).
-/// - `GET /stt/stream` is the WebSocket endpoint (currently `not_implemented`
-///   server-side; the client must still implement all five server messages).
-/// - Audio travels as binary PCM16 16kHz mono frames.
+// Voice wire protocol — Swift mirror of
+// `packages/shared-types/src/schemas/voice.ts`.
+//
+// The Zod schemas are the normative reference; these `Codable` types must
+// accept exactly what the backend sends and emit exactly what it expects.
+// Do not add message types or fields here — the Swift app is a client of an
+// existing system.
+//
+// Transport (frozen backend contract, see
+// `apps/backend/src/modules/stt/stt.routes.ts`):
+// - `POST /stt/token` mints a short-lived JWT; the socket verifies `?token=`
+//   (long-lived access tokens are never accepted in the URL).
+// - `GET /stt/stream` is the WebSocket endpoint (currently `not_implemented`
+//   server-side; the client must still implement all five server messages).
+// - Audio travels as binary PCM16 16kHz mono frames.
 
 // MARK: - STT mode (sttModeSchema: "local" | "cloud" | "byok")
 
