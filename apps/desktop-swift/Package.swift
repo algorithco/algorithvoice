@@ -10,6 +10,9 @@ import PackageDescription
 //   App/       → AlgorithVoice executable (entry point + Features/ UI).
 //   Resources/ → .app bundling assets (Info.plist used by the Xcode/signing
 //                pipeline in PR6; `swift build` does not bundle a .app).
+//   Stores/     → AlgorithVoiceStores — sqlite-backed stores (macOS SDK
+//                `SQLite3`, same tables as the Tauri app). Wired into the
+//                app in PR4/PR5; exercised by tests from day one.
 //   Tests/     → XCTest suites, one file per Core module.
 //
 // Concurrency posture (Swift 6.2 Approachable Concurrency, adopted
@@ -49,9 +52,17 @@ let package = Package(
                 .defaultIsolation(MainActor.self)
             ]
         ),
+        .target(
+            name: "AlgorithVoiceStores",
+            dependencies: ["AlgorithVoiceCore"],
+            path: "Stores",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
+        ),
         .testTarget(
             name: "AlgorithVoiceCoreTests",
-            dependencies: ["AlgorithVoiceCore"],
+            dependencies: ["AlgorithVoiceCore", "AlgorithVoiceStores"],
             path: "Tests",
             swiftSettings: [
                 .swiftLanguageMode(.v5)

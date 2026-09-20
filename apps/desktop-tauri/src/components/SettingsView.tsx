@@ -7,6 +7,7 @@ import { login, logout, sessionStatus, signup } from "../lib/session/auth.js";
 import { DEMO_EMAIL, loginDemo } from "../lib/session/demo-account.js";
 import { isTauri } from "../lib/session/env.js";
 import type { SessionInfo } from "../lib/session/types.js";
+import { LocalUsageSection } from "./LocalUsageSection.js";
 import { OAuthButtons } from "./OAuthButtons.js";
 import { triggerUpdateCheck } from "./UpdateAnnouncement.js";
 
@@ -385,6 +386,8 @@ export function SettingsView({
           </div>
         </div>
       </section>
+
+      <LocalUsageSection />
 
       <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">

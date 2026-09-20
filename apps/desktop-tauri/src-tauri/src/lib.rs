@@ -6,6 +6,7 @@ mod history;
 /// engine and pipeline; the Tauri command surface stays curated in
 /// `invoke_handler` below regardless of what is reachable here.
 pub mod local_asr;
+mod local_usage;
 mod logging;
 mod push_to_talk;
 mod state;
@@ -852,6 +853,9 @@ pub fn run() {
             history::history_stats,
             history::history_delete,
             history::history_clear,
+            // Local-AI usage ledger (pure-local; numbers only, zero network).
+            local_usage::local_usage_summary,
+            local_usage::local_usage_clear,
             // Local model manager (additive; cloud path untouched).
             local_asr::commands::list_available_models,
             local_asr::commands::get_model_status,
