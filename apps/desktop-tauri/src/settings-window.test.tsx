@@ -48,6 +48,7 @@ describe("settings window (white-screen regression)", () => {
     expect(html).toContain("Dictation");
     expect(html).toContain("Appearance");
     expect(html).toContain("System");
+    expect(html).toContain("Local usage");
   });
 
   it("boots the app bundle in a settings-labelled webview", () => {

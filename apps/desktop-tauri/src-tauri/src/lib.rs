@@ -853,6 +853,9 @@ pub fn run() {
             history::history_stats,
             history::history_delete,
             history::history_clear,
+            // Local-AI usage ledger (pure-local; numbers only, zero network).
+            local_usage::local_usage_summary,
+            local_usage::local_usage_clear,
             // Local model manager (additive; cloud path untouched).
             local_asr::commands::list_available_models,
             local_asr::commands::get_model_status,
