@@ -48,10 +48,6 @@ jobs:
         run: cargo build --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
-      - name: build desktop (debug)
-        run: cargo build --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml
-        env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
       - name: install tauri-driver
         # Pinned: the driver speaks the native-driver protocol, so it must
         # move in lockstep with tauri/cli (floating broke nothing yet, but a

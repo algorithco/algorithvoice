@@ -1210,8 +1210,22 @@ mod tests {
             )
             .expect("start ok");
         assert!(manager.is_running("m"));
-        // Let a few chunks land, then cancel.
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Wait until a few chunks have landed (part file exists and is
+        // non-empty) before cancelling. A fixed sleep races task startup
+        // on fast CI runners: cancel could win before the first flush and
+        // the part file would never exist (NotFound flake).
+        let part_path = dir.join("model.bin.part");
+        let mut landed = false;
+        for _ in 0..200 {
+            if let Ok(md) = std::fs::metadata(&part_path) {
+                if md.len() > 0 {
+                    landed = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(landed, "some bytes must land before cancel");
         assert!(manager.cancel("m"), "live task must cancel");
         assert!(!manager.is_running("m"));
         assert!(!manager.cancel("m"), "second cancel reports nothing live");
