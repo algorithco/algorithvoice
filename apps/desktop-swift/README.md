@@ -15,9 +15,13 @@ Package.swift   swift-tools 6.2; targets map to the directories below
 Core/           AlgorithVoiceCore — portable logic, no AppKit:
                 AppError, HotkeyValidator, TrayState, VoiceProtocol (WS),
                 LocalModels (manifest), SHA256, License (7d grace),
-                BackendConfig. Every public value type is Sendable.
+                BackendConfig, LocalUsage (on-device usage math). Every
+                public value type is Sendable.
 App/            AlgorithVoice executable: entry point + Features/
                 (PushToTalk, LocalSTT, Settings, Licensing land per-PR)
+Stores/         AlgorithVoiceStores — sqlite-backed stores (macOS SDK
+                `SQLite3`, same tables as the Tauri app, e.g. local-AI
+                usage ledger: numbers only, zero network).
 Resources/      Info.plist (bundle id com.algorithvoice.app — same SERVICE
                 string the Rust side uses for the Keychain, so session +
                 Groq-key items are shared with no migration) + future assets
