@@ -190,12 +190,17 @@ test.before(async () => {
       // makes msedgedriver launch Edge as a plain browser instead, which
       // crashes on CI runners (DevToolsActivePort file doesn't exist).
       browserName: "wry",
-      // Plain application attach (no extra args): msedgedriver owns the
-      // remote-debugging port entirely. EXPERIMENT (debug branch): earlier
-      // attempts with env-injected and API-injected --remote-debugging-port
-      // produced DevToolsActivePort-missing / chrome-not-reachable, both
-      // consistent with duplicate-flag port confusion.
-      "tauri:options": { application: APP },
+      "tauri:options": {
+        application: APP,
+        // Remote-debugging port via the WebView2 API channel. Env/CLI
+        // switches are ignored on elevated hosts (WebView2 Runtime 150+
+        // hardening), which is exactly the CI runner case — without this,
+        // msedgedriver never finds the DevTools port and session creation
+        // fails with DevToolsActivePort file doesn't exist.
+        webviewOptions: {
+          additionalBrowserArguments: ["--remote-debugging-port=9222"],
+        },
+      },
     })
     .build();
 });
