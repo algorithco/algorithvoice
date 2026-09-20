@@ -8,6 +8,8 @@
 
 **No telemetry by default.** No analytics SDK, no ads, no cross-app tracking in MVP. Crash reports, if added later, will be opt-in and scrubbed.
 
+**Local usage meter.** `Settings → Local usage` counts on-device transcriptions (sessions, audio seconds in, words out) in the desktop app's local database. Only counts are stored — never audio, never transcript text — and they never leave the device; clearing them is one tap.
+
 **BYOK.** Your provider key is envelope-encrypted at rest (AES-256-GCM, per-row DEK wrapped by KEK), decrypted only in-memory per request, shown as `••••last4` only.
 
 **Your rights (GDPR Art. 6/7/17).** Access, rectify, erase, restrict, port via in-app delete + support contact. Subprocessors: Stripe (billing), Google/GitHub (OAuth, if used), Mistral/OpenRouter (cloud STT, only when you use cloud mode).
