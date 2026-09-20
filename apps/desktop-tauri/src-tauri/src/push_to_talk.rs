@@ -392,8 +392,12 @@ pub async fn transcribe_audio(
 /// apps and over RDP). Restore also runs when the keystroke itself
 /// fails, so the original clipboard is never left clobbered.
 #[tauri::command]
-pub fn paste_text(text: String, restore_clipboard: Option<bool>) -> AppResult<()> {
-    paste_text_blocking(text, restore_clipboard)
+pub async fn paste_text(text: String, restore_clipboard: Option<bool>) -> AppResult<()> {
+    // Off the async executor like the combo path: ~470ms of sleeps must
+    // never saturate Tauri's sync worker pool (see transcribe_and_paste).
+    tokio::task::spawn_blocking(move || paste_text_blocking(text, restore_clipboard))
+        .await
+        .map_err(|e| AppError::new("paste", format!("paste worker: {e}")))?
 }
 
 fn paste_text_blocking(text: String, restore_clipboard: Option<bool>) -> AppResult<()> {

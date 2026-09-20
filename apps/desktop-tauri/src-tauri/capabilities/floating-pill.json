@@ -1,13 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "floating-pill-capability",
-  "description": "Least privilege for the hold-to-talk pill: mic capture + transcribe/paste only. No history, model management, updater, store, or tray.",
+  "description": "Least privilege for the hold-to-talk pill: mic capture + transcribe/paste only, plus read-only prefs so it mirrors Settings. No history, model management, updater, or tray.",
   "windows": ["floating-pill"],
   "permissions": [
     "core:window:default",
     "core:webview:default",
     "core:app:default",
     "core:event:default",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "store:allow-get"
   ]
 }
