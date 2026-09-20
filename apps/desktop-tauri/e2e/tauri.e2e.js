@@ -169,8 +169,14 @@ test.before(async () => {
   );
   driver = await new Builder()
     .usingServer(`http://localhost:${PORT}/`)
-    .withCapabilities({ "tauri:options": { application: APP } })
-    .forBrowser("MicrosoftEdge")
+    .withCapabilities({
+      // 'wry' routes the session through tauri-driver so it spawns the
+      // Tauri app and attaches to its WebViews. Requesting 'MicrosoftEdge'
+      // makes msedgedriver launch Edge as a plain browser instead, which
+      // crashes on CI runners (DevToolsActivePort file doesn't exist).
+      browserName: "wry",
+      "tauri:options": { application: APP },
+    })
     .build();
 });
 
