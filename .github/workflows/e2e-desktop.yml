@@ -74,6 +74,10 @@ jobs:
           # hardcoded D:\ path that no longer exists (first real E2E run
           # failed all 4 tests with "no msedge binary at ...").
           TAURI_APP_PATH: ${{ runner.temp }}/cargo-target/debug/algorith-voice-desktop.exe
+          # DIAGNOSTIC (debug branch only): enable WebView2 remote debugging
+          # so msedgedriver can attach (DevToolsActivePort). Inherited by the
+          # app through tauri-driver -> node -> app process chain.
+          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: --remote-debugging-port=9222
         run: pnpm --filter @algorith-voice/desktop e2e
       - name: upload screenshots
         if: always()
