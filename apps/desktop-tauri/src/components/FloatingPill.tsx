@@ -335,14 +335,18 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     let unReleased: (() => void) | undefined;
     void listen("ptt-pressed", () => {
       void startPress();
-    }).then((fn) => {
-      unPressed = fn;
-    });
+    })
+      .then((fn) => {
+        unPressed = fn;
+      })
+      .catch(() => {});
     void listen("ptt-released", () => {
       stopPress();
-    }).then((fn) => {
-      unReleased = fn;
-    });
+    })
+      .then((fn) => {
+        unReleased = fn;
+      })
+      .catch(() => {});
     return () => {
       unPressed?.();
       unReleased?.();

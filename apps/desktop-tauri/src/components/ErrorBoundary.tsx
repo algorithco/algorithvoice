@@ -1,5 +1,7 @@
+import { load } from "@tauri-apps/plugin-store";
 import { Component, type ReactNode } from "react";
 import { reportFrontendError } from "../lib/error-report.js";
+import { isTauri } from "../lib/session/env.js";
 
 interface Props {
   children: ReactNode;
@@ -40,16 +42,29 @@ export class ErrorBoundary extends Component<Props, State> {
 
   private handleReset = () => {
     this.setState({ error: null });
-    try {
-      localStorage.removeItem("algorith-voice-prefs");
-    } catch {
-      // ignore
-    }
-    try {
-      window.location.reload();
-    } catch {
-      // ignore
-    }
+    // plugin-store is authoritative in Tauri: clearing only the localStorage
+    // mirror leaves a corrupt prefs.json behind and the error loop persists.
+    void (async () => {
+      try {
+        if (isTauri()) {
+          const store = await load("prefs.json");
+          await store.delete("prefs");
+          await store.save();
+        }
+      } catch {
+        // ignore — reload still attempted below
+      }
+      try {
+        localStorage.removeItem("algorith-voice-prefs");
+      } catch {
+        // ignore
+      }
+      try {
+        window.location.reload();
+      } catch {
+        // ignore
+      }
+    })();
   };
 
   render(): ReactNode {

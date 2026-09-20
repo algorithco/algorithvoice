@@ -122,11 +122,28 @@ const Particles = ({
     const container = containerRef.current;
     if (!container) return;
 
-    const renderer = new Renderer({
-      dpr: pixelRatio,
-      depth: false,
-      alpha: true,
-    });
+    // No-GPU machines (CI runners, broken drivers): `new Renderer()`
+    // itself throws when context creation fails, so probe first and bail
+    // out to the plain background instead of crashing the view.
+    try {
+      const probe =
+        document.createElement("canvas").getContext("webgl2") ??
+        document.createElement("canvas").getContext("webgl");
+      if (!probe) return;
+    } catch {
+      return;
+    }
+
+    let renderer: Renderer;
+    try {
+      renderer = new Renderer({
+        dpr: pixelRatio,
+        depth: false,
+        alpha: true,
+      });
+    } catch {
+      return;
+    }
     const gl = renderer.gl;
     if (!gl) return;
     container.appendChild(gl.canvas);

@@ -8,15 +8,23 @@ import "@fontsource/inter/latin-600.css";
 import "@fontsource/inter-tight/latin-600.css";
 import "@fontsource/jetbrains-mono/latin-500.css";
 import App from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { installGlobalErrorHandlers } from "./lib/error-report.js";
 import "./styles.css";
 
 installGlobalErrorHandlers();
 
 const root = document.getElementById("root");
-if (!root) throw new Error("missing #root element");
+if (!root) {
+  // Never leave a blank window: surface the failure as static content.
+  document.body.innerHTML =
+    '<main style="display:flex;min-height:100vh;align-items:center;justify-content:center;background:#000;color:#fff;font-family:sans-serif">Algorith Voice failed to start (missing #root).</main>';
+  throw new Error("missing #root element");
+}
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>,
 );

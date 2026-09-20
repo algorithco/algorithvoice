@@ -40,16 +40,20 @@ export function DictateView({ hotkey }: { hotkey: string }) {
       setTray("recording");
       void setTrayState("recording");
       setPreview("Listening…");
-    }).then((fn) => {
-      unlistenPressed = fn;
-    });
+    })
+      .then((fn) => {
+        unlistenPressed = fn;
+      })
+      .catch(() => {});
     void listen("ptt-released", () => {
       setTray("processing");
       void setTrayState("processing");
       setPreview("Transcribing…");
-    }).then((fn) => {
-      unlistenReleased = fn;
-    });
+    })
+      .then((fn) => {
+        unlistenReleased = fn;
+      })
+      .catch(() => {});
     return () => {
       unlistenPressed?.();
       unlistenReleased?.();
@@ -68,9 +72,11 @@ export function DictateView({ hotkey }: { hotkey: string }) {
     let unTranscript: (() => void) | undefined;
     void listen<string>(PTT_ERROR_EVENT, (event) => {
       setPillMsg(String(event.payload ?? "Dictation failed."));
-    }).then((fn) => {
-      unError = fn;
-    });
+    })
+      .then((fn) => {
+        unError = fn;
+      })
+      .catch(() => {});
     void listen<PttTranscriptPayload>(PTT_TRANSCRIPT_EVENT, (event) => {
       const payload = event.payload;
       if (!payload || !payload.text) return;
@@ -82,9 +88,11 @@ export function DictateView({ hotkey }: { hotkey: string }) {
           ? payload.text
           : `${payload.text}\n(Auto-paste unavailable — copied to clipboard, press Ctrl+V.)`,
       );
-    }).then((fn) => {
-      unTranscript = fn;
-    });
+    })
+      .then((fn) => {
+        unTranscript = fn;
+      })
+      .catch(() => {});
     return () => {
       unError?.();
       unTranscript?.();

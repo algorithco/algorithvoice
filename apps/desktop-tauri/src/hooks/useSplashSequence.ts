@@ -1,7 +1,12 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import type { Prefs } from "../components/SettingsView.js";
-import { DEFAULT_PREFS, loadOnboarded, loadPrefs } from "../lib/prefs.js";
+import {
+  DEFAULT_PREFS,
+  loadOnboarded,
+  loadPrefs,
+  withTimeout,
+} from "../lib/prefs.js";
 import { sessionStatus } from "../lib/session/auth.js";
 import type { SessionInfo } from "../lib/session/types.js";
 
@@ -22,26 +27,40 @@ export function useSplashSequence(opts: {
 
   useEffect(() => {
     if (isSecondary) {
-      void Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
-        setPrefs(p);
-        setOnboarded(o);
-        setReady(true);
-      });
+      void withTimeout(
+        Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
+          setPrefs(p);
+          setOnboarded(o);
+        }),
+        3000,
+        undefined,
+      )
+        .catch(() => {})
+        .finally(() => setReady(true));
       let unlisten: (() => void) | undefined;
       void listen("settings-refresh", () => {
         void loadPrefs().then(setPrefs);
-      }).then((fn) => {
-        unlisten = fn;
-      });
+      })
+        .then((fn) => {
+          unlisten = fn;
+        })
+        .catch(() => {});
       return () => {
         if (unlisten) unlisten();
       };
     }
-    void Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
-      setPrefs(p);
-      setOnboarded(o);
-      setReady(true);
-    });
+    // Prefs must never block first paint: 3s deadline, then defaults.
+    // (Session already had its own 3s fallback below.)
+    void withTimeout(
+      Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
+        setPrefs(p);
+        setOnboarded(o);
+      }),
+      3000,
+      undefined,
+    )
+      .catch(() => {})
+      .finally(() => setReady(true));
     // Session must never block splash forever — 3s fallback to logged-out
     let settled = false;
     void sessionStatus()

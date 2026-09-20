@@ -28,18 +28,28 @@ export function detectWindowLabels(): {
   }
 }
 
-/** Detects secondary Tauri windows, with a late re-check for async IPC injection. */
+/** Detects secondary Tauri windows, with re-checks for async IPC injection. */
 export function useWindowLabel() {
   const [labels, setLabels] = useState(detectWindowLabels);
   const { isSettings, isPill } = labels;
 
   useEffect(() => {
     if (isSettings || isPill) return;
-    const id = window.setTimeout(() => {
+    // __TAURI__ injection can lag on cold machines; a single 120ms shot
+    // can misrender a pill/settings webview as the main window. Re-check
+    // until Tauri answers or ~2s elapse.
+    let attempts = 0;
+    const id = window.setInterval(() => {
+      attempts += 1;
       const late = detectWindowLabels();
-      if (late.isSettings || late.isPill) setLabels(late);
-    }, 120);
-    return () => clearTimeout(id);
+      if (late.isSettings || late.isPill) {
+        setLabels(late);
+        window.clearInterval(id);
+      } else if (attempts >= 8) {
+        window.clearInterval(id);
+      }
+    }, 250);
+    return () => window.clearInterval(id);
   }, [isSettings, isPill]);
 
   return labels;

@@ -12,6 +12,25 @@ export const DEFAULT_PREFS: Prefs = {
   activeModelId: null,
 };
 
+/**
+ * Race a promise against a deadline, resolving to `fallback` on timeout
+ * OR rejection. Boot-path IPC (plugin-store) must never hang first paint:
+ * use this around every load the splash gate depends on.
+ */
+export function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  fallback: T,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 export function sanitizeMode(value: unknown): Prefs["mode"] {
   const parsed = sttModeSchema.safeParse(value);
   return parsed.success ? parsed.data : "cloud";
@@ -29,8 +48,21 @@ export function sanitizeModelId(value: unknown): string | null {
 export function sanitizeHotkey(value: unknown): string {
   if (typeof value !== "string") return DEFAULT_PREFS.hotkey;
   const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.length > 48) return DEFAULT_PREFS.hotkey;
+  // Aligned with Rust normalize_hotkey (lib.rs): ≤32 chars, charset, and a
+  // modifier + "+" so a stored value can always (re-)register.
+  if (trimmed.length === 0 || trimmed.length > 32) return DEFAULT_PREFS.hotkey;
   if (!/^[A-Za-z0-9+_ -]+$/.test(trimmed)) return DEFAULT_PREFS.hotkey;
+  const lower = trimmed.toLowerCase();
+  const hasModifier = [
+    "ctrl",
+    "alt",
+    "shift",
+    "super",
+    "meta",
+    "command",
+    "cmd",
+  ].some((m) => lower.includes(m));
+  if (!hasModifier || !lower.includes("+")) return DEFAULT_PREFS.hotkey;
   const hasAlnum = /[A-Za-z0-9]/.test(trimmed);
   if (!hasAlnum) return DEFAULT_PREFS.hotkey;
   return trimmed;
