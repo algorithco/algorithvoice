@@ -128,9 +128,10 @@ public final class LocalUsageStore {
 
     private func errorMessage(for database: OpaquePointer) -> String {
         guard let raw = sqlite3_errmsg(database) else { return "database error" }
-        let bytes = UnsafeRawPointer(raw).assumingMemoryBound(to: CChar.self)
-        let count = strlen(bytes)
-        return String(decoding: UnsafeBufferPointer(start: raw, count: count), as: UTF8.self)
+        let text = UnsafeRawPointer(raw).assumingMemoryBound(to: CChar.self)
+        let count = strlen(text)
+        let bytes = UnsafeRawPointer(raw).assumingMemoryBound(to: UInt8.self)
+        return String(decoding: UnsafeBufferPointer(start: bytes, count: count), as: UTF8.self)
     }
 
     private func execute(_ sql: String) throws {

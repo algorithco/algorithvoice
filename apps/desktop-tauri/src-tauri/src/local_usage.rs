@@ -118,66 +118,55 @@ pub fn summarize_usage(db: &Db, period: Option<&str>) -> AppResult<LocalUsageSum
     let conn = db.0.lock().map_err(|_| AppError::store("db lock"))?;
     // Cutoff timestamps are RFC3339 UTC, same as recorded_at, so lexicographic
     // comparison is chronological. COALESCE keeps empty tables at exact zero.
-    let (sessions, audio_seconds, text_chars, text_words): (i64, f64, i64, i64) =
-        match cutoff.as_deref() {
-            Some(since) => conn.query_row(
-                "SELECT COUNT(*), COALESCE(SUM(audio_seconds), 0),
-                        COALESCE(SUM(text_chars), 0), COALESCE(SUM(text_words), 0)
-                 FROM local_ai_usage WHERE recorded_at >= ?1",
-                [since],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            ),
-            None => conn.query_row(
-                "SELECT COUNT(*), COALESCE(SUM(audio_seconds), 0),
-                        COALESCE(SUM(text_chars), 0), COALESCE(SUM(text_words), 0)
-                 FROM local_ai_usage",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            ),
+    // `params_from_iter` keeps both branches (filtered/unfiltered) on one
+    // param type — `[since]` vs `[]` literals produce incompatible generics.
+    let owned_cutoff: Vec<String> = cutoff.as_deref().into_iter().map(str::to_owned).collect();
+    let params = || rusqlite::params_from_iter(owned_cutoff.iter().map(String::as_str));
+    let total_sql = match cutoff.as_deref() {
+        Some(_) => {
+            "SELECT COUNT(*), COALESCE(SUM(audio_seconds), 0),
+                    COALESCE(SUM(text_chars), 0), COALESCE(SUM(text_words), 0)
+             FROM local_ai_usage WHERE recorded_at >= ?1"
         }
+        None => {
+            "SELECT COUNT(*), COALESCE(SUM(audio_seconds), 0),
+                    COALESCE(SUM(text_chars), 0), COALESCE(SUM(text_words), 0)
+             FROM local_ai_usage"
+        }
+    };
+    let (sessions, audio_seconds, text_chars, text_words): (i64, f64, i64, i64) = conn
+        .query_row(total_sql, params(), |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
         .map_err(|e| AppError::store(e.to_string()))?;
-    let mut stmt = match cutoff.as_deref() {
-        Some(_) => conn
-            .prepare(
-                "SELECT model_id, engine, COUNT(*),
-                        COALESCE(SUM(audio_seconds), 0), COALESCE(SUM(text_words), 0)
-                 FROM local_ai_usage WHERE recorded_at >= ?1
-                 GROUP BY model_id, engine ORDER BY COUNT(*) DESC",
-            )
-            .map_err(|e| AppError::store(e.to_string()))?,
-        None => conn
-            .prepare(
-                "SELECT model_id, engine, COUNT(*),
-                        COALESCE(SUM(audio_seconds), 0), COALESCE(SUM(text_words), 0)
-                 FROM local_ai_usage
-                 GROUP BY model_id, engine ORDER BY COUNT(*) DESC",
-            )
-            .map_err(|e| AppError::store(e.to_string()))?,
+    let model_sql = match cutoff.as_deref() {
+        Some(_) => {
+            "SELECT model_id, engine, COUNT(*),
+                    COALESCE(SUM(audio_seconds), 0), COALESCE(SUM(text_words), 0)
+             FROM local_ai_usage WHERE recorded_at >= ?1
+             GROUP BY model_id, engine ORDER BY COUNT(*) DESC"
+        }
+        None => {
+            "SELECT model_id, engine, COUNT(*),
+                    COALESCE(SUM(audio_seconds), 0), COALESCE(SUM(text_words), 0)
+             FROM local_ai_usage
+             GROUP BY model_id, engine ORDER BY COUNT(*) DESC"
+        }
     };
-    let rows = match cutoff.as_deref() {
-        Some(since) => stmt
-            .query_map([since], |r| {
-                Ok(LocalModelUsage {
-                    model_id: r.get(0)?,
-                    engine: r.get(1)?,
-                    sessions: r.get(2)?,
-                    audio_seconds: r.get(3)?,
-                    text_words: r.get(4)?,
-                })
+    let mut stmt = conn
+        .prepare(model_sql)
+        .map_err(|e| AppError::store(e.to_string()))?;
+    let rows = stmt
+        .query_map(params(), |r| {
+            Ok(LocalModelUsage {
+                model_id: r.get(0)?,
+                engine: r.get(1)?,
+                sessions: r.get(2)?,
+                audio_seconds: r.get(3)?,
+                text_words: r.get(4)?,
             })
-            .map_err(|e| AppError::store(e.to_string()))?,
-        None => stmt
-            .query_map([], |r| {
-                Ok(LocalModelUsage {
-                    model_id: r.get(0)?,
-                    engine: r.get(1)?,
-                    sessions: r.get(2)?,
-                    audio_seconds: r.get(3)?,
-                    text_words: r.get(4)?,
-                })
-            })
-            .map_err(|e| AppError::store(e.to_string()))?,
-    };
+        })
+        .map_err(|e| AppError::store(e.to_string()))?;
     let mut by_model = Vec::new();
     for row in rows {
         by_model.push(row.map_err(|e| AppError::store(e.to_string()))?);
