@@ -27,6 +27,22 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+      # Fail fast on tag/config version skew: tauri-action's v__VERSION__
+      # release would otherwise diverge from the git tag that triggered us.
+      - name: version consistency gate
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          CARGO=$(grep -m1 '^version' apps/desktop-tauri/src-tauri/Cargo.toml | cut -d'"' -f2)
+          CONF=$(python3 -c "import json;print(json.load(open('apps/desktop-tauri/src-tauri/tauri.conf.json'))['version'])")
+          PKG=$(node -p "require('./apps/desktop-tauri/package.json').version")
+          [ "$TAG" = "$CARGO" ] && [ "$TAG" = "$CONF" ] && [ "$TAG" = "$PKG" ] || { echo "tag v$TAG != cargo $CARGO / conf $CONF / pkg $PKG"; exit 1; }
+      - name: signing secrets preflight
+        shell: bash
+        run: |
+          # With createUpdaterArtifacts:true a tag build without signing keys
+          # ships no .sig/latest.json and breaks auto-update in the field.
+          [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ] || { echo "TAURI_SIGNING_PRIVATE_KEY missing — updater artifacts would be unsigned"; exit 1; }
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
@@ -52,5 +68,5 @@ jobs:
           projectPath: apps/desktop-tauri
           tagName: v__VERSION__
           releaseName: "Algorith Voice v__VERSION__"
-          releaseBody: "Desktop app (Windows) — see attached .msi/.exe (Windows), .AppImage/.deb (Linux). Public downloads: https://github.com/algorithco/algorithvoice-app/releases/latest"
+          releaseBody: "Desktop app (Windows + Linux) — see attached -setup.exe (Windows NSIS installer), .AppImage/.deb (Linux), plus .sig/latest.json updater files. Public downloads: https://github.com/algorithco/algorithvoice-app/releases/latest"
           args: --target ${{ matrix.target }}
