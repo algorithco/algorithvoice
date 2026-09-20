@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Must stay com.algorithvoice.app: the Rust side uses the same SERVICE
+	     string for the keyring (push_to_talk.rs SERVICE/GROQ_ACCOUNT), so the
+	     Swift app shares session + Groq-key Keychain items with no migration. -->
+	<key>CFBundleIdentifier</key>
+	<string>com.algorithvoice.app</string>
+	<key>CFBundleName</key>
+	<string>Algorith Voice</string>
+	<key>CFBundleDisplayName</key>
+	<string>Algorith Voice</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Algorithco</string>
+	<!-- Push-to-talk audio capture (PCM16 16kHz mono tap, see Core/VoiceProtocol). -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Algorith Voice records while you hold the push-to-talk hotkey so it can transcribe your speech.</string>
+	<!-- Global hotkey (CGEventTap) + Cmd+V text injection need Accessibility;
+	     the app must prompt and degrade gracefully without it (PR3). -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Algorith Voice injects transcribed text into the app you were using via paste.</string>
+	<!-- OAuth login + Stripe billing redirect back from the system browser.
+	     Mirrors the Tauri deep-link contract (lib.rs DEEP_LINK_SCHEME,
+	     algorithvoice://auth-callback, strict allowlist). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.algorithvoice.app.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>algorithvoice</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+</dict>
+</plist>
