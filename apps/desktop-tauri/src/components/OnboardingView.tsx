@@ -1,8 +1,13 @@
-import type { LocalModel } from "@algorith-voice/shared-types";
+import type {
+  DownloadProgress,
+  LocalModel,
+  ModelStatusInfo,
+} from "@algorith-voice/shared-types";
 import { Logo } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import {
+  cancelDownload,
   downloadModel,
   getHardwareInfo,
   getModelCompatibilities,
@@ -10,9 +15,12 @@ import {
   type HardwareInfo,
   listAvailableModels,
   type ModelCompatibility,
+  onDownloadProgress,
+  onModelStatusChanged,
   selectActiveModel,
 } from "../lib/localModels.js";
 import { isTauri } from "../lib/session/env.js";
+import { DownloadStep } from "./onboarding/DownloadStep.js";
 import { HotkeyStep } from "./onboarding/HotkeyStep.js";
 import { ModelStep } from "./onboarding/ModelStep.js";
 import { ModeStep } from "./onboarding/ModeStep.js";
@@ -48,6 +56,17 @@ export function OnboardingView({
     () => prefs.activeModelId,
   );
   const [preparing, setPreparing] = useState(false);
+  // Gated download phase: while set, step 2 renders DownloadStep instead of
+  // the model list, and the dashboard stays unreachable until the model is
+  // downloaded, verified, and selected (finishLocalSetup).
+  const [downloadId, setDownloadId] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] =
+    useState<DownloadProgress | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<ModelStatusInfo | null>(
+    null,
+  );
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadBusy, setDownloadBusy] = useState(false);
 
   useEffect(() => {
     setHotkeyInput(prefs.hotkey);
@@ -127,6 +146,103 @@ export function OnboardingView({
       cancelled = true;
     };
   }, [step, cloudOnly]);
+
+  /** Download complete + verified: select (loads the engine), then Ready. */
+  const finishLocalSetup = async (id: string) => {
+    setDownloadBusy(true);
+    try {
+      await selectActiveModel(id);
+      setDownloadId(null);
+      setDownloadProgress(null);
+      setDownloadStatus(null);
+      setDownloadError(null);
+      setStep(3);
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloadBusy(false);
+    }
+  };
+
+  // Live download feed while the gate is active. A `ready` status means the
+  // files are verified — finish setup (select + load engine) before leaving.
+  useEffect(() => {
+    if (!downloadId || !isTauri()) return;
+    const id = downloadId;
+    let cancelled = false;
+    let unProgress: (() => void) | undefined;
+    let unStatus: (() => void) | undefined;
+    void onDownloadProgress((p) => {
+      if (!cancelled && p.id === id) setDownloadProgress(p);
+    }).then((u) => {
+      unProgress = u;
+    });
+    void onModelStatusChanged((s) => {
+      if (cancelled || s.id !== id) return;
+      setDownloadStatus(s);
+      if (s.status === "ready") {
+        void finishLocalSetup(id);
+      } else if (s.status === "error") {
+        setDownloadError(s.errorMessage || s.errorCode || "Download failed.");
+      }
+    }).then((u) => {
+      unStatus = u;
+    });
+    return () => {
+      cancelled = true;
+      unProgress?.();
+      unStatus?.();
+    };
+  }, [downloadId]);
+
+  const resetDownloadState = () => {
+    setDownloadId(null);
+    setDownloadProgress(null);
+    setDownloadStatus(null);
+    setDownloadError(null);
+    setDownloadBusy(false);
+  };
+
+  const handleDownloadCancel = async () => {
+    if (!downloadId) return;
+    const id = downloadId;
+    setDownloadBusy(true);
+    try {
+      await cancelDownload(id).catch(() => null);
+    } finally {
+      resetDownloadState();
+      setPreparing(false);
+    }
+  };
+
+  const handleDownloadRetry = async () => {
+    if (!downloadId) return;
+    const id = downloadId;
+    setDownloadBusy(true);
+    setDownloadError(null);
+    try {
+      const st = await getModelStatus(id).catch(() => null);
+      if (st?.status === "ready") {
+        await finishLocalSetup(id);
+        return;
+      }
+      await downloadModel(id);
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloadBusy(false);
+    }
+  };
+
+  const handleUseCloud = async () => {
+    if (downloadId) {
+      await cancelDownload(downloadId).catch(() => null);
+    }
+    resetDownloadState();
+    setPreparing(false);
+    onPrefs({ ...prefs, mode: "cloud", activeModelId: null });
+    setStep(3);
+  };
 
   const saveHotkey = async (raw: string): Promise<boolean> => {
     const next = raw.trim();
@@ -244,58 +360,88 @@ export function OnboardingView({
           ) : null}
 
           {step === 2 ? (
-            <ModelStep
-              hardware={hardware}
-              models={models}
-              compat={compat}
-              error={modelError}
-              pickedId={pickedModelId}
-              busy={preparing}
-              onPick={setPickedModelId}
-              onContinue={async () => {
-                if (!pickedModelId) {
-                  setModelError("Pick a compatible model or choose Cloud.");
-                  return;
+            downloadId ? (
+              <DownloadStep
+                modelName={
+                  models?.find((m) => m.id === downloadId)?.name ?? downloadId
                 }
-                const c = compat?.[pickedModelId];
-                if (c?.level === "unsupported") {
-                  setModelError(c.reasons.join(" "));
-                  return;
-                }
-                setPreparing(true);
-                setModelError(null);
-                try {
-                  onPrefs({
-                    ...prefs,
-                    mode: "local",
-                    activeModelId: pickedModelId,
-                  });
-                  try {
-                    const st = await getModelStatus(pickedModelId);
-                    if (
-                      st.status === "not-downloaded" ||
-                      st.status === "error"
-                    ) {
-                      await downloadModel(pickedModelId);
-                      setModelError(
-                        `Download started for ${pickedModelId} — track progress in Settings → Local. You can start with Cloud and switch when ready.`,
-                      );
-                    } else if (st.status === "ready") {
-                      await selectActiveModel(pickedModelId).catch(() => {});
-                    }
-                  } catch {
-                    // Status check is best-effort
+                progress={downloadProgress}
+                status={downloadStatus}
+                error={downloadError}
+                busy={downloadBusy}
+                onCancel={() => void handleDownloadCancel()}
+                onRetry={() => void handleDownloadRetry()}
+                onUseCloud={() => void handleUseCloud()}
+              />
+            ) : (
+              <ModelStep
+                hardware={hardware}
+                models={models}
+                compat={compat}
+                error={modelError}
+                pickedId={pickedModelId}
+                busy={preparing}
+                onPick={setPickedModelId}
+                onContinue={async () => {
+                  if (!pickedModelId) {
+                    setModelError("Pick a compatible model or choose Cloud.");
+                    return;
                   }
+                  const c = compat?.[pickedModelId];
+                  if (c?.level === "unsupported") {
+                    setModelError(c.reasons.join(" "));
+                    return;
+                  }
+                  const id = pickedModelId;
+                  setPreparing(true);
+                  setModelError(null);
+                  try {
+                    onPrefs({
+                      ...prefs,
+                      mode: "local",
+                      activeModelId: id,
+                    });
+                    const st = await getModelStatus(id);
+                    if (st.status === "ready") {
+                      // Already downloaded + verified: select (loads the
+                      // engine) and finish — no download screen needed.
+                      await finishLocalSetup(id);
+                    } else if (
+                      st.status === "not-downloaded" ||
+                      st.status === "error" ||
+                      st.status === "downloading" ||
+                      st.status === "verifying"
+                    ) {
+                      // Gate: stay on step 2 and show the download until it
+                      // is complete. `downloading`/`verifying` attaches to
+                      // an in-flight transfer (e.g. started in Settings).
+                      if (
+                        st.status === "not-downloaded" ||
+                        st.status === "error"
+                      ) {
+                        await downloadModel(id);
+                      }
+                      setDownloadStatus(st);
+                      setDownloadProgress(null);
+                      setDownloadError(null);
+                      setDownloadId(id);
+                    } else {
+                      setModelError(`Unexpected model status: ${st.status}`);
+                    }
+                  } catch (e) {
+                    // Non-shell (browser preview) or backend failure: stay on
+                    // the list with a message instead of advancing.
+                    setModelError(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setPreparing(false);
+                  }
+                }}
+                onSkip={() => {
+                  onPrefs({ ...prefs, mode: "cloud", activeModelId: null });
                   setStep(3);
-                } finally {
-                  setPreparing(false);
-                }
-              }}
-              onSkip={() => {
-                onPrefs({ ...prefs, mode: "cloud", activeModelId: null });
-                setStep(3);
-              }}
-            />
+                }}
+              />
+            )
           ) : null}
 
           {step === 3 ? (
