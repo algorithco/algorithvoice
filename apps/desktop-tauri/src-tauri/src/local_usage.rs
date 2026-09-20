@@ -94,9 +94,7 @@ pub struct LocalUsageSummary {
 fn period_cutoff(period: Option<&str>) -> AppResult<Option<String>> {
     let now = chrono::Utc::now();
     match period.map(str::trim) {
-        None | Some("") | Some("30d") => {
-            Ok(Some((now - chrono::Duration::days(30)).to_rfc3339()))
-        }
+        None | Some("") | Some("30d") => Ok(Some((now - chrono::Duration::days(30)).to_rfc3339())),
         Some("today") => Ok(Some(today_start(now))),
         Some("7d") => Ok(Some((now - chrono::Duration::days(7)).to_rfc3339())),
         Some("all") => Ok(None),
@@ -257,8 +255,14 @@ mod tests {
     #[test]
     fn record_inserts_numbers_only_row() {
         let db = mem_db();
-        record_local_usage(&db, "parakeet-tdt-0.6b-v3", ModelEngine::SherpaOnnx, 2.5, "hello world")
-            .expect("record");
+        record_local_usage(
+            &db,
+            "parakeet-tdt-0.6b-v3",
+            ModelEngine::SherpaOnnx,
+            2.5,
+            "hello world",
+        )
+        .expect("record");
         assert_eq!(row_count(&db), 1);
         let conn = db.0.lock().expect("lock");
         let (model_id, engine, audio_seconds, text_chars, text_words, prompt, completion): (
@@ -378,8 +382,24 @@ mod tests {
     fn summary_totals_and_groups_by_model() {
         let db = mem_db();
         let now = rfc3339_days_ago(0);
-        seed_row(&db, &now, "parakeet-tdt-0.6b-v3", "sherpa-onnx", 60.0, 500, 100);
-        seed_row(&db, &now, "parakeet-tdt-0.6b-v3", "sherpa-onnx", 30.0, 250, 50);
+        seed_row(
+            &db,
+            &now,
+            "parakeet-tdt-0.6b-v3",
+            "sherpa-onnx",
+            60.0,
+            500,
+            100,
+        );
+        seed_row(
+            &db,
+            &now,
+            "parakeet-tdt-0.6b-v3",
+            "sherpa-onnx",
+            30.0,
+            250,
+            50,
+        );
         seed_row(&db, &now, "whisper-small", "sherpa-onnx", 10.0, 80, 20);
         let summary = summarize_usage(&db, Some("all")).expect("summarize");
         assert_eq!(summary.sessions, 3);
@@ -397,10 +417,42 @@ mod tests {
     #[test]
     fn period_filtering_matches_windows() {
         let db = mem_db();
-        seed_row(&db, &rfc3339_days_ago(0), "fresh", "sherpa-onnx", 10.0, 10, 2);
-        seed_row(&db, &rfc3339_days_ago(6), "week", "sherpa-onnx", 10.0, 10, 2);
-        seed_row(&db, &rfc3339_days_ago(20), "month", "sherpa-onnx", 10.0, 10, 2);
-        seed_row(&db, &rfc3339_days_ago(60), "old", "sherpa-onnx", 10.0, 10, 2);
+        seed_row(
+            &db,
+            &rfc3339_days_ago(0),
+            "fresh",
+            "sherpa-onnx",
+            10.0,
+            10,
+            2,
+        );
+        seed_row(
+            &db,
+            &rfc3339_days_ago(6),
+            "week",
+            "sherpa-onnx",
+            10.0,
+            10,
+            2,
+        );
+        seed_row(
+            &db,
+            &rfc3339_days_ago(20),
+            "month",
+            "sherpa-onnx",
+            10.0,
+            10,
+            2,
+        );
+        seed_row(
+            &db,
+            &rfc3339_days_ago(60),
+            "old",
+            "sherpa-onnx",
+            10.0,
+            10,
+            2,
+        );
         // Default (None) and blank behave as 30d.
         for period in [None, Some(""), Some("30d")] {
             let s = summarize_usage(&db, period).expect("30d");
@@ -430,7 +482,10 @@ mod tests {
         seed_row(&db, &now, "a", "sherpa-onnx", 1.0, 1, 1);
         seed_row(&db, &now, "b", "sherpa-onnx", 1.0, 1, 1);
         assert_eq!(clear_usage(&db).expect("clear"), 2);
-        assert_eq!(summarize_usage(&db, Some("all")).expect("after").sessions, 0);
+        assert_eq!(
+            summarize_usage(&db, Some("all")).expect("after").sessions,
+            0
+        );
         // Clearing an empty ledger reports zero, never errors.
         assert_eq!(clear_usage(&db).expect("clear again"), 0);
     }
