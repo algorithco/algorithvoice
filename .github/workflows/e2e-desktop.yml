@@ -67,6 +67,16 @@ jobs:
           Write-Host "--- app stderr ---"; Get-Content "$env:RUNNER_TEMP/app-err.log" -ErrorAction SilentlyContinue | Select-Object -First 30
       - name: install tauri-driver
         run: cargo install tauri-driver --locked
+      # DIAGNOSTIC (debug branch only): versions that must line up for
+      # WebView2 attach (Edge Runtime vs msedgedriver vs wry SDK).
+      - name: dump webview versions (diagnostic)
+        shell: pwsh
+        run: |
+          $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+          if (Test-Path $edge) { Write-Host "edge: $((Get-Item $edge).VersionInfo.FileVersion)" }
+          Get-ChildItem "C:\Program Files (x86)\Microsoft\EdgeWebView\Application" -ErrorAction SilentlyContinue | Select-Object Name
+          & msedgedriver --version 2>&1 | Select-Object -First 2
+          & tauri-driver --help 2>&1 | Select-Object -First 3
       - name: run tauri-driver E2E
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
@@ -86,3 +96,14 @@ jobs:
           name: e2e-screenshots-windows
           path: apps/desktop-tauri/e2e/screenshots/
           if-no-files-found: warn
+      # DIAGNOSTIC (debug branch only): hunt the DevToolsActivePort file the
+      # driver waits for — tells us whether any WebView wrote it and where.
+      - name: hunt DevToolsActivePort (diagnostic)
+        if: always()
+        shell: pwsh
+        run: |
+          foreach ($root in @($env:APPDATA, $env:LOCALAPPDATA, $env:TEMP, "${{ runner.temp }}/cargo-target/debug")) {
+            Write-Host "== $root"
+            Get-ChildItem -Path $root -Filter "DevToolsActivePort" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName | Select-Object -First 5
+          }
+          Get-Process algorith-voice-desktop -ErrorAction SilentlyContinue | Select-Object Id, StartTime
