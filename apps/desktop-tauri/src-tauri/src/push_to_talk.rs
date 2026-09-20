@@ -17,6 +17,7 @@
 
 use crate::error::{AppError, AppResult};
 use crate::local_asr::worker::TranscriptionWorker;
+use crate::state::Db;
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State, WebviewUrl};
@@ -291,6 +292,7 @@ pub(crate) async fn transcribe_local(
     model: &crate::local_asr::manifest::LocalModel,
     audio_base64: &str,
     language: Option<&str>,
+    db: Option<&Db>,
 ) -> AppResult<TranscribeResult> {
     let audio = decode_audio_payload(audio_base64)?;
     let decoded = crate::local_asr::audio::decode_wav(&audio)?;
@@ -323,6 +325,19 @@ pub(crate) async fn transcribe_local(
     let transcript = worker
         .transcribe(&decoded.samples, language.unwrap_or("auto"))
         .await?;
+    // Local usage ledger (numbers only, best-effort): a ledger write must
+    // never fail the transcription — log and keep the transcript instead.
+    if let Some(db) = db {
+        if let Err(e) = crate::local_usage::record_local_usage(
+            db,
+            &model.id,
+            model.engine,
+            decoded.duration_secs(),
+            &transcript.text,
+        ) {
+            eprintln!("algorith-voice: local usage record failed: {e}");
+        }
+    }
     Ok(TranscribeResult {
         text: transcript.text,
         pasted: false,
@@ -374,7 +389,18 @@ pub async fn transcribe_audio(
             let data = app.path().app_data_dir().map_err(|e| {
                 AppError::model_not_loaded(format!("cannot resolve app data dir: {e}"))
             })?;
-            transcribe_local(&worker, &data, &model, &audio_base64, language.as_deref()).await
+            // Usage ledger is best-effort: no managed Db (fresh installs
+            // where init failed) simply means no row, never an error.
+            let db = app.try_state::<Db>();
+            transcribe_local(
+                &worker,
+                &data,
+                &model,
+                &audio_base64,
+                language.as_deref(),
+                db.as_deref(),
+            )
+            .await
         }
     }
 }
@@ -834,11 +860,39 @@ mod tests {
         let worker = Arc::new(worker);
         let dir = fixture_dir("x");
         let audio = wav_base64(&[1000i16; 1600]);
-        let result = transcribe_local(&worker, &dir, &model, &audio, Some("en"))
+        // No ledger DB: path works, nothing recorded.
+        let result = transcribe_local(&worker, &dir, &model, &audio, Some("en"), None)
             .await
             .unwrap();
         assert_eq!(result.text, "hello local");
         assert!(!result.pasted);
+    }
+
+    #[tokio::test]
+    async fn local_path_records_usage_ledger() {
+        let worker = TranscriptionWorker::new();
+        let model = load_stub(&worker, Some("hello local"));
+        let worker = Arc::new(worker);
+        let dir = fixture_dir("ledger");
+        let audio = wav_base64(&[1000i16; 1600]); // 1600 samples = 0.1 s @16k
+        let mut conn = rusqlite::Connection::open_in_memory().expect("mem db");
+        crate::db::run_migrations(&mut conn).expect("migrate");
+        let db = crate::state::Db(std::sync::Mutex::new(conn));
+        let result = transcribe_local(&worker, &dir, &model, &audio, Some("en"), Some(&db))
+            .await
+            .unwrap();
+        assert_eq!(result.text, "hello local");
+        let conn = db.0.lock().expect("lock");
+        let (model_id, audio_seconds, text_words): (String, f64, i64) = conn
+            .query_row(
+                "SELECT model_id, audio_seconds, text_words FROM local_ai_usage",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("ledger row");
+        assert_eq!(model_id, "test-model");
+        assert!((audio_seconds - 0.1).abs() < 1e-9);
+        assert_eq!(text_words, 2);
     }
 
     #[tokio::test]
@@ -848,7 +902,7 @@ mod tests {
         let worker = Arc::new(worker);
         let dir = fixture_dir("x");
         // Valid base64, not a WAV file.
-        let err = transcribe_local(&worker, &dir, &model, "bm90LWEtd2F2", None)
+        let err = transcribe_local(&worker, &dir, &model, "bm90LWEtd2F2", None, None)
             .await
             .unwrap_err();
         assert_eq!(err.code, "audio-unsupported-format");
@@ -861,7 +915,7 @@ mod tests {
         let worker = Arc::new(worker);
         let dir = fixture_dir("x");
         let audio = wav_base64(&[1000i16; 1600]);
-        let err = transcribe_local(&worker, &dir, &model, &audio, None)
+        let err = transcribe_local(&worker, &dir, &model, &audio, None, None)
             .await
             .unwrap_err();
         assert_eq!(err.code, "engine-init-failed");

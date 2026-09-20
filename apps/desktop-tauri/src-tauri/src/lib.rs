@@ -6,6 +6,7 @@ mod history;
 /// engine and pipeline; the Tauri command surface stays curated in
 /// `invoke_handler` below regardless of what is reachable here.
 pub mod local_asr;
+mod local_usage;
 mod logging;
 mod push_to_talk;
 mod state;
