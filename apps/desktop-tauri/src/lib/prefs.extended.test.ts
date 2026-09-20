@@ -22,6 +22,16 @@ describe("prefs sanitizers", () => {
     expect(sanitizeHotkey("Ctrl+Space")).toBe("Ctrl+Space");
   });
 
+  it("requires a modifier + key like Rust normalize_hotkey", () => {
+    // Modifier-less or overlong values can never register: fall back.
+    expect(sanitizeHotkey("foobar")).toBe(DEFAULT_PREFS.hotkey);
+    expect(sanitizeHotkey("Space")).toBe(DEFAULT_PREFS.hotkey);
+    expect(sanitizeHotkey("Ctrl")).toBe(DEFAULT_PREFS.hotkey);
+    expect(sanitizeHotkey(`Ctrl+${"a".repeat(30)}`)).toBe(DEFAULT_PREFS.hotkey);
+    expect(sanitizeHotkey("Alt+Space")).toBe("Alt+Space");
+    expect(sanitizeHotkey("Shift+F1")).toBe("Shift+F1");
+  });
+
   it("sanitizes model ids against Rust slug allowlist", () => {
     expect(sanitizeModelId("")).toBeNull();
     expect(sanitizeModelId("Bad Slug!")).toBeNull();

@@ -303,15 +303,22 @@ export async function signInDesktop(): Promise<SessionInfo> {
       return;
     }
   });
+  // Mirror signInWithOAuth: never wait forever (e.g. callback emitted to a
+  // different window than the one listening).
+  const timeout = window.setTimeout(() => {
+    rejectSession(new Error("Sign-in timed out — please try again."));
+  }, 300_000);
   try {
     await safeOpenUrl(authorizeUrl);
   } catch {
+    clearTimeout(timeout);
     unlisten();
     throw new Error("Could not open the system browser.");
   }
   try {
     return await completed;
   } finally {
+    clearTimeout(timeout);
     unlisten();
   }
 }

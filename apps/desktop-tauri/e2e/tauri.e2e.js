@@ -22,7 +22,13 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -32,7 +38,7 @@ import { Builder } from "selenium-webdriver";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)));
 const SHOTS = join(ROOT, "screenshots");
 // TAURI_APP_PATH env wins; else derive from CARGO_TARGET_DIR (CI sets both
-// to ${{ runner.temp }}/cargo-target); else legacy hardcoded dev-machine path.
+// to ${{ runner.temp }}/cargo-target); else the in-tree debug target dir.
 const APP =
   process.env.TAURI_APP_PATH ??
   (process.env.CARGO_TARGET_DIR
@@ -43,7 +49,16 @@ const APP =
           ? "algorith-voice-desktop.exe"
           : "algorith-voice-desktop",
       )
-    : "D:\\cargo-target\\desktop\\debug\\algorith-voice-desktop.exe");
+    : join(
+        ROOT,
+        "..",
+        "src-tauri",
+        "target",
+        "debug",
+        process.platform === "win32"
+          ? "algorith-voice-desktop.exe"
+          : "algorith-voice-desktop",
+      ));
 const DRIVER = process.env.TAURI_DRIVER ?? "tauri-driver";
 const PORT = process.env.TAURI_DRIVER_PORT ?? "4444";
 
@@ -151,15 +166,11 @@ test.before(async () => {
     // none running — the expected case
   }
   const edgeDriver = resolveEdgeDriver();
-  // DIAGNOSTIC (debug branch only): inherit stdio so tauri-driver's own
-  // logs (app spawn, native-driver attach) reach the CI log.
-  const driverStdio =
-    process.env.TAURI_DRIVER_STDIO === "pipe" ? "pipe" : "inherit";
   driverProcess = spawn(
     DRIVER,
     ["--port", PORT, "--native-driver", edgeDriver],
     {
-      stdio: driverStdio,
+      stdio: "pipe",
     },
   );
   await waitFor(
@@ -179,7 +190,17 @@ test.before(async () => {
       // makes msedgedriver launch Edge as a plain browser instead, which
       // crashes on CI runners (DevToolsActivePort file doesn't exist).
       browserName: "wry",
-      "tauri:options": { application: APP },
+      "tauri:options": {
+        application: APP,
+        // Remote-debugging port via the WebView2 API channel. Env/CLI
+        // switches are ignored on elevated hosts (WebView2 Runtime 150+
+        // hardening), which is exactly the CI runner case — without this,
+        // msedgedriver never finds the DevTools port and session creation
+        // fails with DevToolsActivePort file doesn't exist.
+        webviewOptions: {
+          additionalBrowserArguments: ["--remote-debugging-port=9222"],
+        },
+      },
     })
     .build();
 });
@@ -233,7 +254,15 @@ test(
 test("real IPC round-trip: get_version", { timeout: 60_000 }, async () => {
   const res = await tauriInvoke(driver, "get_version");
   assert.ok(!res.err, `invoke failed (serialization/capability?): ${res.err}`);
-  assert.equal(res.ok, "0.4.0");
+  // Compare against the manifest, not a hardcoded literal (a literal rots
+  // on every version bump and fails the suite on all newer tags).
+  const cargo = readFileSync(
+    join(ROOT, "..", "src-tauri", "Cargo.toml"),
+    "utf-8",
+  );
+  const expected = cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+  assert.ok(expected, "could not read version from src-tauri/Cargo.toml");
+  assert.equal(res.ok, expected);
 });
 
 test(

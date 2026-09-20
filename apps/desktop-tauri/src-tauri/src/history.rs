@@ -70,13 +70,13 @@ pub fn history_stats(db: tauri::State<'_, Db>) -> AppResult<HistoryStats> {
     let total: i64 = conn
         .query_row("SELECT COUNT(*) FROM history", [], |r| r.get(0))
         .map_err(|e| AppError::store(e.to_string()))?;
-    // today: from UTC midnight
+    // today: from UTC midnight (infallible fallback — a clock edge must
+    // never panic inside a command and hang the invoke).
     let today_start = chrono::Utc::now()
         .date_naive()
         .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_utc()
-        .to_rfc3339();
+        .map(|t| t.and_utc().to_rfc3339())
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
     let today: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM history WHERE created_at >= ?1",

@@ -505,9 +505,13 @@ pub async fn get_transcription_status(
 }
 
 /// Hardware snapshot for compatibility display and diagnostics.
+/// Runs off the async executor: sysinfo scans can stall it for hundreds
+/// of milliseconds.
 #[tauri::command]
 pub async fn get_hardware_info() -> AppResult<HardwareInfo> {
-    Ok(hardware::detect())
+    tokio::task::spawn_blocking(hardware::detect)
+        .await
+        .map_err(|e| crate::error::AppError::internal(format!("hardware probe failed: {e}")))
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

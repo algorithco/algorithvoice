@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { motion } from "motion/react";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -16,7 +17,7 @@ import { useAuthGate } from "./hooks/useAuthGate.js";
 import { useOnboardingGate } from "./hooks/useOnboardingGate.js";
 import { useSplashSequence } from "./hooks/useSplashSequence.js";
 import { useWindowLabel } from "./hooks/useWindowLabel.js";
-import { saveOnboarded, savePrefs } from "./lib/prefs.js";
+import { DEFAULT_PREFS, saveOnboarded, savePrefs } from "./lib/prefs.js";
 import { ensureFloatingPill } from "./lib/ptt.js";
 import { logout } from "./lib/session/auth.js";
 import { isTauri } from "./lib/session/env.js";
@@ -65,6 +66,21 @@ export default function App() {
     return () => clearTimeout(id);
   }, [ready, splashDone, onboarded, session, isPill, isSettings]);
 
+  // Restore the saved custom hotkey on boot: Rust only arms DEFAULT_HOTKEY
+  // in setup(), so without this a restart silently reverts to Ctrl+Space
+  // while the UI still displays the custom binding.
+  useEffect(() => {
+    if (isPill || isSettings) return;
+    if (!ready || !splashDone || !onboarded || session === null) return;
+    if (!isTauri()) return;
+    if (prefs.hotkey === DEFAULT_PREFS.hotkey) return;
+    void invoke("register_hotkey", { shortcut: prefs.hotkey }).catch(
+      (e: unknown) => {
+        console.error("algorith-voice: boot hotkey restore failed", e);
+      },
+    );
+  }, [ready, splashDone, onboarded, session, isPill, isSettings, prefs.hotkey]);
+
   useEffect(() => {
     document.documentElement.classList.toggle("dark", prefs.theme === "dark");
   }, [prefs.theme]);
@@ -79,9 +95,11 @@ export default function App() {
         setSession(payload);
         if (!payload.loggedIn) setView("dashboard");
       }
-    }).then((fn) => {
-      unlisten = fn;
-    });
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
     return () => {
       if (unlisten) unlisten();
     };
@@ -125,55 +143,60 @@ export default function App() {
 
   if (!ready || !splashDone || session === null) {
     return (
-      <main className="fixed inset-0 bg-black">
-        <ParticleLogoLoader
-          className="absolute inset-0"
-          logoSize={300}
-          particleCount={7000}
-          cycleDuration={7000}
-        />
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <div className="h-[300px] w-full shrink-0" aria-hidden />
-          <div className="flex select-none items-center gap-[0.24em] -translate-y-[52px]">
-            <motion.span
-              initial={{ x: -220, filter: "blur(18px)", opacity: 0 }}
-              animate={{ x: 0, filter: "blur(0px)", opacity: 1 }}
-              transition={{
-                duration: 1.05,
-                delay: 0.6,
-                ease: [0.22, 0.61, 0.36, 1],
-              }}
-              className="text-[34px] font-[700] tracking-[0.14em] text-white md:text-[42px]"
-              style={{ fontFeatureSettings: '"ss01"', letterSpacing: "0.14em" }}
-            >
-              Algorith
-            </motion.span>
-            <motion.span
-              initial={{ x: 220, filter: "blur(18px)", opacity: 0 }}
-              animate={{ x: 0, filter: "blur(0px)", opacity: 1 }}
-              transition={{
-                duration: 1.05,
-                delay: 0.6,
-                ease: [0.22, 0.61, 0.36, 1],
-              }}
-              className="text-[34px] font-[300] tracking-[0.14em] text-white md:text-[42px]"
-            >
-              Voice
-            </motion.span>
+      <ErrorBoundary>
+        <main className="fixed inset-0 bg-black">
+          <ParticleLogoLoader
+            className="absolute inset-0"
+            logoSize={300}
+            particleCount={7000}
+            cycleDuration={7000}
+          />
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+            <div className="h-[300px] w-full shrink-0" aria-hidden />
+            <div className="flex select-none items-center gap-[0.24em] -translate-y-[52px]">
+              <motion.span
+                initial={{ x: -220, filter: "blur(18px)", opacity: 0 }}
+                animate={{ x: 0, filter: "blur(0px)", opacity: 1 }}
+                transition={{
+                  duration: 1.05,
+                  delay: 0.6,
+                  ease: [0.22, 0.61, 0.36, 1],
+                }}
+                className="text-[34px] font-[700] tracking-[0.14em] text-white md:text-[42px]"
+                style={{
+                  fontFeatureSettings: '"ss01"',
+                  letterSpacing: "0.14em",
+                }}
+              >
+                Algorith
+              </motion.span>
+              <motion.span
+                initial={{ x: 220, filter: "blur(18px)", opacity: 0 }}
+                animate={{ x: 0, filter: "blur(0px)", opacity: 1 }}
+                transition={{
+                  duration: 1.05,
+                  delay: 0.6,
+                  ease: [0.22, 0.61, 0.36, 1],
+                }}
+                className="text-[34px] font-[300] tracking-[0.14em] text-white md:text-[42px]"
+              >
+                Voice
+              </motion.span>
+            </div>
           </div>
-        </div>
-        <div className="pointer-events-none absolute bottom-10 left-1/2 flex -translate-x-1/2 flex-col items-center gap-3">
-          <div className="h-[2px] w-24 overflow-hidden rounded bg-white/10">
-            <div
-              className="h-full w-1/2 bg-white"
-              style={{ animation: "shimmer 1.2s ease-in-out infinite" }}
-            />
+          <div className="pointer-events-none absolute bottom-10 left-1/2 flex -translate-x-1/2 flex-col items-center gap-3">
+            <div className="h-[2px] w-24 overflow-hidden rounded bg-white/10">
+              <div
+                className="h-full w-1/2 bg-white"
+                style={{ animation: "shimmer 1.2s ease-in-out infinite" }}
+              />
+            </div>
+            <p className="text-[10px] tracking-[0.2em] text-white/50 uppercase">
+              Loading
+            </p>
           </div>
-          <p className="text-[10px] tracking-[0.2em] text-white/50 uppercase">
-            Loading
-          </p>
-        </div>
-      </main>
+        </main>
+      </ErrorBoundary>
     );
   }
 

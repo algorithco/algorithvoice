@@ -697,9 +697,9 @@ fn handle_argv_deep_links(handle: &tauri::AppHandle, argv: &[String]) {
         return;
     }
     focus_main_for_external_event(handle);
-    if let Some(win) = handle.get_webview_window("main") {
-        let _ = win.emit("auth-callback", urls);
-    }
+    // App-wide emit: the flow may have started in any window (main or the
+    // standalone settings webview), matching the single-instance branch.
+    let _ = handle.emit("auth-callback", urls);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -795,9 +795,9 @@ pub fn run() {
                     return;
                 }
                 focus_main_for_external_event(&handle);
-                if let Some(win) = handle.get_webview_window("main") {
-                    let _ = win.emit("auth-callback", urls);
-                }
+                // App-wide emit: the OAuth flow may have started in any
+                // window (main or standalone settings), not just "main".
+                let _ = handle.emit("auth-callback", urls);
             });
             Ok(())
         })
