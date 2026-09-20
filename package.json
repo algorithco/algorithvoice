@@ -1,6 +1,6 @@
 {
   "name": "algorith-voice",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "license": "GPL-3.0-or-later",
   "packageManager": "pnpm@10.29.3",
