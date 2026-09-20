@@ -49,7 +49,7 @@ public func resolveTranscribePath(mode: SttMode?) throws -> TranscribePath {
 public func resolveTranscribePath(rawMode: String?) throws -> TranscribePath {
     guard let rawMode else { return .cloud }
     guard let mode = SttMode(rawValue: rawMode) else {
-        throw AppError.internal("unknown transcription mode: \(rawMode)")
+        throw AppError.internalError("unknown transcription mode: \(rawMode)")
     }
     return try resolveTranscribePath(mode: mode)
 }
@@ -78,7 +78,7 @@ public struct WsHello: Codable, Equatable, Sendable {
     /// `z.literal` on the wire: a non-conformant hello must never be sent).
     public func validated() throws -> WsHello {
         guard type == "hello" else {
-            throw AppError.internal("ws hello must have type 'hello'")
+            throw AppError.internalError("ws hello must have type 'hello'")
         }
         guard sampleRate == 16_000 else {
             throw AppError.transcribe("ws hello sampleRate must be 16000")

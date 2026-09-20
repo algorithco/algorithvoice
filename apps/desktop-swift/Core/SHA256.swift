@@ -131,7 +131,7 @@ public enum SHA256: Sendable {
     public static func verify(fileURL: URL, expectedHex: String) throws {
         let normalized = expectedHex.lowercased()
         guard normalized.count == 64, normalized.allSatisfy({ $0.isHexDigit }) else {
-            throw AppError.internal("malformed sha256 expectation")
+            throw AppError.internalError("malformed sha256 expectation")
         }
         let handle: FileHandle
         do {

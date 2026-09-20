@@ -124,17 +124,17 @@ public enum ModelManifestValidation {
     /// Shape + security validation. Transport trust is NOT established here.
     public static func validate(_ manifest: ModelManifest) throws {
         guard manifest.manifestVersion == modelManifestVersion else {
-            throw AppError.internal(
+            throw AppError.internalError(
                 "unsupported model manifest version \(manifest.manifestVersion), this build understands \(modelManifestVersion)"
             )
         }
         guard !manifest.models.isEmpty else {
-            throw AppError.internal("model manifest contains no models")
+            throw AppError.internalError("model manifest contains no models")
         }
         var ids = Set<String>()
         for model in manifest.models {
             guard ids.insert(model.id).inserted else {
-                throw AppError.internal("duplicate model id: \(model.id)")
+                throw AppError.internalError("duplicate model id: \(model.id)")
             }
             try validateModel(model)
         }
@@ -142,24 +142,24 @@ public enum ModelManifestValidation {
 
     static func validateModel(_ model: LocalModel) throws {
         guard isSafeSlug(model.id) else {
-            throw AppError.internal("model id is not a safe slug: \(model.id)")
+            throw AppError.internalError("model id is not a safe slug: \(model.id)")
         }
         guard !model.name.trimmingCharacters(in: .whitespaces).isEmpty, model.name.count <= 120 else {
-            throw AppError.internal("model \(model.id) has an invalid display name")
+            throw AppError.internalError("model \(model.id) has an invalid display name")
         }
         guard isSemver(model.version) else {
-            throw AppError.internal("model \(model.id) version is not semver x.y.z: \(model.version)")
+            throw AppError.internalError("model \(model.id) version is not semver x.y.z: \(model.version)")
         }
         guard !model.quantization.trimmingCharacters(in: .whitespaces).isEmpty, model.quantization.count <= 32 else {
-            throw AppError.internal("model \(model.id) has an invalid quantization label")
+            throw AppError.internalError("model \(model.id) has an invalid quantization label")
         }
         guard !model.files.isEmpty else {
-            throw AppError.internal("model \(model.id) lists no files")
+            throw AppError.internalError("model \(model.id) lists no files")
         }
         var names = Set<String>()
         for file in model.files {
             guard names.insert(file.filename).inserted else {
-                throw AppError.internal("model \(model.id) has a duplicate filename: \(file.filename)")
+                throw AppError.internalError("model \(model.id) has a duplicate filename: \(file.filename)")
             }
             try validateFilename(modelId: model.id, name: file.filename)
             try validateHTTPSURL(modelId: model.id, raw: file.url)
@@ -167,26 +167,26 @@ public enum ModelManifestValidation {
                 try validateHTTPSURL(modelId: model.id, raw: fallback)
             }
             guard isSHA256(file.sha256) else {
-                throw AppError.internal("model \(model.id) file \(file.filename) has a malformed sha256")
+                throw AppError.internalError("model \(model.id) file \(file.filename) has a malformed sha256")
             }
         }
         guard !model.languages.isEmpty, model.languages.allSatisfy(isLanguageCode) else {
-            throw AppError.internal("model \(model.id) has invalid languages")
+            throw AppError.internalError("model \(model.id) has invalid languages")
         }
         guard model.recommendedRamGb >= model.minRamGb,
               model.recommendedVramGb >= model.minVramGb,
               model.minRamGb >= 0,
               model.minVramGb >= 0
         else {
-            throw AppError.internal("model \(model.id) has inconsistent memory requirements")
+            throw AppError.internalError("model \(model.id) has inconsistent memory requirements")
         }
         guard !model.supportedOs.isEmpty, !model.supportedArch.isEmpty else {
-            throw AppError.internal("model \(model.id) supports no OS/arch")
+            throw AppError.internalError("model \(model.id) supports no OS/arch")
         }
         guard !model.license.trimmingCharacters(in: .whitespaces).isEmpty,
               !model.attribution.trimmingCharacters(in: .whitespaces).isEmpty
         else {
-            throw AppError.internal("model \(model.id) is missing license/attribution")
+            throw AppError.internalError("model \(model.id) is missing license/attribution")
         }
     }
 
@@ -216,16 +216,16 @@ public enum ModelManifestValidation {
                     || $0.range(of: "..") != nil || $0.range(of: "\\") != nil
             })
         if bad {
-            throw AppError.internal("model \(modelId) has an unsafe filename: \(name)")
+            throw AppError.internalError("model \(modelId) has an unsafe filename: \(name)")
         }
     }
 
     static func validateHTTPSURL(modelId: String, raw: String) throws {
         guard let url = URL(string: raw), let scheme = url.scheme?.lowercased() else {
-            throw AppError.internal("model \(modelId) has a malformed URL")
+            throw AppError.internalError("model \(modelId) has a malformed URL")
         }
         guard scheme == "https" else {
-            throw AppError.internal("model \(modelId) URL must use HTTPS")
+            throw AppError.internalError("model \(modelId) URL must use HTTPS")
         }
     }
 

@@ -68,7 +68,9 @@ public struct AppError: Error, Codable, Equatable, Sendable, CustomStringConvert
         AppError(code: "validation", message: message)
     }
 
-    public static func internal(_ message: String) -> AppError {
+    /// Named `internalError` (not `internal`): `internal` is a reserved Swift
+    /// keyword. The wire `code` stays `"internal"`, matching the Rust side.
+    public static func internalError(_ message: String) -> AppError {
         AppError(code: "internal", message: message)
     }
 
