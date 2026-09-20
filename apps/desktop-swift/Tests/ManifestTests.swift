@@ -119,10 +119,10 @@ final class ManifestTests: XCTestCase {
     func testWireFormatIsCamelCaseLikeSharedTypes() throws {
         let data = try JSONEncoder().encode(exampleManifest())
         let text = String(data: data, encoding: .utf8) ?? ""
-        for key in ["manifestVersion", "minRamGb", "supportedOs", "sizeBytes", "fallbackUrl"] {
+        for key in ["manifestVersion", "minRamGb", "supportedOs", "sizeBytes"] {
             XCTAssertTrue(text.range(of: "\"\(key)\"") != nil, "wire JSON must contain \(key)")
         }
-        // fallbackUrl is nil here and Codable omits it — encode one with it set.
+        // fallbackUrl is nil here so Codable omits it — encode one with it set.
         var withFallback = exampleManifest()
         withFallback.models[0].files[0].fallbackUrl = "https://cdn.example.com/fallback"
         let fallbackText = String(data: try JSONEncoder().encode(withFallback), encoding: .utf8) ?? ""
