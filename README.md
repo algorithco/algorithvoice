@@ -79,8 +79,9 @@ apps/desktop-swift    Native macOS app (Swift/SwiftUI, separate from Tauri)
 apps/web              Next.js 16 marketing + dashboard
 apps/backend          Fastify 5 API + WebSocket
 packages/shared-types Zod contracts (single source of truth)
-packages/ui           Monochrome React components
+packages/ui           Monochrome React components (no packages/config/* by design — root owns biome/tsconfig/turbo)
 infra/                compose stack (postgres/redis/migrate/backend/worker/web) + Prisma + Fly
+infra/prisma          Prisma schema/migrations (workspace member consumed by backend)
 .github/workflows/    CI, releases, desktop builds
 ```
 
