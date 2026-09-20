@@ -2,6 +2,7 @@ name: ci
 on:
   pull_request:
     branches: [main, develop, "release/*"]
+    paths-ignore: ['**.md', 'docs/**', 'assets/**']
   push:
     branches: [main, develop, "release/*", "hotfix/*"]
     tags: ["v*.*.*", "v*.*.*-*"]
