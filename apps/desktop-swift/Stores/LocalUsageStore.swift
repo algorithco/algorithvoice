@@ -131,7 +131,8 @@ public final class LocalUsageStore {
         let text = UnsafeRawPointer(raw).assumingMemoryBound(to: CChar.self)
         let count = strlen(text)
         let bytes = UnsafeRawPointer(raw).assumingMemoryBound(to: UInt8.self)
-        return String(decoding: UnsafeBufferPointer(start: bytes, count: count), as: UTF8.self)
+        let view = UnsafeBufferPointer(start: bytes, count: count)
+        return String(bytes: view, encoding: .utf8) ?? "undecodable database error"
     }
 
     private func execute(_ sql: String) throws {
@@ -196,7 +197,11 @@ public final class LocalUsageStore {
                 throw AppError.store("corrupt usage row")
             }
             let count = Int(sqlite3_column_bytes(statement, column))
-            return String(decoding: UnsafeBufferPointer(start: raw, count: count), as: UTF8.self)
+            let view = UnsafeBufferPointer(start: raw, count: count)
+            guard let value = String(bytes: view, encoding: .utf8) else {
+                throw AppError.store("corrupt usage row")
+            }
+            return value
         }
         let recordedAtString = try text(at: 0)
         guard let recordedAt = Self.iso.date(from: recordedAtString) else {

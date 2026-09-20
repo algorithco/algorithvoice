@@ -61,7 +61,7 @@ final class LocalUsageTests: XCTestCase {
         let rows = [
             row(daysAgo: 0),
             row(daysAgo: 0, seconds: 30, chars: 250, words: 50),
-            row(daysAgo: 0, model: "whisper-small", seconds: 10, chars: 80, words: 20),
+            row(daysAgo: 0, model: "whisper-small", seconds: 10, chars: 80, words: 20)
         ]
         let summary = LocalUsage.summarize(rows: rows, period: .all)
         XCTAssertEqual(summary.sessions, 3)
@@ -78,7 +78,7 @@ final class LocalUsageTests: XCTestCase {
             row(daysAgo: 0, model: "fresh"),
             row(daysAgo: 6, model: "week"),
             row(daysAgo: 20, model: "month"),
-            row(daysAgo: 60, model: "old"),
+            row(daysAgo: 60, model: "old")
         ]
         XCTAssertEqual(LocalUsage.summarize(rows: rows, period: .thirtyDays).sessions, 3)
         XCTAssertEqual(LocalUsage.summarize(rows: rows, period: .sevenDays).sessions, 2)
