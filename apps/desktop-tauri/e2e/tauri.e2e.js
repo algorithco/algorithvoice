@@ -151,11 +151,15 @@ test.before(async () => {
     // none running — the expected case
   }
   const edgeDriver = resolveEdgeDriver();
+  // DIAGNOSTIC (debug branch only): inherit stdio so tauri-driver's own
+  // logs (app spawn, native-driver attach) reach the CI log.
+  const driverStdio =
+    process.env.TAURI_DRIVER_STDIO === "pipe" ? "pipe" : "inherit";
   driverProcess = spawn(
     DRIVER,
     ["--port", PORT, "--native-driver", edgeDriver],
     {
-      stdio: "pipe",
+      stdio: driverStdio,
     },
   );
   await waitFor(

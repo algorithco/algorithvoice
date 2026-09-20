@@ -48,6 +48,23 @@ jobs:
         run: cargo build --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+      # DIAGNOSTIC (debug branch only): does the debug binary stay alive on
+      # the runner? Captures early-exit code, which tauri-driver swallows
+      # behind SessionNotCreatedError.
+      - name: smoke-boot debug binary (diagnostic)
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+        shell: pwsh
+        run: |
+          $exe = "${{ runner.temp }}/cargo-target/debug/algorith-voice-desktop.exe"
+          Write-Host "exists: $(Test-Path $exe)"
+          $p = Start-Process -FilePath $exe -RedirectStandardOutput "$env:RUNNER_TEMP/app-out.log" -RedirectStandardError "$env:RUNNER_TEMP/app-err.log" -PassThru
+          Start-Sleep -Seconds 20
+          $alive = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
+          if ($alive) { Write-Host "APP ALIVE pid=$($p.Id)"; Stop-Process -Id $p.Id -Force; Start-Sleep -Seconds 3 }
+          else { Write-Host "APP EXITED hasExited=$($p.HasExited)" }
+          Write-Host "--- app stdout ---"; Get-Content "$env:RUNNER_TEMP/app-out.log" -ErrorAction SilentlyContinue | Select-Object -First 30
+          Write-Host "--- app stderr ---"; Get-Content "$env:RUNNER_TEMP/app-err.log" -ErrorAction SilentlyContinue | Select-Object -First 30
       - name: install tauri-driver
         run: cargo install tauri-driver --locked
       - name: run tauri-driver E2E
