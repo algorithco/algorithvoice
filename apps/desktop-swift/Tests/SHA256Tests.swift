@@ -24,7 +24,7 @@ final class SHA256Tests: XCTestCase {
     func testStreamingMatchesOneShot() {
         var hasher = SHA256Hasher()
         hasher.update(Data("abc".utf8))
-        hasher.update("def".data(using: .utf8) ?? Data())
+        hasher.update(Data("def".utf8))
         let streamed = hasher.finalized().map { String(format: "%02x", $0) }.joined()
         XCTAssertEqual(streamed, SHA256.hexDigest(Data("abcdef".utf8)))
     }
