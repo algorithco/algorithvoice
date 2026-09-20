@@ -1,0 +1,6 @@
+// Features/ hosts per-feature SwiftUI + controllers as they land:
+//   PushToTalk/  (PR3: hotkey monitor, pill panel, audio tap, cloud STT)
+//   LocalSTT/     (PR4: model manager UI, inference worker)
+//   Settings/     (PR5: hotkey, STT mode, API keys, license/devices)
+//   Licensing/    (PR5: activation, seats, billing deep-links)
+// This file keeps the empty directory tracked until PR3.

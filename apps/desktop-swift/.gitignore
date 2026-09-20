@@ -1,0 +1,19 @@
+# Xcode / SwiftPM — Algorith Voice macOS app
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM/
+# SwiftPM (macOS app: keep Package.resolved committed for reproducible builds)
+.swiftpm/
+# macOS
+.DS_Store
+# Signing (never commit)
+*.p12
+*.mobileprovision
+AuthKey_*.p8

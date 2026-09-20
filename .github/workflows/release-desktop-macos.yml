@@ -1,0 +1,57 @@
+name: release-desktop-macos
+on:
+  push:
+    branches: [main, develop, "release/*", "feature/desktop-swift-*"]
+    paths: ["apps/desktop-swift/**", ".github/workflows/release-desktop-macos.yml"]
+  pull_request:
+    branches: [main, develop, "release/*"]
+    paths: ["apps/desktop-swift/**", ".github/workflows/release-desktop-macos.yml"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Override version (e.g. 0.2.0)"
+        required: false
+
+permissions:
+  contents: read
+
+# Fully additive to release-desktop.yml (Windows/Linux Tauri matrix) — separate
+# workflow file, separate artifacts (`algorithvoice_{version}_macos_{arch}.dmg`
+# per DECISIONS.md item 7), separate versioning if that proves simpler.
+
+jobs:
+  build-test-lint:
+    runs-on: macos-latest # Xcode 26 / Swift 6.2 toolchain required (swift-tools 6.2)
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/desktop-swift
+    steps:
+      - uses: actions/checkout@v5
+      - name: toolchain
+        run: swift --version
+      - name: build
+        run: swift build --configuration release
+      - name: test
+        run: swift test
+      - name: lint
+        run: |
+          brew install swiftlint
+          swiftlint --strict
+      # PR6 adds here, in order: signing/notarization secrets preflight
+      # (mirroring the TAURI_SIGNING_* gate — fail loudly when
+      # MACOS_SIGNING_* secrets are absent, never ship a silent unsigned
+      # artifact), .app bundling, `create-dmg`, Sparkle appcast, upload.
+
+  secret-scan-note:
+    # The repo-wide gitleaks job covers secrets; Swift-side rules live here:
+    # no hardcoded secrets, no hardcoded API base URLs (BackendConfig resolves
+    # ALGORITHVOICE_API_URL → VITE_API_URL → dev/prod defaults).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: reject hardcoded secrets in Swift sources
+        run: |
+          ! grep -RniE 'sk-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{10,}|BEGIN [A-Z ]*PRIVATE KEY' \
+            apps/desktop-swift/Core apps/desktop-swift/App apps/desktop-swift/Tests \
+            || { echo "possible hardcoded secret in desktop-swift sources"; exit 1; }
