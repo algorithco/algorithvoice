@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "@fontsource-variable/inter";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
@@ -12,6 +12,9 @@ export const metadata: Metadata = {
   },
   description:
     "Push-to-talk dictation for macOS, Windows, Linux. Local mode = audio never leaves your device.",
+};
+
+export const viewport: Viewport = {
   themeColor: "#000000",
 };
 

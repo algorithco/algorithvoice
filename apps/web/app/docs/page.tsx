@@ -43,15 +43,14 @@ const SECTIONS = [
 const OS_DETAILS = [
   {
     id: "macos",
-    os: "macOS 13+",
+    os: "macOS 13+ — native Swift app, coming soon",
     icon: "◐",
     steps: [
-      "Open the .dmg and drag Algorith Voice to Applications.",
-      "System Settings → Privacy & Security → Microphone → enable Algorith Voice.",
-      "Privacy & Security → Accessibility → enable Algorith Voice, then relaunch.",
-      "Hold Ctrl+Space and speak — text appears where your cursor was.",
+      "macOS ships as a separate native Swift app (not the Tauri bundle) — it is in development and has no download yet.",
+      "Windows & Linux are available today via the Tauri desktop app (see below).",
+      "Planned macOS UX matches the other platforms: hold the hotkey, speak, release → text at cursor.",
     ],
-    code: "open Algorith.Voice_0.4.0_aarch64.dmg  # or x64.dmg",
+    code: "# macOS Swift app — coming soon (no download yet)",
   },
   {
     id: "windows",
@@ -230,7 +229,7 @@ export default function DocsPage() {
                     </span>
                     <h2 className="t-h2 min-w-0 flex-1">{s.os}</h2>
                     <span className="ml-auto hidden rounded-full bg-black px-2.5 py-1 text-xs font-medium text-white md:inline dark:bg-white dark:text-black">
-                      4 steps
+                      {s.steps.length} steps
                     </span>
                   </div>
                   <ol className="mt-6 flex flex-col gap-3">
