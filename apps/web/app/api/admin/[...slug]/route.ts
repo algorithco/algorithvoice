@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = process.env.API_URL ?? "https://api.trqsh.uz";
 
 async function proxy(req: Request, slug: string[]) {
   const url = new URL(req.url);

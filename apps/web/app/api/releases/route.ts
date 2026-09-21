@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const repo =
-      process.env.NEXT_PUBLIC_GITHUB_REPO ?? "algorithco/algorithvoice";
+      process.env.NEXT_PUBLIC_GITHUB_REPO ?? "algorithco/algorithvoice-app";
     const res = await fetch(
       `https://api.github.com/repos/${repo}/releases/latest`,
       {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = process.env.API_URL ?? "https://api.trqsh.uz";
 const COOKIE_NAME = "__Host-av_at";
 
 export async function POST(req: Request) {
