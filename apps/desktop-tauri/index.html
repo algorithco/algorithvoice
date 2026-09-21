@@ -6,9 +6,14 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>Algorith Voice</title>
     <style>
+      /* Transparent first paint: the floating pill (72x72, transparent
+         window) loads this same file and must never flash — or stick on —
+         black. The main/settings windows keep their native #000 behind
+         this (tauri.conf backgroundColor) plus their own shell bg, so a
+         transparent page changes nothing for them. */
       html,
       body {
-        background: #000;
+        background: transparent;
       }
     </style>
   </head>

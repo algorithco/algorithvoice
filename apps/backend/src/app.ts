@@ -52,7 +52,14 @@ export function buildApp() {
   app.setSerializerCompiler(serializerCompiler);
 
   app.register(cors, {
-    origin: [env.APP_URL, "tauri://localhost", "http://tauri.localhost"],
+    origin: [
+      env.APP_URL,
+      "tauri://localhost",
+      "http://tauri.localhost",
+      // Local-dev loopback (direct localhost access bypassing the tunnel).
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+    ],
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],

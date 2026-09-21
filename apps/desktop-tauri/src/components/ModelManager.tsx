@@ -294,6 +294,29 @@ export function ModelManager({
     }
   };
 
+  // NOTE: these memos must stay above the early returns below. Hooks must
+  // run unconditionally on every render — when `models` flips null → loaded,
+  // any hook placed after `if (!models) return` would change the hook count
+  // between renders and crash React (#310).
+  const allLanguages = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of models ?? []) for (const l of m.languages) s.add(l);
+    return ["all", ...Array.from(s).sort()];
+  }, [models]);
+
+  const filteredModels = useMemo(() => {
+    if (!models) return [];
+    const q = query.trim().toLowerCase();
+    return models.filter((m) => {
+      if (langFilter !== "all" && !m.languages.includes(langFilter))
+        return false;
+      if (!q) return true;
+      const hay =
+        `${m.id} ${m.name} ${m.engine} ${m.quantization} ${m.languages.join(" ")} ${m.license}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [models, query, langFilter]);
+
   if (!isTauri()) {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-500 dark:border-white/15">
@@ -306,24 +329,6 @@ export function ModelManager({
   if (!models) {
     return <p className="text-sm text-gray-500">Loading model catalog…</p>;
   }
-
-  const allLanguages = useMemo(() => {
-    const s = new Set<string>();
-    for (const m of models) for (const l of m.languages) s.add(l);
-    return ["all", ...Array.from(s).sort()];
-  }, [models]);
-
-  const filteredModels = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return models.filter((m) => {
-      if (langFilter !== "all" && !m.languages.includes(langFilter))
-        return false;
-      if (!q) return true;
-      const hay =
-        `${m.id} ${m.name} ${m.engine} ${m.quantization} ${m.languages.join(" ")} ${m.license}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [models, query, langFilter]);
 
   return (
     <div className="flex flex-col gap-6">

@@ -18,9 +18,10 @@ export async function POST(req: Request) {
     // ignore
   }
   const response = NextResponse.json({ ok: true });
+  // Must match the setter attributes (Secure) or the clear is ignored.
   response.cookies.set(COOKIE_NAME, "", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: true,
     sameSite: "lax",
     path: "/",
     maxAge: 0,
