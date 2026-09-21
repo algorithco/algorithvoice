@@ -1,3 +1,4 @@
+import type { SttMode } from "@algorith-voice/shared-types";
 import { Button, RecordingOverlay, WaveformGlyph } from "@algorith-voice/ui";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
@@ -19,7 +20,13 @@ import { setTrayState, type TrayState } from "../lib/session/tray.js";
 // Phase 2 replaces the timers with cpal → VAD → STT → inject.
 // The global hotkey registered in Rust emits `ptt-pressed` / `ptt-released`,
 // which drive the same state machine as the simulator below.
-export function DictateView({ hotkey }: { hotkey: string }) {
+export function DictateView({
+  hotkey,
+  mode,
+}: {
+  hotkey: string;
+  mode: SttMode;
+}) {
   const [tray, setTray] = useState<TrayState>("idle");
   const [preview, setPreview] = useState(
     "Hold the hotkey and speak — text lands here.",
@@ -29,6 +36,7 @@ export function DictateView({ hotkey }: { hotkey: string }) {
   const [groqInput, setGroqInput] = useState("");
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
   const timers = useRef<number[]>([]);
+  const isLocal = mode === "local";
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -100,11 +108,11 @@ export function DictateView({ hotkey }: { hotkey: string }) {
   }, []);
 
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isTauri() || isLocal) return;
     void hasGroqKey()
       .then(setGroqReady)
       .catch(() => setGroqReady(false));
-  }, []);
+  }, [isLocal]);
 
   return (
     <div className="mx-auto w-full max-w-[900px] p-8 lg:p-10 2xl:max-w-[1060px]">
@@ -241,44 +249,53 @@ export function DictateView({ hotkey }: { hotkey: string }) {
         {pillMsg ? (
           <p className="av-small mt-2 text-gray-500">{pillMsg}</p>
         ) : null}
-        <p className="av-small mt-3 text-gray-500">
-          Groq key:{" "}
-          {groqReady === null
-            ? "checking…"
-            : groqReady
-              ? "saved in OS keyring"
-              : "missing — paste below to enable real transcription"}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <input
-            type="password"
-            value={groqInput}
-            onChange={(e) => setGroqInput(e.target.value)}
-            placeholder="gsk_…"
-            autoComplete="off"
-            spellCheck={false}
-            className="av-mono min-w-0 flex-1 border border-gray-200 bg-transparent px-2 py-1 text-sm dark:border-white/10"
-          />
-          <Button
-            variant="secondary"
-            disabled={!groqInput.trim()}
-            onClick={() => {
-              void setGroqApiKey(groqInput.trim())
-                .then(() => {
-                  setGroqReady(true);
-                  setGroqInput("");
-                  setPillMsg("Groq key saved to OS keyring.");
-                })
-                .catch((e: unknown) =>
-                  setPillMsg(
-                    e instanceof Error ? e.message : "Could not save key.",
-                  ),
-                );
-            }}
-          >
-            Save key
-          </Button>
-        </div>
+        {isLocal ? (
+          <p className="av-small mt-3 text-gray-500">
+            Local (offline) mode — no API key needed. Audio never leaves this
+            device.
+          </p>
+        ) : (
+          <>
+            <p className="av-small mt-3 text-gray-500">
+              Groq key:{" "}
+              {groqReady === null
+                ? "checking…"
+                : groqReady
+                  ? "saved in OS keyring"
+                  : "missing — paste below to enable real transcription"}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <input
+                type="password"
+                value={groqInput}
+                onChange={(e) => setGroqInput(e.target.value)}
+                placeholder="gsk_…"
+                autoComplete="off"
+                spellCheck={false}
+                className="av-mono min-w-0 flex-1 border border-gray-200 bg-transparent px-2 py-1 text-sm dark:border-white/10"
+              />
+              <Button
+                variant="secondary"
+                disabled={!groqInput.trim()}
+                onClick={() => {
+                  void setGroqApiKey(groqInput.trim())
+                    .then(() => {
+                      setGroqReady(true);
+                      setGroqInput("");
+                      setPillMsg("Groq key saved to OS keyring.");
+                    })
+                    .catch((e: unknown) =>
+                      setPillMsg(
+                        e instanceof Error ? e.message : "Could not save key.",
+                      ),
+                    );
+                }}
+              >
+                Save key
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

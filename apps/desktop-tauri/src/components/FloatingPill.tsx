@@ -174,12 +174,23 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         }
         setPill("idle");
       } catch (e) {
-        const raw =
-          e instanceof Error
-            ? e.message
-            : typeof e === "string"
-              ? e
-              : JSON.stringify(e);
+        // Tauri serializes Rust `AppError` as `{code, message}`, which
+        // `invoke` rejects with as a plain object — extract the message so
+        // users never see raw JSON like `{"code":"transcribe",...}`.
+        let raw: string;
+        if (e instanceof Error) {
+          raw = e.message;
+        } else if (typeof e === "string") {
+          raw = e;
+        } else if (
+          e !== null &&
+          typeof e === "object" &&
+          typeof (e as { message?: unknown }).message === "string"
+        ) {
+          raw = (e as { message: string }).message;
+        } else {
+          raw = JSON.stringify(e);
+        }
         // Surface actionable guidance for known classes
         let message = raw;
         if (
@@ -187,6 +198,9 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           raw.includes("no local model")
         ) {
           message = "No local model — download one in Settings → Local.";
+        } else if (raw.includes("Groq API key") || raw.includes("groq")) {
+          message =
+            "Cloud mode needs a Groq key — paste one in Dictate, or switch to Local (offline) in Settings.";
         } else if (
           raw.includes("web audio") ||
           raw.includes("offline resampling")
