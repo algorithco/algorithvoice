@@ -605,14 +605,16 @@ impl TranscriptionWorker {
         }
         // Refuse to even try when RAM provably cannot fit the weights.
         if model.min_ram_gb > 0.0 {
-            let available = sysinfo::System::new_all().available_memory();
-            let need = (model.min_ram_gb * 1_000_000_000.0) as u64;
+            let mut sys = sysinfo::System::new();
+            sys.refresh_memory();
+            let available = sys.available_memory();
+            let need = (model.min_ram_gb * 1024.0 * 1024.0 * 1024.0) as u64;
             if available < need {
                 let message = format!(
                     "not enough free memory to load {} (need ~{:.0} GB, have ~{:.1} GB)",
                     model.id,
                     model.min_ram_gb,
-                    available as f64 / 1_000_000_000.0
+                    available as f64 / 1_073_741_824.0
                 );
                 self.fail(&message);
                 return Err(AppError::out_of_memory(message));
@@ -625,7 +627,28 @@ impl TranscriptionWorker {
         verify_model_files(model, dir).inspect_err(|e| {
             self.fail(&e.message);
         })?;
-        self.set_lifecycle(WorkerLifecycle::Loading, Some(model.id.clone()), None);
+        // Re-check busy under lock to close TOCTOU window between first check
+        // and verify (which hashes ~670MB and holds no lock).
+        {
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|_| AppError::engine_init_failed("worker state is unavailable"))?;
+            if inner.lifecycle == WorkerLifecycle::Loading
+                || inner.lifecycle == WorkerLifecycle::Transcribing
+            {
+                return Err(AppError::engine_init_failed(
+                    "worker is busy; wait for the current operation",
+                ));
+            }
+            inner.lifecycle = WorkerLifecycle::Loading;
+            inner.model_id = Some(model.id.clone());
+            inner.failure = None;
+            inner.engine = None;
+            inner.loaded_provider = None;
+            inner.loaded_language = None;
+            inner.language_selective = false;
+        }
         on_stage(LoadStage::ResolvingFiles);
         on_stage(LoadStage::CreatingEngine);
         match loader(model, dir) {
@@ -702,9 +725,12 @@ impl TranscriptionWorker {
                     "no local model is loaded; download and load one first",
                 ));
             };
-            if lifecycle != WorkerLifecycle::Ready && lifecycle != WorkerLifecycle::Transcribing {
-                // Loading/Unloaded with a stale engine slot: refuse rather
-                // than decode against a half-loaded model.
+            if lifecycle != WorkerLifecycle::Ready {
+                if lifecycle == WorkerLifecycle::Transcribing {
+                    return Err(AppError::engine_init_failed(
+                        "worker is busy transcribing — try again shortly",
+                    ));
+                }
                 return Err(AppError::model_not_loaded(
                     "no local model is loaded; download and load one first",
                 ));
@@ -758,21 +784,21 @@ impl TranscriptionWorker {
         let engine = engine.clone();
         let owned: Vec<f32> = samples.to_vec();
         let lang = language.to_string();
-        let decoded = tokio::time::timeout(
-            self.transcribe_timeout,
-            tokio::task::spawn_blocking(move || {
-                engine
-                    .lock()
-                    .map_err(|_| AppError::engine_init_failed("transcriber lock is unavailable"))
-                    .and_then(|engine| engine.transcribe(&owned, &lang))
-            }),
-        )
-        .await;
+        let mut handle = tokio::task::spawn_blocking(move || {
+            engine
+                .lock()
+                .map_err(|_| AppError::engine_init_failed("transcriber lock is unavailable"))
+                .and_then(|engine| engine.transcribe(&owned, &lang))
+        });
+        let decoded = tokio::time::timeout(self.transcribe_timeout, &mut handle).await;
         match decoded {
-            Err(_) => Err(AppError::inference_timeout(format!(
-                "local transcription timed out after {}s",
-                self.transcribe_timeout.as_secs()
-            ))),
+            Err(_) => {
+                handle.abort();
+                Err(AppError::inference_timeout(format!(
+                    "local transcription timed out after {}s",
+                    self.transcribe_timeout.as_secs()
+                )))
+            }
             Ok(Err(join)) => {
                 // The decode thread died: engine state is suspect, drop it.
                 self.unload();

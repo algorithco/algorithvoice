@@ -29,6 +29,8 @@ const GROQ_ENDPOINT: &str = "https://api.groq.com/openai/v1/audio/transcriptions
 const GROQ_MODEL: &str = "whisper-large-v3-turbo";
 /// Groq `multipart/form-data` upload cap.
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
+/// Local WAV cap (from audio.rs) — offline path can handle larger files.
+const MAX_LOCAL_AUDIO_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TranscribeResult {
@@ -140,11 +142,26 @@ pub fn clear_groq_key() -> AppResult<()> {
 // ---- Audio → Groq Whisper (Rust backend, multipart) ----
 
 fn decode_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
+    decode_audio_payload_with_limit(audio_base64, MAX_AUDIO_BYTES, "Groq limit is 25 MB")
+}
+
+fn decode_local_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
+    decode_audio_payload_with_limit(
+        audio_base64,
+        MAX_LOCAL_AUDIO_BYTES,
+        "local limit is 128 MB",
+    )
+}
+
+fn decode_audio_payload_with_limit(
+    audio_base64: &str,
+    max_bytes: usize,
+    limit_label: &str,
+) -> AppResult<Vec<u8>> {
     let trimmed = audio_base64.trim();
     if trimmed.is_empty() {
         return Err(AppError::new("transcribe", "empty audio payload"));
     }
-    // Accept raw base64 as well as `data:audio/webm;base64,...` URLs.
     let b64 = if trimmed.starts_with("data:") {
         match trimmed.split_once(',') {
             Some((_, payload)) => payload.trim(),
@@ -153,19 +170,14 @@ fn decode_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
     } else {
         trimmed
     };
-    // Pre-check estimated decoded size to avoid large allocation before
-    // base64 decode (DoS via 250MB b64 -> 187MB Vec).
-    // Base64 expands by 4/3, so decoded ≈ b64_len * 3 / 4.
-    // Add small headroom for padding, reject early.
     let est = b64.len().saturating_mul(3) / 4;
-    if est > MAX_AUDIO_BYTES.saturating_add(1024 * 1024) {
+    if est > max_bytes.saturating_add(1024 * 1024) {
         return Err(AppError::new(
             "transcribe",
-            "audio too large (Groq limit is 25 MB)",
+            format!("audio too large ({limit_label})"),
         ));
     }
-    // Also reject obviously huge payloads (100MB b64 string itself)
-    if b64.len() > 40 * 1024 * 1024 {
+    if b64.len() > 180 * 1024 * 1024 {
         return Err(AppError::new("transcribe", "audio too large"));
     }
     use base64::Engine as _;
@@ -175,10 +187,10 @@ fn decode_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
     if bytes.is_empty() {
         return Err(AppError::new("transcribe", "decoded audio is empty"));
     }
-    if bytes.len() > MAX_AUDIO_BYTES {
+    if bytes.len() > max_bytes {
         return Err(AppError::new(
             "transcribe",
-            "audio too large (Groq limit is 25 MB)",
+            format!("audio too large ({limit_label})"),
         ));
     }
     Ok(bytes)
@@ -298,7 +310,7 @@ pub(crate) async fn transcribe_local(
     language: Option<&str>,
     db: Option<&Db>,
 ) -> AppResult<TranscribeResult> {
-    let audio = decode_audio_payload(audio_base64)?;
+    let audio = decode_local_audio_payload(audio_base64)?;
     let decoded = crate::local_asr::audio::decode_wav(&audio)?;
     if decoded.samples.is_empty() {
         return Err(AppError::audio_unsupported_format(
@@ -462,25 +474,20 @@ fn paste_text_blocking(text: String, restore_clipboard: Option<bool>) -> AppResu
         arboard::Clipboard::new().map_err(|e| AppError::new("paste", format!("clipboard: {e}")))?;
     let previous = clipboard.get_text().ok();
     clipboard
-        .set_text(text)
+        .set_text(text.clone())
         .map_err(|e| AppError::new("paste", format!("clipboard write: {e}")))?;
-    // Give the OS a tick to publish the new clipboard owner before the
-    // synthetic keystroke lands.
     std::thread::sleep(std::time::Duration::from_millis(120));
 
     let keystroke = paste_keystroke();
-    // Wait for the focused app to consume the paste before restoring.
     std::thread::sleep(std::time::Duration::from_millis(350));
 
-    if restore {
+    if restore && keystroke.is_ok() {
         if let Some(old) = previous {
-            // Best effort: restoring must never turn a successful paste
-            // into an error.
             let _ = clipboard.set_text(old);
         }
     }
-    // Report the keystroke error *after* restoring, so a failed paste
-    // never costs the user their original clipboard.
+    // On failure keep transcript on clipboard — frontend will also
+    // do navigator.clipboard.writeText as fallback.
     keystroke?;
     Ok(())
 }

@@ -216,13 +216,33 @@ fn resample_antialiased(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32>
     if input.is_empty() || from_rate == to_rate {
         return input.to_vec();
     }
-    let filtered = lowpass_fir(
-        input,
-        f64::from(from_rate),
-        0.45 * f64::from(from_rate.min(to_rate)),
-    );
+    // Upsample: input Nyquist is lower than output Nyquist — no aliasing
+    // to remove, so skip the FIR stage and preserve full bandwidth.
+    // Downsample: need to low-pass at output Nyquist.
+    let filtered: Vec<f32> = if from_rate < to_rate {
+        // Guard large inputs even on upsample path (DoS cap: ~40s at source rate)
+        if input.len() > from_rate as usize * 40 {
+            let capped = from_rate as usize * 40;
+            return resample_antialiased(&input[..capped], from_rate, to_rate);
+        }
+        input.to_vec()
+    } else {
+        // DoS guard: O(N*64) FIR on 32M samples (128 MiB stereo) would be ~2e9 ops.
+        // Cap to ~40s of audio at source rate before filtering.
+        let capped_input = if input.len() > from_rate as usize * 40 {
+            &input[..from_rate as usize * 40]
+        } else {
+            input
+        };
+        lowpass_fir(
+            capped_input,
+            f64::from(from_rate),
+            0.45 * f64::from(to_rate),
+        )
+    };
     let ratio = f64::from(from_rate) / f64::from(to_rate);
-    let out_len = ((input.len() as f64 / ratio).round() as usize).max(1);
+    // Use ceil to avoid off-by-one truncation for small utterances.
+    let out_len = ((input.len() as f64 / ratio).ceil() as usize).max(1);
     let mut out = Vec::with_capacity(out_len);
     for i in 0..out_len {
         let pos = i as f64 * ratio;

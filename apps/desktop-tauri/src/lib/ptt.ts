@@ -143,6 +143,7 @@ export function pickSupportedMimeType(): string | undefined {
     "audio/webm",
     "audio/mp4",
     "audio/ogg;codecs=opus",
+    "audio/wav",
   ];
   for (const mime of candidates) {
     try {
@@ -205,7 +206,8 @@ export function encodeWavPCM16(
   view.setUint32(40, dataBytes, true);
   for (let i = 0; i < samples.length; i += 1) {
     const clamped = Math.max(-1, Math.min(1, samples[i] ?? 0));
-    view.setInt16(44 + i * 2, Math.round(clamped * 32767), true);
+    const s = Math.round(clamped * 32768);
+    view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, s)), true);
   }
   return new Blob([buffer], { type: "audio/wav" });
 }
@@ -224,9 +226,19 @@ export async function blobToWav16kMono(blob: Blob): Promise<string> {
   if (!AudioContextClass) {
     throw new Error("web audio is unavailable for local transcription");
   }
-  const context = new AudioContextClass();
+  const context = new AudioContextClass({ sampleRate: LOCAL_SAMPLE_RATE });
+  if (context.state === "suspended") {
+    try {
+      await context.resume();
+    } catch (e) {
+      console.warn("algorith-voice: AudioContext resume failed", e);
+    }
+  }
   try {
     const decoded = await context.decodeAudioData(inputBuffer.slice(0));
+    if (!decoded.length || !decoded.numberOfChannels) {
+      throw new Error("decoded audio is empty");
+    }
     const channelData = decoded.getChannelData(0);
     if (decoded.numberOfChannels > 1) {
       // Downmix to mono by averaging all channels.
@@ -257,9 +269,20 @@ async function wavBase64FromMono(
   samples: Float32Array<ArrayBufferLike>,
   sampleRate: number,
 ): Promise<string> {
-  // Copy into an ArrayBuffer-backed array: decoded channel data may carry
-  // a SharedArrayBuffer typing that copyToChannel/encode reject.
-  let mono: Float32Array<ArrayBuffer> = Float32Array.from(samples);
+  // Avoid copy when already ArrayBuffer-backed; SharedArrayBuffer needs clone.
+  let mono: Float32Array<ArrayBuffer>;
+  if (samples.buffer instanceof SharedArrayBuffer) {
+    mono = Float32Array.from(samples) as Float32Array<ArrayBuffer>;
+  } else if (samples.buffer instanceof ArrayBuffer) {
+    // Use view directly if length matches, otherwise slice copy.
+    mono = new Float32Array(samples.buffer, samples.byteOffset, samples.length) as Float32Array<ArrayBuffer>;
+    // Ensure we own a clean ArrayBuffer (not a slice of larger buffer)
+    if (mono.buffer.byteLength !== mono.length * 4) {
+      mono = Float32Array.from(samples) as Float32Array<ArrayBuffer>;
+    }
+  } else {
+    mono = Float32Array.from(samples) as Float32Array<ArrayBuffer>;
+  }
   if (sampleRate !== LOCAL_SAMPLE_RATE) {
     const OfflineClass =
       window.OfflineAudioContext ??
@@ -282,7 +305,7 @@ async function wavBase64FromMono(
     try {
       const length = Math.max(
         1,
-        Math.round((samples.length * LOCAL_SAMPLE_RATE) / sampleRate),
+        Math.ceil((samples.length * LOCAL_SAMPLE_RATE) / sampleRate),
       );
       const offline = new OfflineClass(1, length, LOCAL_SAMPLE_RATE);
       const source = offline.createBufferSource();

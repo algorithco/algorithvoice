@@ -201,14 +201,21 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         } else {
           raw = JSON.stringify(e);
         }
-        // Surface actionable guidance for known classes
         let message = raw;
+        const lower = raw.toLowerCase();
         if (
+          raw.includes("model-not-loaded") ||
           raw.includes("model_not_loaded") ||
-          raw.includes("no local model")
+          raw.includes("no local model") ||
+          lower.includes("model_not_loaded") ||
+          lower.includes("model-not-loaded")
         ) {
           message = "No local model — download one in Settings → Local.";
-        } else if (raw.includes("Groq API key") || raw.includes("groq")) {
+        } else if (
+          lower.includes("groq api key") ||
+          lower.includes("groq") ||
+          raw.includes("Groq API key")
+        ) {
           message =
             "Cloud mode needs a Groq key — paste one in Dictate, or switch to Local (offline) in Settings.";
         } else if (
@@ -274,32 +281,34 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     chunksRef.current = [];
     let stream: MediaStream;
     try {
-      // Prefer 16 kHz mono for local STT (lower decode + exact match).
-      // Use `ideal` constraints so exotic mics don't throw OverconstrainedError;
-      // fallback to default constraints if the ideal set is rejected.
+      const useLocalMic = prefsRef.current.mode === "local";
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            echoCancellation: { ideal: false },
+            noiseSuppression: { ideal: false },
+            autoGainControl: { ideal: false },
             channelCount: { ideal: 1 },
             sampleRate: { ideal: 16000 },
             sampleSize: { ideal: 16 },
           } as MediaTrackConstraints,
         });
+        // For cloud, we could keep processing enabled, but local fidelity
+        // matters most — keep processing off for local, on for cloud is not
+        // needed now (both off preserves original speech for either engine).
+        void useLocalMic;
       } catch (e) {
         const name = e instanceof DOMException ? e.name : "";
-        if (name === "OverconstrainedError" || name === "NotFoundError") {
+        if (name === "OverconstrainedError" || name === "NotSupportedError") {
           console.warn(
             "algorith-voice: ideal audio constraints failed, retrying defaults",
             e,
           );
           stream = await navigator.mediaDevices.getUserMedia({
             audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
+              echoCancellation: { ideal: false },
+              noiseSuppression: { ideal: false },
+              autoGainControl: { ideal: false },
             },
           });
         } else {
@@ -361,6 +370,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     };
     recorder.onerror = () => {
       recorderRef.current = null;
+      chunksRef.current = [];
       stopTracks();
       showNotice("Microphone error — hold again to retry.");
       setPill("idle");
