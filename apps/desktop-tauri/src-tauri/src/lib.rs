@@ -206,6 +206,12 @@ fn write_fallback_readme(dir: &std::path::Path) {
 
 fn read_fallback_payload(app: &tauri::AppHandle) -> Option<serde_json::Value> {
     let path = fallback_session_path(app)?;
+    if let Ok(meta) = std::fs::symlink_metadata(&path) {
+        if meta.is_symlink() {
+            eprintln!("algorith-voice: fallback path is a symlink — refusing to read");
+            return None;
+        }
+    }
     let raw = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&raw).ok()
 }
@@ -219,12 +225,32 @@ fn write_fallback_payload(app: &tauri::AppHandle, payload: &serde_json::Value) -
     std::fs::create_dir_all(&dir).map_err(|e| AppError::session(e.to_string()))?;
     write_fallback_readme(&dir);
     let path = dir.join("session.fallback.json");
-    std::fs::write(&path, payload.to_string())
-        .map_err(|e| AppError::session(format!("fallback session write failed: {e}")))?;
+    if let Ok(meta) = std::fs::symlink_metadata(&path) {
+        if meta.is_symlink() {
+            return Err(AppError::session(
+                "fallback path is a symlink — refusing to write",
+            ));
+        }
+    }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt as _;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| AppError::session(format!("fallback session write failed: {e}")))?;
+        file.write_all(payload.to_string().as_bytes())
+            .map_err(|e| AppError::session(format!("fallback session write failed: {e}")))?;
+        let _ = file.sync_all();
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&path, payload.to_string())
+            .map_err(|e| AppError::session(format!("fallback session write failed: {e}")))?;
     }
     logging::log_event(
         app,
@@ -336,7 +362,8 @@ fn store_session(
             let unavailable = msg.contains("Secret Service")
                 || msg.contains("PlatformFailure")
                 || msg.contains("NoStorageAccess")
-                || cfg!(target_os = "linux");
+                || msg.contains("No storage access")
+                || msg.contains("service not available");
             if unavailable {
                 eprintln!("algorith-voice: keyring unavailable, using fallback: {e}");
                 write_fallback_payload(&app, &payload)?;
@@ -364,16 +391,22 @@ fn session_status(app: tauri::AppHandle) -> SessionStatus {
 
 #[tauri::command]
 fn clear_session(app: tauri::AppHandle) -> AppResult<()> {
+    let entry_res = keyring_entry();
     delete_fallback_payload(&app);
-    let entry = keyring_entry()?;
-    // Missing entry == already logged out; don't error.
-    match entry.delete_credential() {
-        Ok(()) => {}
-        Err(keyring::Error::NoEntry) => {}
-        Err(e) if is_keyring_unavailable(&e) => {
-            eprintln!("algorith-voice: keyring delete failed (backend unavailable, fallback already cleared): {}", keyring_guidance(&e));
+    match entry_res {
+        Ok(entry) => match entry.delete_credential() {
+            Ok(()) => {}
+            Err(keyring::Error::NoEntry) => {}
+            Err(e) if is_keyring_unavailable(&e) => {
+                eprintln!("algorith-voice: keyring delete failed (backend unavailable, fallback already cleared): {}", keyring_guidance(&e));
+            }
+            Err(e) => return Err(AppError::session(keyring_guidance(&e))),
+        },
+        Err(e) => {
+            // keyring::Entry::new can fail on Linux without DBUS — fallback
+            // already cleared, treat as logged out rather than error.
+            eprintln!("algorith-voice: keyring entry unavailable on clear: {}", e);
         }
-        Err(e) => return Err(AppError::session(keyring_guidance(&e))),
     }
     logging::log_event(&app, "auth", "clear-session", "session cleared");
     let _ = app.emit("session-changed", serde_json::json!({ "loggedIn": false }));
@@ -614,23 +647,13 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 });
             }
             "quit" => {
-                // 1) Remember the intent so CloseRequested below lets the
-                //    windows die instead of hiding them back into the tray.
                 if let Some(state) = app.try_state::<AppState>() {
                     state.exiting.store(true, Ordering::SeqCst);
                 }
-                // 2) Drop the tray icon right away so no ghost lingers in
-                //    the notification area while the runtime shuts down.
                 if let Some(tray) = app.tray_by_id("main") {
                     let _ = tray.set_visible(false);
                 }
-                // 3) Graceful runtime shutdown (ExitRequested -> Exit).
                 app.exit(0);
-                // 4) Guarantee: the process must be gone from Task Manager.
-                //    Safe to be unconditional here — the app keeps no unsaved
-                //    state, the tray icon is already hidden, and the exit
-                //    code stays 0.
-                std::process::exit(0);
             }
             _ => {}
         })
@@ -667,18 +690,15 @@ fn focus_main_for_external_event(handle: &tauri::AppHandle) {
 
 fn is_deep_link(raw: &str) -> bool {
     let trimmed = raw.trim();
-    // Strict allowlist: only `algorithvoice://auth-callback?...` (with or
-    // without trailing slash, optional query/fragment). Reject bare scheme,
-    // other hosts, and file paths. Case-insensitive.
     let Ok(url) = url::Url::parse(trimmed) else {
         return false;
     };
     if url.scheme().to_ascii_lowercase() != DEEP_LINK_SCHEME {
         return false;
     }
-    // Require host `auth-callback` (covers `algorithvoice://auth-callback`)
-    // Tauri on Windows may deliver `algorithvoice://auth-callback?code=...`
-    // which url crate parses with host = Some("auth-callback").
+    if url.port().is_some() {
+        return false;
+    }
     matches!(
         url.host_str(),
         Some(host) if host.eq_ignore_ascii_case("auth-callback")
@@ -711,11 +731,6 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             focus_main_for_external_event(app);
             handle_argv_deep_links(app, &argv);
-            // Emit only sanitized deep-links, never raw argv (prevents argv injection).
-            let filtered: Vec<String> = argv.into_iter().filter(|a| is_deep_link(a)).collect();
-            if !filtered.is_empty() {
-                let _ = app.emit("auth-callback", filtered);
-            }
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
@@ -767,6 +782,12 @@ pub fn run() {
                 }
                 Err(e) => {
                     eprintln!("algorith-voice: sqlite init failed: {e}");
+                    logging::log_event(
+                        app.handle(),
+                        "db",
+                        "init-failed-fatal",
+                        &format!("sqlite init failed: {e} — history and usage will be unavailable"),
+                    );
                 }
             }
             if let Err(e) = build_tray(app.handle()) {

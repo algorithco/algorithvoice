@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings-capability",
-  "description": "Settings window: prefs + account + update check. No tray, no global-shortcut registration, no model downloads.",
+  "description": "Settings window: prefs + account + hotkey + model manager + update check. Shares store/autostart with main.",
   "windows": ["settings"],
   "permissions": [
     "core:window:default",
@@ -17,12 +17,17 @@
     "store:allow-save",
     "dialog:allow-message",
     "notification:allow-notify",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-is-registered",
+    "global-shortcut:allow-unregister",
     {
       "identifier": "opener:allow-open-url",
       "allow": [
         { "url": "https://api.trqsh.uz/*" },
         { "url": "https://github.com/*" },
-        { "url": "https://*.githubusercontent.com/*" }
+        { "url": "https://objects.githubusercontent.com/*" },
+        { "url": "https://huggingface.co/*" },
+        { "url": "https://*.huggingface.co/*" }
       ]
     }
   ]

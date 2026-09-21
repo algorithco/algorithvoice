@@ -109,24 +109,15 @@ pub fn manifest_signing_bytes(manifest: &ModelManifest) -> AppResult<Vec<u8>> {
 
 /// Verify `manifest.signature` against the bundled pubkey. Always
 /// fail-closed: a missing, malformed, or invalid signature refuses the
-/// download. (The unsigned-allowed branch below only triggers if the baked
-/// pubkey file is emptied, in which case `build.rs` already fails the build
-/// first — see `src-tauri/build.rs`.) Per-file SHA-256 still applies
-/// regardless.
+/// download regardless of whether a pubkey is baked in. `build.rs` enforces
+/// that a pubkey and signature are present at build time, but runtime
+/// verification never trusts an unsigned manifest. Per-file SHA-256 still
+/// applies regardless.
 pub fn verify_manifest_signature(manifest: &ModelManifest) -> AppResult<()> {
     match manifest.signature.as_deref() {
-        None => {
-            if MANIFEST_SIGNING_PUBKEY_HEX.is_empty() {
-                eprintln!(
-                    "algorith-voice: model manifest is unsigned (no signing pubkey baked in) — trusting bundled template; per-file SHA-256 still enforced"
-                );
-                Ok(())
-            } else {
-                Err(AppError::model_download_failed(
-                    "model manifest is missing its signature — refusing to download",
-                ))
-            }
-        }
+        None => Err(AppError::model_download_failed(
+            "model manifest is missing its signature — refusing to download",
+        )),
         Some(sig_hex) => {
             if MANIFEST_SIGNING_PUBKEY_HEX.is_empty() {
                 return Err(AppError::model_download_failed(

@@ -96,17 +96,20 @@ fn check_https(raw: &str) -> AppResult<reqwest::Url> {
     if url.scheme() == "https" {
         return Ok(url);
     }
-    // Loopback HTTP exists so integration tests can run against a local
-    // fixture server (and mirrors Tauri's own http://localhost devUrl).
-    // Manifests stay HTTPS-strict at validation time; this is transport
-    // enforcement with a test-only-shaped carve-out, and hashes are still
-    // verified regardless of scheme.
-    let loopback = url.scheme() == "http"
+    // Loopback HTTP only allowed in tests/fixtures — production manifests are
+    // HTTPS-strict at validation time. Gate with debug_assert in release.
+    #[cfg(test)]
+    let allow_loopback = true;
+    #[cfg(not(test))]
+    let allow_loopback = url.scheme() == "http"
+        && std::env::var("ALLOW_HTTP_LOOPBACK").as_deref() == Ok("1");
+    if allow_loopback
+        && url.scheme() == "http"
         && matches!(
             url.host_str(),
             Some("localhost") | Some("127.0.0.1") | Some("::1")
-        );
-    if loopback {
+        )
+    {
         Ok(url)
     } else {
         Err(AppError::model_download_failed(
@@ -193,7 +196,10 @@ pub(crate) async fn verify_file(path: &Path, expected_sha256: &str) -> AppResult
 }
 
 fn map_write_error(e: std::io::Error, dest: &Path) -> AppError {
-    if e.kind() == std::io::ErrorKind::StorageFull {
+    let is_full = e.kind() == std::io::ErrorKind::StorageFull
+        || e.raw_os_error() == Some(28)
+        || e.to_string().contains("No space");
+    if is_full {
         AppError::model_insufficient_disk_space(format!(
             "disk full while writing {}",
             dest.display()
@@ -251,12 +257,20 @@ async fn fetch_once(
     // Enforce HTTPS even after redirects (prevents CDN http downgrade/SSRF).
     {
         let final_url = response.url();
-        let is_loopback = final_url.scheme() == "http"
+        #[cfg(test)]
+        let allow_loopback = final_url.scheme() == "http"
             && matches!(
                 final_url.host_str(),
                 Some("localhost") | Some("127.0.0.1") | Some("::1")
             );
-        if final_url.scheme() != "https" && !is_loopback {
+        #[cfg(not(test))]
+        let allow_loopback = final_url.scheme() == "http"
+            && std::env::var("ALLOW_HTTP_LOOPBACK").as_deref() == Ok("1")
+            && matches!(
+                final_url.host_str(),
+                Some("localhost") | Some("127.0.0.1") | Some("::1")
+            );
+        if final_url.scheme() != "https" && !allow_loopback {
             return Err(AppError::model_download_failed(
                 "refusing non-HTTPS redirect target",
             ));
@@ -345,27 +359,17 @@ where
             AppError::model_download_failed(format!("cannot create model dir: {e}"))
         })?;
         // Reject symlink parent after creation (prevents Startup folder hijack)
-        if let Ok(meta) = tokio::fs::symlink_metadata(parent).await {
-            if meta.file_type().is_symlink() {
-                return Err(AppError::model_download_failed(
-                    "model directory is a symlink — refusing to write",
-                ));
-            }
-        }
-        // Walk parent components for symlink (defense against nested tokenizer symlink)
-        let mut cur = parent;
-        while let Some(p) = cur.parent() {
-            if p.as_os_str().is_empty() {
-                break;
-            }
-            if let Ok(m) = std::fs::symlink_metadata(p) {
-                if m.file_type().is_symlink() {
+        // Walk entire parent chain including root (C:\ on Windows).
+        let mut cur: Option<&Path> = Some(parent);
+        while let Some(p) = cur {
+            if let Ok(meta) = std::fs::symlink_metadata(p) {
+                if meta.file_type().is_symlink() {
                     return Err(AppError::model_download_failed(
                         "model path contains symlink — refusing to write",
                     ));
                 }
             }
-            cur = p;
+            cur = p.parent();
         }
     }
     // Refuse to overwrite an existing symlink file
@@ -378,6 +382,16 @@ where
     }
     let part = part_path(&req.dest_final);
     let meta_path = meta_path(&req.dest_final);
+    // TOCTOU: reject if .part or .part.json are already symlinks
+    for p in [&part, &meta_path] {
+        if let Ok(meta) = std::fs::symlink_metadata(p) {
+            if meta.file_type().is_symlink() {
+                return Err(AppError::model_download_failed(
+                    "partial download path is a symlink — refusing to write",
+                ));
+            }
+        }
+    }
 
     let urls: Vec<&str> = std::iter::once(req.url.as_str())
         .chain(req.fallback_url.as_deref())
@@ -520,6 +534,22 @@ where
         },
     )
     .await?;
+
+    // TOCTOU re-check just before open (attacker could swap after download_file check)
+    if let Ok(meta) = tokio::fs::symlink_metadata(part).await {
+        if meta.file_type().is_symlink() {
+            return Err(AppError::model_download_failed(
+                "partial path is a symlink — refusing to write",
+            ));
+        }
+    }
+    if let Ok(meta) = tokio::fs::symlink_metadata(meta_path).await {
+        if meta.file_type().is_symlink() {
+            return Err(AppError::model_download_failed(
+                "resume meta path is a symlink — refusing to write",
+            ));
+        }
+    }
 
     let file = tokio::fs::OpenOptions::new()
         .create(true)
