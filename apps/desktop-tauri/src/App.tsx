@@ -99,7 +99,9 @@ export default function App() {
       .then((fn) => {
         unlisten = fn;
       })
-      .catch((e) => console.warn("algorith-voice: session-changed listen failed", e));
+      .catch((e) =>
+        console.warn("algorith-voice: session-changed listen failed", e),
+      );
     return () => {
       if (unlisten) unlisten();
     };
@@ -117,10 +119,9 @@ export default function App() {
         // fails with "missing Groq API key" despite local mode selected.
         // Also re-read per-press in FloatingPill as safety net.
         if (isTauri()) {
-          void emit("settings-refresh")
-            .catch((e: unknown) => {
-              console.warn("algorith-voice: settings-refresh emit failed", e);
-            });
+          void emit("settings-refresh").catch((e: unknown) => {
+            console.warn("algorith-voice: settings-refresh emit failed", e);
+          });
         }
       })
       .catch((e: unknown) => {
