@@ -15,7 +15,6 @@ export function isAllowedOpenUrl(url: string): boolean {
     }
     if (u.protocol !== "https:") return false;
     const allowed = [
-      "api.algorithvoice.com",
       "api.trqsh.uz",
       "app.trqsh.uz",
       "github.com",

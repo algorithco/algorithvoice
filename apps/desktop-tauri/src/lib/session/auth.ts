@@ -7,9 +7,7 @@ import { safeOpenUrl } from "./url-safety.js";
 
 const API: string =
   (import.meta.env.VITE_API_URL as string | undefined) ??
-  (import.meta.env.DEV
-    ? "http://localhost:3001"
-    : "https://api.algorithvoice.com");
+  (import.meta.env.DEV ? "http://localhost:3001" : "https://api.trqsh.uz");
 
 async function tauri<T>(
   cmd: string,

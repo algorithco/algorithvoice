@@ -4,7 +4,10 @@ import { isAllowedOpenUrl } from "./url-safety.js";
 
 describe("isAllowedOpenUrl", () => {
   it("allows first-party https hosts and subdomains", () => {
-    expect(isAllowedOpenUrl("https://api.algorithvoice.com/x")).toBe(true);
+    expect(
+      isAllowedOpenUrl("https://api.trqsh.uz/auth/oauth/github/start"),
+    ).toBe(true);
+    expect(isAllowedOpenUrl("https://app.trqsh.uz/login")).toBe(true);
     expect(isAllowedOpenUrl("https://github.com/a/b")).toBe(true);
     // Subdomains of allowlisted hosts are allowed (e.g. gist pages).
     expect(isAllowedOpenUrl("https://foo.github.com/bar")).toBe(true);
@@ -13,7 +16,7 @@ describe("isAllowedOpenUrl", () => {
   });
 
   it("blocks http, non-allowlisted hosts, and malformed urls", () => {
-    expect(isAllowedOpenUrl("http://api.algorithvoice.com/x")).toBe(false);
+    expect(isAllowedOpenUrl("http://api.trqsh.uz/x")).toBe(false);
     expect(isAllowedOpenUrl("https://evil.com/https://github.com")).toBe(false);
     expect(isAllowedOpenUrl("https://github.com.evil.com/")).toBe(false);
     expect(isAllowedOpenUrl("not a url")).toBe(false);

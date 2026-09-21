@@ -31,7 +31,7 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://api.algorithvoice.com/*" },
+        { "url": "https://api.trqsh.uz/*" },
         { "url": "https://github.com/*" },
         { "url": "https://*.githubusercontent.com/*" },
         { "url": "https://huggingface.co/*" },
