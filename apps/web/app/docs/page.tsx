@@ -57,12 +57,12 @@ const OS_DETAILS = [
     os: "Windows 10 1809+",
     icon: "▣",
     steps: [
-      "Run the .msi installer — WebView2 is installed automatically if missing.",
+      "Run the .exe installer — WebView2 is installed automatically if missing. Silent: .\\Algorith.Voice_0.5.10_x64-setup.exe /S",
       "Settings → Privacy → Microphone → allow desktop apps if dictation stays silent.",
       "Elevated apps (Run as admin) require Algorith Voice also elevated to paste.",
       "Hold Ctrl+Space and speak.",
     ],
-    code: "msiexec /i Algorith.Voice_0.4.0_x64_en-US.msi /quiet",
+    code: "curl -LO https://github.com/algorithco/algorithvoice-app/releases/download/v0.5.10/Algorith.Voice_0.5.10_x64-setup.exe\n# Double-click to install\n# Or silent:\n.\\Algorith.Voice_0.5.10_x64-setup.exe /S\n# Or winget (if published):\nwinget install Algorith.Voice",
   },
   {
     id: "linux",
@@ -74,7 +74,7 @@ const OS_DETAILS = [
       "Wayland: sudo apt install ydotool && systemctl --user enable ydotool && enable clipboard mode in Settings.",
       "Hold Ctrl+Space and speak.",
     ],
-    code: "chmod +x Algorith.Voice_0.4.0_amd64.AppImage && ./Algorith.Voice_0.4.0_amd64.AppImage",
+    code: "curl -LO https://github.com/algorithco/algorithvoice-app/releases/download/v0.5.10/Algorith.Voice_0.5.10_amd64.AppImage\nchmod +x Algorith.Voice_0.5.10_amd64.AppImage && ./Algorith.Voice_0.5.10_amd64.AppImage\n# Or deb:\nsudo dpkg -i Algorith.Voice_0.5.10_amd64.deb  # or sudo apt install ./Algorith.Voice_0.5.10_amd64.deb",
   },
 ];
 
@@ -123,7 +123,7 @@ export default function DocsPage() {
         {/* Main content */}
         <main className="min-w-0 flex-1 py-10 md:py-12">
           <Reveal>
-            <p className="t-cap text-faint">Docs • v0.4.0 • 6 models</p>
+            <p className="t-cap text-faint">Docs • v0.5.10 • 6 models</p>
             <h1 className="t-h1 mt-3">Setup guide.</h1>
             <p className="t-body mt-4 max-w-[68ch] text-sub">
               One panel per operating system. Four steps each. Local mode
@@ -418,7 +418,7 @@ export default function DocsPage() {
               href="/download"
               className="inline-flex min-h-[44px] items-center justify-center rounded-full bg-black px-5 text-sm font-medium text-white dark:bg-white dark:text-black"
             >
-              Download v0.4.0
+              Download v0.5.10
             </a>
             <a
               href="/pricing"
