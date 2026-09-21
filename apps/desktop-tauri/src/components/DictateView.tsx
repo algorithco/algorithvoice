@@ -135,7 +135,7 @@ export function DictateView({
   }, [isLocal]);
 
   return (
-    <div className="mx-auto w-full max-w-[900px] p-8 lg:p-10 2xl:max-w-[1060px]">
+    <div className="mx-auto w-full max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
       <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-white">
         Dictate
       </h1>
@@ -145,7 +145,7 @@ export function DictateView({
         to talk. Release to inject text into the focused app.
       </p>
 
-      <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-8 dark:border-white/10 dark:bg-black">
+      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 lg:p-8 dark:border-white/10 dark:bg-black">
         <div className="flex flex-col items-center text-center">
           <div
             className={`grid size-20 place-items-center rounded-full border transition-colors ${

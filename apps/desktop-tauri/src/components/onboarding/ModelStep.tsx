@@ -107,7 +107,7 @@ export function ModelStep({
       <div
         role="radiogroup"
         aria-label="Select a model"
-        className="max-h-[42vh] w-full space-y-2 overflow-auto rounded-lg border border-white/10 bg-white/[0.04] p-2 text-left"
+        className="max-h-[32vh] sm:max-h-\[42vh\] w-full space-y-2 overflow-auto rounded-lg border border-white/10 bg-white/[0.04] p-2 text-left"
       >
         {models.map((m) => {
           const total = m.files.reduce((a, f) => a + f.sizeBytes, 0);

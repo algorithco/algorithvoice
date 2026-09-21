@@ -159,7 +159,7 @@ export function SettingsView({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[900px] p-8 lg:p-10 2xl:max-w-[1060px]">
+    <div className="mx-auto w-full max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
       <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-white">
         Settings
       </h1>
@@ -167,7 +167,7 @@ export function SettingsView({
         Manage your preferences. Changes save automatically.
       </p>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Dictation
         </h2>
@@ -264,7 +264,7 @@ export function SettingsView({
 
       <LocalUsageSection />
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Appearance
         </h2>
@@ -284,7 +284,7 @@ export function SettingsView({
         </p>
       </section>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           System
         </h2>
@@ -302,7 +302,7 @@ export function SettingsView({
         </p>
       </section>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Updates
         </h2>
@@ -348,7 +348,7 @@ export function SettingsView({
         </div>
       </section>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Diagnostics
         </h2>

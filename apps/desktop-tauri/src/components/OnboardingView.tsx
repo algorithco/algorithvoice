@@ -352,15 +352,15 @@ export function OnboardingView({
         />
       </div>
 
-      <div className="relative z-10 flex min-h-screen w-full items-center justify-center p-6 md:p-8">
+      <div className="relative z-10 flex min-h-[100dvh] w-full items-center justify-center p-4 sm:p-6 md:p-8 overflow-y-auto">
         <div className="flex w-full max-w-[680px] flex-col items-center text-center">
           <Logo className="h-8 w-auto text-white md:h-9" />
           <div className="h-8" />
-          <h1 className="text-[32px] font-semibold leading-[1.1] tracking-tight text-white md:text-[44px]">
+          <h1 className="text-2xl sm:text-\[32px\] font-semibold leading-[1.1] tracking-tight text-white md:text-[44px]">
             Welcome to Algorith Voice
           </h1>
           <div className="h-3" />
-          <p className="text-sm tracking-wide text-white/40">
+          <p className="text-xs sm:text-sm tracking-wide text-white/40">
             Step {step + 1} of {STEPS.length} · {STEPS[step]}
           </p>
           <div className="h-12" />

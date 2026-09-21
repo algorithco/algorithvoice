@@ -477,7 +477,7 @@ export function ModelManager({
                 key={m.id}
                 className={`rounded-xl border p-5 transition-colors ${isActive ? "border-black bg-white dark:border-white dark:bg-black" : "border-gray-200 bg-white dark:border-white/10 dark:bg-black"}`}
               >
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-semibold text-black dark:text-white">

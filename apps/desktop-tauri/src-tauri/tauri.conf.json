@@ -14,13 +14,13 @@
       {
         "label": "main",
         "title": "Algorith Voice",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 960,
-        "minHeight": 600,
+        "width": 1100,
+        "height": 720,
+        "minWidth": 360,
+        "minHeight": 520,
         "center": true,
         "resizable": true,
-        "maximized": true,
+        "maximized": false,
         "backgroundColor": "#000000",
         "visible": true
       }

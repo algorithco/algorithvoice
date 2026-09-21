@@ -12,6 +12,7 @@ import {
 import { AppSidebar } from "./components/AppSidebar.js";
 import { AuthView } from "./components/AuthView.js";
 import { ArrowLeft } from "./components/animate-ui/icons/arrow-left.js";
+import { PanelLeft } from "./components/animate-ui/icons/panel-left.js";
 import { DashboardView } from "./components/DashboardView.js";
 import { DictateView } from "./components/DictateView.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -57,8 +58,26 @@ export default function App() {
     isFloatingPill: isPill,
   });
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const { showAuth, loggedIn } = useAuthGate(session);
   const showOnboarding = useOnboardingGate({ loggedIn, onboarded });
+
+  // Auto-collapse on narrow viewports and keep content usable on small screens
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia("(max-width: 767px)");
+    const sync = () => {
+      if (mql.matches) setCollapsed(true);
+    };
+    sync();
+    // Modern browsers
+    if (mql.addEventListener) mql.addEventListener("change", sync);
+    else mql.addListener(sync);
+    return () => {
+      if (mql.removeEventListener) mql.removeEventListener("change", sync);
+      else mql.removeListener(sync);
+    };
+  }, []);
 
   // Auto-show floating pill once main app is ready (not in pill/settings windows)
   useEffect(() => {
@@ -239,16 +258,54 @@ export default function App() {
         <ErrorBoundary>
           <main className={shell}>
             {updateBanner}
-            <div className="flex min-h-screen">
-              <AppSidebar
-                active={view}
-                onSelect={(id) => setView(id as View)}
-                collapsed={collapsed}
-                onCollapsedChange={setCollapsed}
-                email={null}
-                onLogout={handleLogout}
-              />
+            <div className="flex min-h-screen overflow-hidden">
+              <div className="hidden md:flex">
+                <AppSidebar
+                  active={view}
+                  onSelect={(id) => setView(id as View)}
+                  collapsed={collapsed}
+                  onCollapsedChange={setCollapsed}
+                  email={null}
+                  onLogout={handleLogout}
+                />
+              </div>
+              {mobileOpen ? (
+                <button
+                  type="button"
+                  aria-label="Close menu"
+                  className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+                  onClick={() => setMobileOpen(false)}
+                />
+              ) : null}
+              <div
+                className={`fixed inset-y-0 left-0 z-50 flex max-w-[85vw] transition-transform duration-200 md:hidden ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+              >
+                <AppSidebar
+                  active={view}
+                  onSelect={(id) => {
+                    setView(id as View);
+                    setMobileOpen(false);
+                  }}
+                  collapsed={false}
+                  onCollapsedChange={() => {}}
+                  email={null}
+                  onLogout={handleLogout}
+                />
+              </div>
               <div className="min-w-0 flex-1 overflow-auto">
+                <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-gray-200 bg-white px-3 dark:border-white/10 dark:bg-black md:hidden">
+                  <button
+                    type="button"
+                    aria-label={mobileOpen ? "Close menu" : "Open menu"}
+                    onClick={() => setMobileOpen((v) => !v)}
+                    className="grid size-8 place-items-center rounded-md text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/10"
+                  >
+                    <PanelLeft size={18} />
+                  </button>
+                  <span className="text-sm font-semibold tracking-tight text-black dark:text-white">
+                    Settings
+                  </span>
+                </div>
                 <SettingsView prefs={prefs} onPrefs={updatePrefs} />
               </div>
             </div>
@@ -305,16 +362,66 @@ export default function App() {
     <ErrorBoundary>
       <main className={shell}>
         {updateBanner}
-        <div className="flex min-h-screen">
-          <AppSidebar
-            active={view}
-            onSelect={(id) => setView(id as View)}
-            collapsed={collapsed}
-            onCollapsedChange={setCollapsed}
-            email={session?.email ?? null}
-            onLogout={handleLogout}
-          />
+        <div className="flex min-h-screen overflow-hidden">
+          {/* Desktop sidebar */}
+          <div className="hidden md:flex">
+            <AppSidebar
+              active={view}
+              onSelect={(id) => setView(id as View)}
+              collapsed={collapsed}
+              onCollapsedChange={setCollapsed}
+              email={session?.email ?? null}
+              onLogout={handleLogout}
+            />
+          </div>
+          {/* Mobile drawer */}
+          {mobileOpen ? (
+            <button
+              type="button"
+              aria-label="Close menu"
+              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+              onClick={() => setMobileOpen(false)}
+            />
+          ) : null}
+          <div
+            className={`fixed inset-y-0 left-0 z-50 flex max-w-[85vw] transition-transform duration-200 md:hidden ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+          >
+            <AppSidebar
+              active={view}
+              onSelect={(id) => {
+                setView(id as View);
+                setMobileOpen(false);
+              }}
+              collapsed={false}
+              onCollapsedChange={() => {}}
+              email={session?.email ?? null}
+              onLogout={handleLogout}
+            />
+          </div>
           <div className="min-w-0 flex-1 overflow-auto">
+            {/* Mobile top bar */}
+            <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-gray-200 bg-white px-3 dark:border-white/10 dark:bg-black md:hidden">
+              <button
+                type="button"
+                aria-label={mobileOpen ? "Close menu" : "Open menu"}
+                onClick={() => setMobileOpen((v) => !v)}
+                className="grid size-8 place-items-center rounded-md text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/10"
+              >
+                <PanelLeft size={18} />
+              </button>
+              <span className="text-sm font-semibold tracking-tight text-black dark:text-white">
+                Algorith Voice
+              </span>
+              <span className="ml-auto text-xs text-gray-500">
+                {view === "dashboard"
+                  ? "Dashboard"
+                  : view === "dictate"
+                    ? "Dictate"
+                    : view === "history"
+                      ? "History"
+                      : "Settings"}
+              </span>
+            </div>
             {view === "dashboard" ? (
               <DashboardView
                 hotkey={prefs.hotkey}

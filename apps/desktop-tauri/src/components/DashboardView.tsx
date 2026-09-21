@@ -98,11 +98,11 @@ export function DashboardView({
       : 0;
 
   return (
-    <div className="mx-auto w-full max-w-[1100px] p-8 lg:p-10 2xl:max-w-[1280px]">
+    <div className="mx-auto w-full max-w-[1100px] p-4 sm:p-6 lg:p-8 xl:p-10 2xl:max-w-[1280px]">
       {/* Header — status lives here so the hero holds the only CTA */}
-      <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-black md:text-4xl dark:text-white 2xl:text-[44px]">
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-black sm:text-3xl md:text-4xl dark:text-white 2xl:text-[44px]">
             {greeting()}
             {email ? `, ${email.split("@")[0]}` : ""}
           </h1>
@@ -110,18 +110,24 @@ export function DashboardView({
             Your voice workspace
           </p>
         </div>
-        <div className="inline-flex h-10 shrink-0 items-center gap-2.5 rounded-full border border-gray-200 bg-white px-5 text-sm text-gray-500 dark:border-white/10 dark:bg-black">
+        <div className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-2 text-xs sm:h-10 sm:gap-2.5 sm:px-5 sm:py-0 sm:text-sm text-gray-500 dark:border-white/10 dark:bg-black">
           <span
             role="img"
             aria-label={needsSetup ? "Local mode — no model" : "Ready"}
-            className={`size-2 rounded-full ${needsSetup ? "bg-amber-500" : "bg-black dark:bg-white"}`}
+            className={`size-2 shrink-0 rounded-full ${needsSetup ? "bg-amber-500" : "bg-black dark:bg-white"}`}
           />
           <span className="font-medium text-black dark:text-white">
             {needsSetup ? "Setup needed" : "Ready"}
           </span>
-          <span className="text-gray-300 dark:text-white/20">•</span>
-          <span className="font-mono text-[13px]">{hotkey}</span>
-          <span className="text-gray-300 dark:text-white/20">•</span>
+          <span className="hidden text-gray-300 dark:text-white/20 sm:inline">
+            •
+          </span>
+          <span className="max-w-[90px] truncate font-mono text-[11px] sm:max-w-none sm:text-[13px]">
+            {hotkey}
+          </span>
+          <span className="hidden text-gray-300 dark:text-white/20 sm:inline">
+            •
+          </span>
           <span>
             {mode === "local" ? "Local" : mode === "byok" ? "BYOK" : "Cloud"}
           </span>
@@ -129,7 +135,7 @@ export function DashboardView({
       </div>
 
       {/* Main dictation card */}
-      <div className="relative mt-8 overflow-hidden rounded-2xl border border-gray-200 bg-white p-8 dark:border-white/10 dark:bg-black md:p-10">
+      <div className="relative mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black sm:mt-8 sm:p-8 md:p-10">
         <div className="pointer-events-none absolute -top-24 left-1/2 h-64 w-[720px] -translate-x-1/2 rounded-full bg-black/5 blur-[80px] dark:bg-white/5" />
         <div className="relative flex flex-col items-center text-center">
           <div className="grid size-20 place-items-center rounded-full border border-gray-300 bg-gray-100 dark:border-white/20 dark:bg-white/5">
