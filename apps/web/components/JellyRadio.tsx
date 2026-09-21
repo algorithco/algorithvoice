@@ -1,12 +1,28 @@
 "use client";
 
-import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { animate, motion, motionValue, useReducedMotion, useTransform } from "motion/react";
+import {
+  animate,
+  motion,
+  motionValue,
+  useReducedMotion,
+  useTransform,
+} from "motion/react";
+import {
+  forwardRef,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import "./JellyRadio.css";
 
 const DEFAULT_ITEMS = ["Off", "Low", "Medium", "High", "Max"];
-const SIZES: Record<string, [number, number, number]> = { sm: [28, 12, 12], md: [36, 13, 16], lg: [44, 14, 20] };
+const SIZES: Record<string, [number, number, number]> = {
+  sm: [28, 12, 12],
+  md: [36, 13, 16],
+  lg: [44, 14, 20],
+};
 
 const spring = (k: number, m: number, bounce: number) => ({
   type: "spring" as const,
@@ -15,21 +31,37 @@ const spring = (k: number, m: number, bounce: number) => ({
   mass: m,
 });
 
-type MotionVals = { x: ReturnType<typeof motionValue<number>>; sx: ReturnType<typeof motionValue<number>>; sy: ReturnType<typeof motionValue<number>> };
+type MotionVals = {
+  x: ReturnType<typeof motionValue<number>>;
+  sx: ReturnType<typeof motionValue<number>>;
+  sy: ReturnType<typeof motionValue<number>>;
+};
 
-const Chip = forwardRef<HTMLButtonElement, { mv: MotionVals; children: React.ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>>(
-  function Chip({ mv, children, ...rest }, ref) {
-    const transform = useTransform(() => `translateX(${mv.x.get()}px) scale(${mv.sx.get()}, ${mv.sy.get()})`);
-    return (
-      <motion.button ref={ref} style={{ transform: transform as unknown as string }} {...(rest as Record<string, unknown>)}>
-        {children}
-      </motion.button>
-    );
-  },
-);
+const Chip = forwardRef<
+  HTMLButtonElement,
+  {
+    mv: MotionVals;
+    children: React.ReactNode;
+  } & React.ButtonHTMLAttributes<HTMLButtonElement>
+>(function Chip({ mv, children, ...rest }, ref) {
+  const transform = useTransform(
+    () => `translateX(${mv.x.get()}px) scale(${mv.sx.get()}, ${mv.sy.get()})`,
+  );
+  return (
+    <motion.button
+      ref={ref}
+      style={{ transform: transform as unknown as string }}
+      {...(rest as Record<string, unknown>)}
+    >
+      {children}
+    </motion.button>
+  );
+});
 Chip.displayName = "Chip";
 
-export type JellyItem = { value: string; label: string; icon?: React.ReactNode; disabled?: boolean } | string;
+export type JellyItem =
+  | { value: string; label: string; icon?: React.ReactNode; disabled?: boolean }
+  | string;
 
 export default function JellyRadio({
   items = DEFAULT_ITEMS,
@@ -76,7 +108,16 @@ export default function JellyRadio({
   ariaLabel?: string;
   className?: string;
 }) {
-  const list = items.map((it) => (typeof it === "string" ? { value: it, label: it } : (it as { value: string; label: string; icon?: React.ReactNode; disabled?: boolean })));
+  const list = items.map((it) =>
+    typeof it === "string"
+      ? { value: it, label: it }
+      : (it as {
+          value: string;
+          label: string;
+          icon?: React.ReactNode;
+          disabled?: boolean;
+        }),
+  );
   const [inner, setInner] = useState(() => defaultValue ?? list[0]?.value);
   const current = value ?? inner;
   const atRaw = list.findIndex((it) => it.value === current);
@@ -88,8 +129,22 @@ export default function JellyRadio({
   const mvs = useRef<MotionVals[]>([]);
   const applied = useRef(at);
   const cfg = useRef<Record<string, unknown>>({});
-  cfg.current = { swell, barge, shrink, jelly, bounce, stagger, stiffness, reduce, count: list.length } as unknown as Record<string, unknown>;
-  const [h, font, px] = (SIZES[size as string] ?? SIZES.md) as [number, number, number];
+  cfg.current = {
+    swell,
+    barge,
+    shrink,
+    jelly,
+    bounce,
+    stagger,
+    stiffness,
+    reduce,
+    count: list.length,
+  } as unknown as Record<string, unknown>;
+  const [h, font, px] = (SIZES[size as string] ?? SIZES.md) as [
+    number,
+    number,
+    number,
+  ];
   const itemsKey = list.map((it) => it.value).join("|");
 
   const mvFor = (i: number) => {
@@ -102,10 +157,21 @@ export default function JellyRadio({
   };
 
   const apply = (sel: number, instant: boolean) => {
-    const C = cfg.current as { swell: number; barge: number; shrink: number; jelly: number; bounce: number; stagger: number; stiffness: number; reduce: boolean; count: number };
+    const C = cfg.current as {
+      swell: number;
+      barge: number;
+      shrink: number;
+      jelly: number;
+      bounce: number;
+      stagger: number;
+      stiffness: number;
+      reduce: boolean;
+      count: number;
+    };
     const group = groupRef.current;
     const rtl = group ? getComputedStyle(group).direction === "rtl" : false;
-    const push = sel === -1 ? 0 : ((widths.current[sel] ?? 0) * C.swell) / 2 + C.barge;
+    const push =
+      sel === -1 ? 0 : ((widths.current[sel] ?? 0) * C.swell) / 2 + C.barge;
     for (let i = 0; i < C.count; i++) {
       const mv = mvFor(i);
       const on = sel !== -1 && i === sel;
@@ -120,15 +186,23 @@ export default function JellyRadio({
         continue;
       }
       const k = C.stiffness * (1 - 0.12 * Math.min(far, 3));
-      const inFlight = mv.x.isAnimating() || mv.sx.isAnimating() || mv.sy.isAnimating();
+      const inFlight =
+        mv.x.isAnimating() || mv.sx.isAnimating() || mv.sy.isAnimating();
       const delay = inFlight ? 0 : (far * C.stagger) / 1000;
       animate(mv.x, x, { ...spring(k, 0.9, C.bounce), delay });
       const j = C.jelly;
       animate(mv.sx, s, {
-        ...spring(k * (1 + 0.24 * j), 0.9 - 0.1 * j, Math.min(0.85, C.bounce + 0.3 * j)),
+        ...spring(
+          k * (1 + 0.24 * j),
+          0.9 - 0.1 * j,
+          Math.min(0.85, C.bounce + 0.3 * j),
+        ),
         delay,
       });
-      animate(mv.sy, s, { ...spring(k * (1 - 0.14 * j), 0.9 + 0.05 * j, C.bounce), delay: delay + 0.05 * j });
+      animate(mv.sy, s, {
+        ...spring(k * (1 - 0.14 * j), 0.9 + 0.05 * j, C.bounce),
+        delay: delay + 0.05 * j,
+      });
     }
   };
 
@@ -138,8 +212,14 @@ export default function JellyRadio({
     widths.current = chipRefs.current.map((el) => el?.offsetWidth ?? 0);
     const chipH = chipRefs.current[0]?.offsetHeight ?? 0;
     const maxW = Math.max(0, ...widths.current);
-    group.style.setProperty("--jr-pad-x", `${Math.ceil((maxW * swell * 1.3) / 2 + barge) + 2}px`);
-    group.style.setProperty("--jr-pad-y", `${Math.ceil((chipH * swell) / 2) + 2}px`);
+    group.style.setProperty(
+      "--jr-pad-x",
+      `${Math.ceil((maxW * swell * 1.3) / 2 + barge) + 2}px`,
+    );
+    group.style.setProperty(
+      "--jr-pad-y",
+      `${Math.ceil((chipH * swell) / 2) + 2}px`,
+    );
   };
 
   useLayoutEffect(() => {
@@ -193,7 +273,8 @@ export default function JellyRadio({
   const onKeyDown = (e: React.KeyboardEvent, i: number) => {
     let next: number | null = null;
     if (e.key === "ArrowRight" || e.key === "ArrowDown") next = stepFrom(i, 1);
-    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = stepFrom(i, -1);
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp")
+      next = stepFrom(i, -1);
     else if (e.key === "Home") next = stepFrom(-1, 1);
     else if (e.key === "End") next = stepFrom(list.length, -1);
     else if (e.key === " " || e.key === "Enter") next = i;
@@ -242,7 +323,9 @@ export default function JellyRadio({
           onKeyDown={(e) => onKeyDown(e, i)}
         >
           <span className="jelly-radio__skin">
-            {it.icon ? <span className="jelly-radio__icon">{it.icon}</span> : null}
+            {it.icon ? (
+              <span className="jelly-radio__icon">{it.icon}</span>
+            ) : null}
             <span className="jelly-radio__label">{it.label}</span>
           </span>
         </Chip>
