@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { motion } from "motion/react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppSidebar } from "./components/AppSidebar.js";
@@ -107,9 +107,18 @@ export default function App() {
 
   const updatePrefs = (p: Prefs) => {
     setPrefs(p);
-    void savePrefs(p).catch((e: unknown) => {
-      console.error("algorith-voice: savePrefs failed", e);
-    });
+    void savePrefs(p)
+      .then(() => {
+        // The floating-pill window runs its own JS context: it loads prefs
+        // once at boot and only resyncs on `settings-refresh`. Without this
+        // emit the pill keeps a stale mode (e.g. "cloud") after the user
+        // switches to Local in Settings, so PTT takes the Groq path and
+        // fails with "missing Groq API key" despite local mode selected.
+        if (isTauri()) void emit("settings-refresh").catch(() => {});
+      })
+      .catch((e: unknown) => {
+        console.error("algorith-voice: savePrefs failed", e);
+      });
   };
 
   const handleLogout = () => {
@@ -289,7 +298,9 @@ export default function App() {
                 onNavigate={setView}
               />
             ) : null}
-            {view === "dictate" ? <DictateView hotkey={prefs.hotkey} /> : null}
+            {view === "dictate" ? (
+              <DictateView hotkey={prefs.hotkey} mode={prefs.mode} />
+            ) : null}
             {view === "history" ? <HistoryView /> : null}
             {view === "settings" ? (
               <SettingsView prefs={prefs} onPrefs={updatePrefs} />
