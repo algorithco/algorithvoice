@@ -107,7 +107,9 @@ export function DashboardView({ hotkey, mode, email, onNavigate }: Props) {
           <span className="text-gray-300 dark:text-white/20">•</span>
           <span className="font-mono text-[13px]">{hotkey}</span>
           <span className="text-gray-300 dark:text-white/20">•</span>
-          <span>{mode === "local" ? "Local" : mode === "byok" ? "BYOK" : "Cloud"}</span>
+          <span>
+            {mode === "local" ? "Local" : mode === "byok" ? "BYOK" : "Cloud"}
+          </span>
         </div>
       </div>
 

@@ -93,10 +93,7 @@ fn resolve_groq_key(explicit: Option<String>) -> AppResult<String> {
 
 #[tauri::command]
 #[allow(non_snake_case)]
-pub fn set_groq_api_key(
-    api_key: Option<String>,
-    apiKey: Option<String>,
-) -> AppResult<()> {
+pub fn set_groq_api_key(api_key: Option<String>, apiKey: Option<String>) -> AppResult<()> {
     let key = api_key
         .or(apiKey)
         .ok_or_else(|| AppError::new("transcribe", "missing Groq API key"))?;
@@ -376,9 +373,9 @@ pub async fn transcribe_audio(
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
     // Accept both snake_case and camelCase (frontend sends both for back-compat)
-    let audio_base64 = audio_base64.or(audioBase64).ok_or_else(|| {
-        AppError::new("transcribe", "missing audio_base64")
-    })?;
+    let audio_base64 = audio_base64
+        .or(audioBase64)
+        .ok_or_else(|| AppError::new("transcribe", "missing audio_base64"))?;
     let api_key = api_key.or(apiKey);
     let mime_type = mime_type.or(mimeType);
     let model_id = model_id.or(modelId);
@@ -531,9 +528,9 @@ pub async fn transcribe_and_paste(
     app: AppHandle,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
-    let audio_base64 = audio_base64.or(audioBase64).ok_or_else(|| {
-        AppError::new("transcribe", "missing audio_base64")
-    })?;
+    let audio_base64 = audio_base64
+        .or(audioBase64)
+        .ok_or_else(|| AppError::new("transcribe", "missing audio_base64"))?;
     let api_key = api_key.or(apiKey);
     let mime_type = mime_type.or(mimeType);
     let restore_clipboard = restore_clipboard.or(restoreClipboard);

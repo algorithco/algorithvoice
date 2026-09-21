@@ -106,7 +106,11 @@ export async function transcribeAndPaste(
 }
 
 export async function pasteText(text: string): Promise<void> {
-  await tauri("paste_text", { text, restore_clipboard: true, restoreClipboard: true });
+  await tauri("paste_text", {
+    text,
+    restore_clipboard: true,
+    restoreClipboard: true,
+  });
 }
 
 // Groq key audit (P3): the key is NEVER persisted in plugin-store or
@@ -241,7 +245,11 @@ export async function blobToWav16kMono(blob: Blob): Promise<string> {
     }
     return wavBase64FromMono(channelData, decoded.sampleRate);
   } finally {
-    void context.close().catch((e) => console.warn("algorith-voice: AudioContext close failed", e));
+    void context
+      .close()
+      .catch((e) =>
+        console.warn("algorith-voice: AudioContext close failed", e),
+      );
   }
 }
 
@@ -263,7 +271,11 @@ async function wavBase64FromMono(
     if (!OfflineClass) {
       // No offline resampler: pack at original rate and let Rust linear resample.
       // Better than hard failure—audio.rs to_mono_16k handles arbitrary rates.
-      console.warn("algorith-voice: OfflineAudioContext missing — sending wav at", sampleRate, "Hz for Rust resample");
+      console.warn(
+        "algorith-voice: OfflineAudioContext missing — sending wav at",
+        sampleRate,
+        "Hz for Rust resample",
+      );
       const wav = encodeWavPCM16(mono, sampleRate);
       return blobToBase64(wav);
     }

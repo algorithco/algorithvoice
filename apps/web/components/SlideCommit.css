@@ -40,8 +40,8 @@
   cursor: grabbing;
 }
 
-.slide-commit[data-phase='pending'] .slide-commit__track,
-.slide-commit[data-phase='done'] .slide-commit__track {
+.slide-commit[data-phase="pending"] .slide-commit__track,
+.slide-commit[data-phase="done"] .slide-commit__track {
   cursor: default;
 }
 
@@ -72,12 +72,12 @@
   filter: blur(2px);
 }
 
-.slide-commit[data-phase='error'] .slide-commit__text--plain {
+.slide-commit[data-phase="error"] .slide-commit__text--plain {
   opacity: 0;
   filter: blur(2px);
 }
 
-.slide-commit[data-phase='error'] .slide-commit__text--error {
+.slide-commit[data-phase="error"] .slide-commit__text--error {
   opacity: 1;
   filter: none;
 }
@@ -96,12 +96,12 @@
     color 200ms ease;
 }
 
-.slide-commit[data-phase='done'] .slide-commit__capsule {
+.slide-commit[data-phase="done"] .slide-commit__capsule {
   background: var(--sc-ok);
   color: var(--sc-on-ok);
 }
 
-.slide-commit[data-phase='error'] .slide-commit__capsule {
+.slide-commit[data-phase="error"] .slide-commit__capsule {
   background: var(--sc-no);
   color: var(--sc-on-no);
 }
@@ -143,11 +143,11 @@
   transition: filter 200ms ease;
 }
 
-.slide-commit[data-phase='pending'] .slide-commit__arrow {
+.slide-commit[data-phase="pending"] .slide-commit__arrow {
   filter: blur(2px);
 }
 
-.slide-commit:not([data-phase='pending']) .slide-commit__spin {
+.slide-commit:not([data-phase="pending"]) .slide-commit__spin {
   filter: blur(2px);
 }
 
@@ -156,7 +156,7 @@
   animation-play-state: paused;
 }
 
-.slide-commit[data-phase='pending'] .slide-commit__spinner {
+.slide-commit[data-phase="pending"] .slide-commit__spinner {
   animation-play-state: running;
 }
 
@@ -184,7 +184,7 @@
     animation-play-state: paused;
   }
 
-  .slide-commit[data-phase='pending'] .slide-commit__spinner {
+  .slide-commit[data-phase="pending"] .slide-commit__spinner {
     animation-play-state: running;
   }
 
