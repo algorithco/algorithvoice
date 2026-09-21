@@ -147,7 +147,7 @@ export function ModelStep({
                     <span
                       className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${isPicked ? "bg-black text-white" : "bg-white text-black"}`}
                     >
-                      Tavsiya
+                      Recommended
                     </span>
                   ) : null}
                   {levelLabel ? (
@@ -195,7 +195,7 @@ export function ModelStep({
           );
         })}
       </div>
-      <p className="mt-2 max-w-[560px] text-xs text-white/25">
+      <p className="mt-2 max-w-[560px] text-xs text-white/60">
         Verified against your system (RAM, GPU, disk). Unsupported models are
         disabled. You can change or download later in Settings → Local.
       </p>

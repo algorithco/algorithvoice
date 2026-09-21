@@ -149,6 +149,11 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           setPill("idle");
           return;
         }
+        if (!useLocal && typeof navigator !== "undefined" && navigator.onLine === false) {
+          showNotice("Offline — switch to Local (offline) in Settings to transcribe without internet.");
+          setPill("idle");
+          return;
+        }
         const base64 = useLocal
           ? await blobToWav16kMono(blob)
           : await blobToBase64(blob);

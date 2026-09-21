@@ -23,9 +23,11 @@ import { setTrayState, type TrayState } from "../lib/session/tray.js";
 export function DictateView({
   hotkey,
   mode,
+  activeModelId,
 }: {
   hotkey: string;
   mode: SttMode;
+  activeModelId?: string | null;
 }) {
   const [tray, setTray] = useState<TrayState>("idle");
   const [preview, setPreview] = useState(
@@ -37,6 +39,18 @@ export function DictateView({
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
   const timers = useRef<number[]>([]);
   const isLocal = mode === "local";
+  const needsModel = isLocal && !activeModelId;
+
+  useEffect(() => {
+    if (!pillMsg) return;
+    const id = window.setTimeout(() => setPillMsg(null), 5000);
+    return () => clearTimeout(id);
+  }, [pillMsg]);
+
+  useEffect(() => {
+    if (isLocal) setGroqReady(null);
+    else setGroqInput("");
+  }, [isLocal]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -155,14 +169,18 @@ export function DictateView({
               ? "Ready to listen"
               : tray === "recording"
                 ? "Listening…"
-                : "Transcribing…"}
+                : isLocal
+                  ? "Transcribing locally…"
+                  : "Transcribing…"}
           </p>
           <p className="mt-1 text-xs text-gray-500">
             {tray === "idle"
               ? `Hold ${hotkey}`
               : tray === "recording"
                 ? "Release to process"
-                : "Please wait"}
+                : isLocal
+                  ? "Offline — audio stays on device (~1s)"
+                  : "Please wait"}
           </p>
         </div>
 
@@ -254,11 +272,11 @@ export function DictateView({
         </div>
         {pillMsg ? (
           <p
+            role="alert"
             className={`av-small mt-2 rounded-md px-2 py-1.5 text-xs ${
-              pillMsg.includes("Groq") ||
-              pillMsg.includes("model") ||
-              pillMsg.includes("Microphone") ||
-              pillMsg.includes("failed")
+              /model-|groq|microphone|failed|inference|audio-|out-of-memory|engine/i.test(
+                pillMsg,
+              )
                 ? "bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800"
                 : "text-gray-500"
             }`}
@@ -266,7 +284,14 @@ export function DictateView({
             {pillMsg}
           </p>
         ) : null}
-        {isLocal ? (
+        {needsModel ? (
+          <p
+            role="alert"
+            className="av-small mt-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+          >
+            No local model selected — download one in Settings → Local, then click “Use this model”.
+          </p>
+        ) : isLocal ? (
           <p className="av-small mt-3 text-gray-500">
             Local (offline) mode — no API key needed. Audio never leaves this
             device.

@@ -312,12 +312,17 @@ export default function App() {
               <DashboardView
                 hotkey={prefs.hotkey}
                 mode={prefs.mode}
+                activeModelId={prefs.activeModelId}
                 email={session?.email ?? null}
                 onNavigate={setView}
               />
             ) : null}
             {view === "dictate" ? (
-              <DictateView hotkey={prefs.hotkey} mode={prefs.mode} />
+              <DictateView
+                hotkey={prefs.hotkey}
+                mode={prefs.mode}
+                activeModelId={prefs.activeModelId}
+              />
             ) : null}
             {view === "history" ? <HistoryView /> : null}
             {view === "settings" ? (

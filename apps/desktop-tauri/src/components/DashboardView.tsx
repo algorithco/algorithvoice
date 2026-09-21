@@ -11,6 +11,7 @@ import { ClipboardList } from "./animate-ui/icons/clipboard-list.js";
 type Props = {
   hotkey: string;
   mode?: "local" | "cloud" | "byok";
+  activeModelId?: string | null;
   email?: string | null;
   onNavigate: (view: "dashboard" | "dictate" | "history" | "settings") => void;
 };
@@ -52,7 +53,15 @@ function formatTime(iso: string): string {
   }
 }
 
-export function DashboardView({ hotkey, mode, email, onNavigate }: Props) {
+export function DashboardView({
+  hotkey,
+  mode,
+  activeModelId,
+  email,
+  onNavigate,
+}: Props) {
+  const isLocal = mode === "local";
+  const needsSetup = isLocal && !activeModelId;
   const [stats, setStats] = useState<{
     total: number;
     today: number;
@@ -102,14 +111,19 @@ export function DashboardView({ hotkey, mode, email, onNavigate }: Props) {
           </p>
         </div>
         <div className="inline-flex h-10 shrink-0 items-center gap-2.5 rounded-full border border-gray-200 bg-white px-5 text-sm text-gray-500 dark:border-white/10 dark:bg-black">
-          <span className="size-2 rounded-full bg-black dark:bg-white" />
-          <span className="font-medium text-black dark:text-white">Ready</span>
+          <span
+            className={`size-2 rounded-full ${needsSetup ? "bg-amber-500" : "bg-black dark:bg-white"}`}
+            aria-label={
+              needsSetup ? "Local mode — no model" : "Ready"
+            }
+          />
+          <span className="font-medium text-black dark:text-white">
+            {needsSetup ? "Setup needed" : "Ready"}
+          </span>
           <span className="text-gray-300 dark:text-white/20">•</span>
           <span className="font-mono text-[13px]">{hotkey}</span>
           <span className="text-gray-300 dark:text-white/20">•</span>
-          <span>
-            {mode === "local" ? "Local" : mode === "byok" ? "BYOK" : "Cloud"}
-          </span>
+          <span>{mode === "local" ? "Local" : mode === "byok" ? "BYOK" : "Cloud"}</span>
         </div>
       </div>
 

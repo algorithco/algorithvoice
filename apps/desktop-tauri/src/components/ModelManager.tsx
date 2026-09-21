@@ -77,7 +77,7 @@ function statusTone(s: ModelStatusInfo["status"]): string {
     case "ready":
       return "bg-black text-white dark:bg-white dark:text-black";
     case "downloading":
-      return "bg-black text-white dark:bg-white dark:text-black";
+      return "bg-blue-600 text-white dark:bg-blue-500 dark:text-white motion-safe:animate-pulse";
     case "verifying":
       return "bg-amber-500 text-black";
     case "error":
@@ -109,6 +109,7 @@ export function ModelManager({
   const [loadStage, setLoadStage] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hardwareError, setHardwareError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [langFilter, setLangFilter] = useState("all");
@@ -131,21 +132,28 @@ export function ModelManager({
       const next: Record<string, ModelStatusInfo> = {};
       for (const e of entries) if (e) next[e[0]] = e[1];
       setStatusMap(next);
-      // hardware + compat + worker
       try {
         const hw = await getHardwareInfo();
         setHardware(hw);
-      } catch {}
+        setHardwareError(null);
+      } catch (e) {
+        setHardwareError(e instanceof Error ? e.message : String(e));
+        console.warn("algorith-voice: getHardwareInfo failed", e);
+      }
       try {
         const comp = await getModelCompatibilities();
         const cmap: Record<string, ModelCompatibility> = {};
         for (const c of comp) cmap[c.id] = c;
         setCompatMap(cmap);
-      } catch {}
+      } catch (e) {
+        console.warn("algorith-voice: getModelCompatibilities failed", e);
+      }
       try {
         const ws = await getTranscriptionStatus();
         setWorkerStatus(ws);
-      } catch {}
+      } catch (e) {
+        console.warn("algorith-voice: getTranscriptionStatus failed", e);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -248,8 +256,12 @@ export function ModelManager({
       if (activeId === id) {
         const next = { ...prefs, activeModelId: null };
         onPrefs(next);
+        setNotice(
+          `Deleted active model ${id} — local mode now has no model. Pick another or switch to Cloud in Settings.`,
+        );
+      } else {
+        setNotice(`Deleted ${id}.`);
       }
-      setNotice(`Deleted ${id}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -307,8 +319,12 @@ export function ModelManager({
   const filteredModels = useMemo(() => {
     if (!models) return [];
     const q = query.trim().toLowerCase();
+    const langLower = langFilter.toLowerCase();
     return models.filter((m) => {
-      if (langFilter !== "all" && !m.languages.includes(langFilter))
+      if (
+        langFilter !== "all" &&
+        !m.languages.some((l) => l.toLowerCase() === langLower)
+      )
         return false;
       if (!q) return true;
       const hay =
@@ -338,8 +354,19 @@ export function ModelManager({
           Hardware
         </p>
         <p className="mt-1 text-xs leading-relaxed text-gray-700 dark:text-gray-300">
-          {hardwareSummary ?? "Detecting hardware…"}
+          {hardwareError
+            ? `Hardware detection failed — ${hardwareError}`
+            : (hardwareSummary ?? "Detecting hardware…")}
         </p>
+        {hardwareError ? (
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="mt-2 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
+          >
+            Retry
+          </button>
+        ) : null}
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <span className="rounded-full border border-gray-200 bg-white px-3 py-1 dark:border-white/15 dark:bg-black">
             Active: {activeId ?? "none"}
