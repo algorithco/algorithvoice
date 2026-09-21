@@ -1,6 +1,6 @@
 {
   "name": "@algorith-voice/prisma",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "private": true,
   "license": "GPL-3.0-or-later",
   "scripts": {
