@@ -12,9 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { signInDesktop } from "@/lib/session/auth";
-import { loginDemo } from "@/lib/session/demo-account";
 import type { SessionInfo } from "@/lib/session/types";
 
 type Props = {
@@ -37,16 +35,6 @@ export default function LoginCardSection({ onDone }: Props) {
       );
     } finally {
       setBusy(false);
-    }
-  };
-
-  const handleDemo = async () => {
-    setError(null);
-    try {
-      const s = await loginDemo();
-      onDone(s);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Demo sign-in failed.");
     }
   };
 
@@ -147,36 +135,6 @@ export default function LoginCardSection({ onDone }: Props) {
                   </motion.p>
                 ) : null}
               </AnimatePresence>
-
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.5, delay: 0.45 }}
-                className="relative"
-              >
-                <Separator className="bg-white/10" />
-                <span className="absolute left-1/2 -translate-x-1/2 -top-2.5 bg-black px-3 text-[11px] uppercase tracking-widest text-white/30">
-                  or
-                </span>
-              </motion.div>
-
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.52 }}
-              >
-                <Button
-                  variant="outline"
-                  className="h-[46px] w-full rounded-xl border border-white/10 bg-black text-[14px] font-medium text-white hover:bg-white/[0.04] hover:border-white/15 hover:text-white transition-all"
-                  onClick={handleDemo}
-                  disabled={busy}
-                >
-                  Continue as demo — no backend needed
-                </Button>
-                <p className="mt-2.5 text-center text-[11px] text-white/30">
-                  demo@algorithvoice.local · local-only session
-                </p>
-              </motion.div>
             </CardContent>
 
             <motion.div

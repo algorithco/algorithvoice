@@ -10,6 +10,7 @@ import {
   cancelDownload,
   downloadModel,
   getHardwareInfo,
+  getInstalledModels,
   getModelCompatibilities,
   getModelStatus,
   type HardwareInfo,
@@ -102,40 +103,71 @@ export function OnboardingView({
           for (const c of comp) map[c.id] = c;
           setCompat(map);
         }
-        // Auto-pick based on real compatibility levels, not hard-coded thresholds
-        if (!pickedModelId && list.length > 0) {
-          let rec: string | null = null;
-          if (comp) {
-            const byLevel = (lvl: string) =>
-              list
-                .filter((m) => comp.find((c) => c.id === m.id)?.level === lvl)
-                .sort(
-                  (a, b) =>
-                    a.files.reduce((s, f) => s + f.sizeBytes, 0) -
-                    b.files.reduce((s, f) => s + f.sizeBytes, 0),
-                );
-            const recommended = byLevel("recommended");
-            const compatible = byLevel("compatible");
-            const barely = byLevel("barely-compatible");
-            if (recommended.length > 0) rec = recommended[0].id;
-            else if (compatible.length > 0) rec = compatible[0].id;
-            else if (barely.length > 0) rec = barely[0].id;
-            else
-              rec =
-                list.find(
-                  (m) =>
-                    comp.find((c) => c.id === m.id)?.level !== "unsupported",
-                )?.id ?? null;
+        // Reuse check: after reinstall the prefs are wiped but model files
+        // may survive on disk. Prefer an already-verified model over
+        // downloading a new one — Continue then skips straight to select.
+        if (!pickedModelId) {
+          let reused: string | null = null;
+          try {
+            const installed = await getInstalledModels().catch(() => []);
+            const ready: string[] = [];
+            for (const m of installed) {
+              const st = await getModelStatus(m.id).catch(() => null);
+              if (st?.status === "ready") ready.push(m.id);
+            }
+            if (ready.length > 0) {
+              const rank = (id: string) => {
+                const lvl = comp?.find((c) => c.id === id)?.level;
+                return lvl === "recommended"
+                  ? 0
+                  : lvl === "compatible"
+                    ? 1
+                    : lvl === "barely-compatible"
+                      ? 2
+                      : 3;
+              };
+              ready.sort((a, b) => rank(a) - rank(b));
+              reused = ready[0] ?? null;
+            }
+          } catch {
+            // Fall through to auto-pick below.
           }
-          if (!rec) {
-            const ramGb = hw ? hw.totalRamBytes / 1_000_000_000 : 8;
-            let cand = "parakeet-tdt-0.6b-v3";
-            if (ramGb < 4) cand = "whisper-small";
-            else if (ramGb >= 16) cand = "qwen3-asr-1.7b";
-            else if (ramGb >= 8) cand = "whisper-large-v3-turbo";
-            rec = list.some((m) => m.id === cand) ? cand : list[0].id;
+          if (reused) {
+            setPickedModelId(reused);
+          } else if (list.length > 0) {
+            let rec: string | null = null;
+            if (comp) {
+              const byLevel = (lvl: string) =>
+                list
+                  .filter((m) => comp.find((c) => c.id === m.id)?.level === lvl)
+                  .sort(
+                    (a, b) =>
+                      a.files.reduce((s, f) => s + f.sizeBytes, 0) -
+                      b.files.reduce((s, f) => s + f.sizeBytes, 0),
+                  );
+              const recommended = byLevel("recommended");
+              const compatible = byLevel("compatible");
+              const barely = byLevel("barely-compatible");
+              if (recommended.length > 0) rec = recommended[0].id;
+              else if (compatible.length > 0) rec = compatible[0].id;
+              else if (barely.length > 0) rec = barely[0].id;
+              else
+                rec =
+                  list.find(
+                    (m) =>
+                      comp.find((c) => c.id === m.id)?.level !== "unsupported",
+                  )?.id ?? null;
+            }
+            if (!rec) {
+              const ramGb = hw ? hw.totalRamBytes / 1_000_000_000 : 8;
+              let cand = "parakeet-tdt-0.6b-v3";
+              if (ramGb < 4) cand = "whisper-small";
+              else if (ramGb >= 16) cand = "qwen3-asr-1.7b";
+              else if (ramGb >= 8) cand = "whisper-large-v3-turbo";
+              rec = list.some((m) => m.id === cand) ? cand : list[0].id;
+            }
+            if (rec) setPickedModelId(rec);
           }
-          if (rec) setPickedModelId(rec);
         }
       } catch (e) {
         if (!cancelled)

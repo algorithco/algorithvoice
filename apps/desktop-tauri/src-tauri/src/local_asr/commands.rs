@@ -302,11 +302,18 @@ pub async fn cancel_download(
 pub async fn delete_model(
     app: AppHandle,
     downloads: State<'_, DownloadManager>,
+    worker: State<'_, Arc<TranscriptionWorker>>,
     id: String,
 ) -> AppResult<ModelStatusInfo> {
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
     downloads.cancel(&model.id);
+    // Drop the in-memory engine when it serves the deleted model. Without
+    // this the worker keeps transcribing with files that no longer exist
+    // (and reports ready for a model that is gone).
+    if worker.is_ready_for(&model.id) {
+        worker.unload();
+    }
     let data = app_data_dir(&app)?;
     let dir = models::model_dir(&data, &model.id)?;
     match std::fs::remove_dir_all(&dir) {

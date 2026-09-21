@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { clearDemoSession, readDemoSession } from "./demo-account.js";
 import { isTauri } from "./env.js";
 import type { AuthResponse, SessionInfo } from "./types.js";
 import { safeOpenUrl } from "./url-safety.js";
@@ -26,12 +25,8 @@ export async function sessionStatus(): Promise<SessionInfo> {
     loggedIn: false,
   });
   if (stored.loggedIn) return stored;
-  // Demo localStorage bypass was reachable from any XSS — only allow it in
-  // browser preview (isTauri() === false). In the desktop shell the keyring
-  // is the single source of truth.
-  if (!isTauri()) {
-    return readDemoSession() ?? { loggedIn: false };
-  }
+  // Browser preview has no keyring: without a stored desktop session the
+  // user is signed out (sign in via the backend).
   return { loggedIn: false };
 }
 
@@ -102,7 +97,6 @@ export async function signup(
 }
 
 export async function logout(): Promise<void> {
-  clearDemoSession();
   try {
     localStorage.removeItem("algorith-voice-history");
     localStorage.removeItem("algorith-voice-last-transcript");
