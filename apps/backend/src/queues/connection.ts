@@ -45,6 +45,11 @@ export function makeApiRedis() {
       maxRetriesPerRequest: 1,
       enableReadyCheck: false,
       connectTimeout: 5000,
+      // Docker Desktop (Windows) NAT drops idle host→container TCP mappings
+      // faster than Redis' own 300s keepalive, leaving half-open corpses
+      // (ECONNRESET on next use). Kernel probes every 10s keep the mapping
+      // alive; harmless everywhere else.
+      keepAlive: 10_000,
       retryStrategy: (times) => Math.min(times * 100, 2000),
     }),
     "api",
@@ -57,6 +62,8 @@ export function makeQueueRedis(label: string) {
     new Redis(env.REDIS_URL, {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
+      // Same NAT idle-death workaround as makeApiRedis.
+      keepAlive: 10_000,
       retryStrategy: (times) => Math.min(times * 100, 2000),
     }),
     label,
