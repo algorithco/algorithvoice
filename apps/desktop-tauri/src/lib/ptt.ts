@@ -68,11 +68,16 @@ export async function transcribeAudio(
   opts?: TranscribeOptions,
 ): Promise<TranscribeResult> {
   return tauri<TranscribeResult>("transcribe_audio", {
-    audioBase64,
+    audio_base64: audioBase64,
     language: language ?? null,
+    api_key: null,
+    mime_type: mimeType ?? null,
+    mode: opts?.mode ?? null,
+    model_id: opts?.modelId ?? null,
+    // Back-compat: older/newer Rust also accepts camelCase; send both.
+    audioBase64,
     apiKey: null,
     mimeType: mimeType ?? null,
-    mode: opts?.mode ?? null,
     modelId: opts?.modelId ?? null,
   });
 }
@@ -84,18 +89,24 @@ export async function transcribeAndPaste(
   opts?: TranscribeOptions,
 ): Promise<TranscribeResult> {
   return tauri<TranscribeResult>("transcribe_and_paste", {
-    audioBase64,
+    audio_base64: audioBase64,
     language: language ?? null,
+    api_key: null,
+    mime_type: mimeType ?? null,
+    restore_clipboard: true,
+    mode: opts?.mode ?? null,
+    model_id: opts?.modelId ?? null,
+    // Back-compat
+    audioBase64,
     apiKey: null,
     mimeType: mimeType ?? null,
     restoreClipboard: true,
-    mode: opts?.mode ?? null,
     modelId: opts?.modelId ?? null,
   });
 }
 
 export async function pasteText(text: string): Promise<void> {
-  await tauri("paste_text", { text, restoreClipboard: true });
+  await tauri("paste_text", { text, restore_clipboard: true, restoreClipboard: true });
 }
 
 // Groq key audit (P3): the key is NEVER persisted in plugin-store or
@@ -105,7 +116,7 @@ export async function pasteText(text: string): Promise<void> {
 // → keyring. `apiKey: null` below is intentional — cloud calls resolve the
 // key server-side in Rust, never from JS memory beyond this call.
 export async function setGroqApiKey(apiKey: string): Promise<void> {
-  await tauri("set_groq_api_key", { apiKey });
+  await tauri("set_groq_api_key", { api_key: apiKey, apiKey });
 }
 
 export async function hasGroqKey(): Promise<boolean> {
@@ -132,8 +143,8 @@ export function pickSupportedMimeType(): string | undefined {
   for (const mime of candidates) {
     try {
       if (MediaRecorder.isTypeSupported(mime)) return mime;
-    } catch {
-      // Ignore and try the next candidate.
+    } catch (e) {
+      console.warn("algorith-voice: isTypeSupported check failed for", mime, e);
     }
   }
   return undefined;
@@ -230,7 +241,7 @@ export async function blobToWav16kMono(blob: Blob): Promise<string> {
     }
     return wavBase64FromMono(channelData, decoded.sampleRate);
   } finally {
-    void context.close().catch(() => {});
+    void context.close().catch((e) => console.warn("algorith-voice: AudioContext close failed", e));
   }
 }
 
@@ -252,6 +263,7 @@ async function wavBase64FromMono(
     if (!OfflineClass) {
       // No offline resampler: pack at original rate and let Rust linear resample.
       // Better than hard failure—audio.rs to_mono_16k handles arbitrary rates.
+      console.warn("algorith-voice: OfflineAudioContext missing — sending wav at", sampleRate, "Hz for Rust resample");
       const wav = encodeWavPCM16(mono, sampleRate);
       return blobToBase64(wav);
     }
@@ -269,8 +281,9 @@ async function wavBase64FromMono(
       source.start();
       const rendered = await offline.startRendering();
       mono = Float32Array.from(rendered.getChannelData(0));
-    } catch {
+    } catch (e) {
       // Fallback to original rate on any offline failure (e.g. 1-sample render)
+      console.warn("algorith-voice: OfflineAudioContext rendering failed", e);
       const wav = encodeWavPCM16(mono, sampleRate);
       return blobToBase64(wav);
     }

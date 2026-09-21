@@ -133,6 +133,15 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       if (!mountedRef.current) return;
       setPill("processing");
       try {
+        // Re-read prefs right before engine routing — user may have toggled
+        // Local ↔ Cloud while holding. StartPress already reloaded, but a
+        // mid-press toggle would otherwise route to stale engine and surface
+        // the opposite-mode error (e.g. cloud key message while in Local).
+        try {
+          prefsRef.current = await loadPrefs();
+        } catch {
+          // Keep last known prefs if store unreadable
+        }
         // Local mode re-encodes through Web Audio (decode + 16 kHz mono
         // WAV) because MediaRecorder cannot emit WAV anywhere; the Rust
         // side validates it with the same parser the worker tests cover.
@@ -265,13 +274,35 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     chunksRef.current = [];
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // Prefer 16 kHz mono for local STT (lower decode + exact match).
+      // Use `ideal` constraints so exotic mics don't throw OverconstrainedError;
+      // fallback to default constraints if the ideal set is rejected.
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: { ideal: 1 },
+            sampleRate: { ideal: 16000 },
+            sampleSize: { ideal: 16 },
+          } as MediaTrackConstraints,
+        });
+      } catch (e) {
+        const name = e instanceof DOMException ? e.name : "";
+        if (name === "OverconstrainedError" || name === "NotFoundError") {
+          console.warn("algorith-voice: ideal audio constraints failed, retrying defaults", e);
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
+        } else {
+          throw e;
+        }
+      }
     } catch (e) {
       startingRef.current = false;
       if (token !== pressTokenRef.current || !mountedRef.current) return;
@@ -362,14 +393,14 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       .then((fn) => {
         unPressed = fn;
       })
-      .catch(() => {});
+      .catch((e) => console.warn("algorith-voice: pill ptt-pressed listen failed", e));
     void listen("ptt-released", () => {
       stopPress();
     })
       .then((fn) => {
         unReleased = fn;
       })
-      .catch(() => {});
+      .catch((e) => console.warn("algorith-voice: pill ptt-released listen failed", e));
     return () => {
       unPressed?.();
       unReleased?.();

@@ -27,6 +27,8 @@ export function useSplashSequence(opts: {
 
   useEffect(() => {
     if (isSecondary) {
+      // Secondary windows must not render with DEFAULT_PREFS cloud flash:
+      // wait for store read (withTimeout guards never-block) before ready.
       void withTimeout(
         Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
           setPrefs(p);
@@ -35,16 +37,18 @@ export function useSplashSequence(opts: {
         3000,
         undefined,
       )
-        .catch(() => {})
+        .catch((e) => console.warn("algorith-voice: secondary prefs load failed", e))
         .finally(() => setReady(true));
       let unlisten: (() => void) | undefined;
       void listen("settings-refresh", () => {
-        void loadPrefs().then(setPrefs);
+        void loadPrefs()
+          .then(setPrefs)
+          .catch((e) => console.warn("algorith-voice: settings-refresh reload failed", e));
       })
         .then((fn) => {
           unlisten = fn;
         })
-        .catch(() => {});
+        .catch((e) => console.warn("algorith-voice: settings-refresh listen failed", e));
       return () => {
         if (unlisten) unlisten();
       };
@@ -59,7 +63,7 @@ export function useSplashSequence(opts: {
       3000,
       undefined,
     )
-      .catch(() => {})
+      .catch((e) => console.warn("algorith-voice: prefs load failed", e))
       .finally(() => setReady(true));
     // Session must never block splash forever — 3s fallback to logged-out
     let settled = false;

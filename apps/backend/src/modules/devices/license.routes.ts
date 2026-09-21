@@ -46,4 +46,34 @@ export async function licenseRoutes(app: FastifyInstance) {
     valid: false,
     graceDays: OFFLINE_GRACE_DAYS,
   }));
+
+  // Real devices for dashboard — no mocks
+  app.get("/devices", { onRequest: [app.authenticate] }, async (req) => {
+    const { sub } = req.user as { sub: string };
+    const devices = await app.prisma.device.findMany({
+      where: { userId: sub },
+      orderBy: { lastSeenAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        fingerprint: true,
+        lastSeenAt: true,
+        createdAt: true,
+      },
+      take: 10,
+    });
+    return {
+      devices: devices.map((d) => ({
+        id: d.id,
+        name: d.name,
+        type: d.type,
+        fingerprint: d.fingerprint,
+        lastSeenAt: d.lastSeenAt?.toISOString() ?? null,
+        createdAt: d.createdAt.toISOString(),
+      })),
+      total: devices.length,
+      seatsMax: LICENSE_SEATS,
+    };
+  });
 }

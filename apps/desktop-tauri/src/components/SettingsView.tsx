@@ -228,27 +228,36 @@ export function SettingsView({
               </Button>
             </div>
             {prefs.mode === "local" ? (
-              <div className="mt-4">
-                <Suspense
-                  fallback={
-                    <p className="text-xs text-gray-500">
-                      Loading model manager…
-                    </p>
-                  }
-                >
-                  <ModelManager prefs={prefs} onPrefs={onPrefs} />
-                </Suspense>
-              </div>
+              <>
+                <div className="mt-4">
+                  <Suspense
+                    fallback={
+                      <p className="text-xs text-gray-500">
+                        Loading model manager…
+                      </p>
+                    }
+                  >
+                    <ModelManager prefs={prefs} onPrefs={onPrefs} />
+                  </Suspense>
+                </div>
+                {prefs.activeModelId ? (
+                  <p className="mt-2 text-xs text-gray-500">
+                    Audio is processed locally on this computer — no audio or
+                    transcripts are uploaded.
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+                    No local model selected — download one below and click “Use
+                    this model” to enable offline transcription.
+                  </p>
+                )}
+              </>
             ) : (
               <p className="mt-2 text-xs text-gray-500">
                 Cloud uses Groq Whisper (whisper-large-v3-turbo). Audio is sent
                 securely; transcripts are stored only locally.
               </p>
             )}
-            <p className="mt-2 text-xs text-gray-500">
-              Audio is processed locally on this computer in local mode — no
-              audio or transcripts are uploaded.
-            </p>
           </div>
         </div>
       </section>

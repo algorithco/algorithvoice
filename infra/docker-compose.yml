@@ -178,7 +178,7 @@ services:
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://127.0.0.1:3000}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:3001}
         NEXT_PUBLIC_STRIPE_PRICE_PRO: ${NEXT_PUBLIC_STRIPE_PRICE_PRO:-}
-        NEXT_PUBLIC_GITHUB_REPO: ${NEXT_PUBLIC_GITHUB_REPO:-algorithco/algorithvoice}
+        NEXT_PUBLIC_GITHUB_REPO: ${NEXT_PUBLIC_GITHUB_REPO:-algorithco/algorithvoice-app}
     image: algorith-voice-web:local
     networks: [app]
     logging: *default-logging
@@ -189,7 +189,7 @@ services:
     environment:
       PORT: 3000
       # Server-side BFF proxy target (Compose DNS — NOT localhost).
-      API_URL: http://backend:3001
+      API_URL: https://api.trqsh.uz
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:

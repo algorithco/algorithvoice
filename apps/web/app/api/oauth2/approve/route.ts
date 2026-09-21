@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = process.env.API_URL ?? "https://api.trqsh.uz";
 
 // Thin BFF: the browser's httpOnly __Host-av_at cookie never leaves this
 // origin. We read it server-side and forward it to the backend as Bearer.

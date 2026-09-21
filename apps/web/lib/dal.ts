@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = process.env.API_URL ?? "https://api.trqsh.uz";
 const COOKIE_NAME = "__Host-av_at";
 
 export interface SessionUser {

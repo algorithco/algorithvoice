@@ -536,4 +536,29 @@ export async function authRoutes(app: FastifyInstance) {
       return toUserSchema(user);
     },
   );
+
+  app.get(
+    "/providers",
+    { onRequest: [app.authenticate] },
+    async (req) => {
+      const { sub } = req.user as { sub: string };
+      const [accounts, user] = await Promise.all([
+        app.prisma.account.findMany({
+          where: { userId: sub },
+          select: { provider: true, email: true },
+        }),
+        app.prisma.user.findUnique({ where: { id: sub }, select: { email: true } }),
+      ]);
+      if (accounts.length === 0) {
+        return { providers: [{ provider: "EMAIL", email: user?.email ?? "", label: "Email" }] };
+      }
+      return {
+        providers: accounts.map((a) => ({
+          provider: a.provider,
+          email: a.email,
+          label: a.provider === "GITHUB" ? "GitHub" : a.provider === "GOOGLE" ? "Google" : a.provider,
+        })),
+      };
+    },
+  );
 }
