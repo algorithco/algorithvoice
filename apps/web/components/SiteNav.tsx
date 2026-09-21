@@ -2,9 +2,9 @@
 
 import { Logo } from "@algorith-voice/ui";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import GooeyNav from "./GooeyNav";
+import JellyRadio from "./JellyRadio";
 import { ShinyButton } from "./ShinyButton";
 
 // V5 nav: wordmark, links, primary CTA — now with scroll-driven floating pill + GooeyNav for nav items (not Download).
@@ -19,6 +19,7 @@ const PUBLIC_ITEMS = [
 // check re-runs on each navigation and never goes stale (login/logout).
 export function SiteNav({ signedIn }: { signedIn?: boolean }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [detected, setDetected] = useState<boolean | null>(null);
   const [isScrolled, setIsScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -84,12 +85,10 @@ export function SiteNav({ signedIn }: { signedIn?: boolean }) {
   // Desktop keeps the floating pill; mobile uses a compact bar + dropdown.
   const showCompact = isScrolled;
 
-  const activeIndex = (() => {
+  const activeValue = (() => {
     const p = pathname ?? "";
-    const idx = NAV_ITEMS.findIndex(
-      (it) => p === it.href || p.startsWith(it.href),
-    );
-    return idx >= 0 ? idx : 0;
+    const found = NAV_ITEMS.find((it) => p === it.href || (it.href !== "/" && p.startsWith(it.href)));
+    return found?.href ?? "__none__";
   })();
 
   const isActive = (href: string) => {
@@ -132,12 +131,26 @@ export function SiteNav({ signedIn }: { signedIn?: boolean }) {
         </Link>
         <div className="flex shrink-0 items-center gap-2 md:gap-4">
           <div className="hidden md:block">
-            <GooeyNav
-              items={[...NAV_ITEMS].map((it) => ({
-                href: it.href,
-                label: it.label,
-              }))}
-              initialActiveIndex={activeIndex}
+            <JellyRadio
+              items={NAV_ITEMS.map((it) => ({ value: it.href, label: it.label }))}
+              value={activeValue}
+              onChange={(val) => router.push(val as never)}
+              ariaLabel="Primary navigation"
+              chipColor="transparent"
+              activeColor="#ffffff"
+              textColor="#9a9a9a"
+              activeTextColor="#000000"
+              size="md"
+              gap={6}
+              radius={999}
+              swell={0.18}
+              barge={4}
+              shrink={0.04}
+              jelly={0.9}
+              bounce={0.28}
+              stagger={18}
+              stiffness={560}
+              className="nav-jelly"
             />
           </div>
           <div className="hidden md:block">

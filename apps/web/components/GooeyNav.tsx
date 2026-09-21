@@ -13,7 +13,7 @@ type GooeyNavProps = {
   initialActiveIndex?: number;
 };
 
-const GooeyNav = ({ items, initialActiveIndex = 0 }: GooeyNavProps) => {
+const GooeyNav = ({ items, initialActiveIndex = -1 }: GooeyNavProps) => {
   const [activeIndex, setActiveIndex] = useState(initialActiveIndex);
 
   // Keep active index in sync with URL without heavy observers
@@ -22,7 +22,7 @@ const GooeyNav = ({ items, initialActiveIndex = 0 }: GooeyNavProps) => {
     const idx = items.findIndex(
       (it) => path === it.href || (it.href !== "/" && path.startsWith(it.href)),
     );
-    if (idx >= 0 && idx !== activeIndex) setActiveIndex(idx);
+    if (idx !== activeIndex) setActiveIndex(idx);
   }, [items, activeIndex]);
 
   return (
