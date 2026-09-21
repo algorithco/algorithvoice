@@ -26,6 +26,25 @@ import {
 import { isTauri } from "../lib/session/env.js";
 import type { Prefs } from "./SettingsView.js";
 
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    if (typeof o.message === "string" && o.message) return o.message;
+    if (typeof o.errorMessage === "string" && o.errorMessage)
+      return o.errorMessage;
+    if (typeof o.error === "string" && o.error) return o.error;
+    if (typeof o.code === "string" && typeof o.message === "string")
+      return o.message;
+    try {
+      const s = JSON.stringify(o);
+      if (s && s !== "{}" && s !== "null") return s;
+    } catch {}
+  }
+  return String(e);
+}
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -137,7 +156,7 @@ export function ModelManager({
         setHardware(hw);
         setHardwareError(null);
       } catch (e) {
-        setHardwareError(e instanceof Error ? e.message : String(e));
+        setHardwareError(getErrorMessage(e));
         console.warn("algorith-voice: getHardwareInfo failed", e);
       }
       try {
@@ -155,7 +174,7 @@ export function ModelManager({
         console.warn("algorith-voice: getTranscriptionStatus failed", e);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
     }
   }, []);
 
@@ -229,7 +248,7 @@ export function ModelManager({
       const s = await downloadModel(id);
       setStatusMap((m) => ({ ...m, [id]: s }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
       setBusyId(null);
     }
   };
@@ -240,7 +259,7 @@ export function ModelManager({
       const s = await cancelDownload(id);
       setStatusMap((m) => ({ ...m, [id]: s }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
     } finally {
       setBusyId(null);
     }
@@ -263,7 +282,7 @@ export function ModelManager({
         setNotice(`Deleted ${id}.`);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
     } finally {
       setBusyId(null);
     }
@@ -281,7 +300,7 @@ export function ModelManager({
           : `Verify failed: ${s.errorMessage ?? s.errorCode}`,
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
     } finally {
       setBusyId(null);
     }
@@ -299,7 +318,7 @@ export function ModelManager({
       const ws = await getTranscriptionStatus().catch(() => null);
       if (ws) setWorkerStatus(ws);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
     } finally {
       setBusyId(null);
       setLoadStage(null);

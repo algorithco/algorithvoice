@@ -29,6 +29,25 @@ import { ReadyStep } from "./onboarding/ReadyStep.js";
 import Particles from "./Particles.js";
 import type { Prefs } from "./SettingsView.js";
 
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    if (typeof o.message === "string" && o.message) return o.message;
+    if (typeof o.errorMessage === "string" && o.errorMessage)
+      return o.errorMessage;
+    if (typeof o.error === "string" && o.error) return o.error;
+    if (typeof o.code === "string" && typeof o.message === "string")
+      return o.message;
+    try {
+      const s = JSON.stringify(o);
+      if (s && s !== "{}" && s !== "null") return s;
+    } catch {}
+  }
+  return String(e);
+}
+
 const STEPS = ["Hotkey", "Mode", "Model", "Ready"] as const;
 
 export function OnboardingView({
@@ -170,8 +189,7 @@ export function OnboardingView({
           }
         }
       } catch (e) {
-        if (!cancelled)
-          setModelError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setModelError(getErrorMessage(e));
       }
     })();
     return () => {
@@ -190,7 +208,7 @@ export function OnboardingView({
       setDownloadError(null);
       setStep(3);
     } catch (e) {
-      setDownloadError(e instanceof Error ? e.message : String(e));
+      setDownloadError(getErrorMessage(e));
     } finally {
       setDownloadBusy(false);
     }
@@ -260,7 +278,7 @@ export function OnboardingView({
       }
       await downloadModel(id);
     } catch (e) {
-      setDownloadError(e instanceof Error ? e.message : String(e));
+      setDownloadError(getErrorMessage(e));
     } finally {
       setDownloadBusy(false);
     }
@@ -463,7 +481,7 @@ export function OnboardingView({
                   } catch (e) {
                     // Non-shell (browser preview) or backend failure: stay on
                     // the list with a message instead of advancing.
-                    setModelError(e instanceof Error ? e.message : String(e));
+                    setModelError(getErrorMessage(e));
                   } finally {
                     setPreparing(false);
                   }
