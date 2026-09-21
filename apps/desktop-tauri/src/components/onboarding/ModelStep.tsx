@@ -104,7 +104,11 @@ export function ModelStep({
         {hardwareLine}
       </p>
       <div className="h-6" />
-      <div className="max-h-[42vh] w-full space-y-2 overflow-auto rounded-lg border border-white/10 bg-white/[0.04] p-2 text-left">
+      <div
+        role="radiogroup"
+        aria-label="Select a model"
+        className="max-h-[42vh] w-full space-y-2 overflow-auto rounded-lg border border-white/10 bg-white/[0.04] p-2 text-left"
+      >
         {models.map((m) => {
           const total = m.files.reduce((a, f) => a + f.sizeBytes, 0);
           const isPicked = pickedId === m.id;
@@ -127,8 +131,10 @@ export function ModelStep({
             <button
               key={m.id}
               type="button"
-              disabled={blocked}
+              role="radio"
+              aria-checked={isPicked}
               aria-disabled={blocked}
+              disabled={blocked}
               onClick={() => {
                 if (!blocked) onPick(m.id);
               }}

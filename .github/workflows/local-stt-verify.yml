@@ -14,6 +14,12 @@ name: local-stt-verify
 on:
   push:
     branches: [ci/local-stt-verify]
+  pull_request:
+    paths:
+      - "apps/desktop-tauri/src-tauri/src/local_asr/**"
+      - "apps/desktop-tauri/src-tauri/scripts/sign-manifest.py"
+      - "apps/desktop-tauri/src-tauri/src/local_asr/default_manifest.json"
+      - "apps/desktop-tauri/src-tauri/src/local_asr/manifest_signing_pubkey.hex"
   workflow_dispatch:
 
 permissions:

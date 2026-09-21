@@ -188,9 +188,12 @@ pub(crate) async fn verify_file(path: &Path, expected_sha256: &str) -> AppResult
     if actual == expected_sha256.to_lowercase() {
         Ok(())
     } else {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "model file".to_string());
         Err(AppError::model_checksum_mismatch(format!(
-            "checksum mismatch for {}",
-            path.display()
+            "checksum mismatch for {name}"
         )))
     }
 }
@@ -199,13 +202,14 @@ fn map_write_error(e: std::io::Error, dest: &Path) -> AppError {
     let is_full = e.kind() == std::io::ErrorKind::StorageFull
         || e.raw_os_error() == Some(28)
         || e.to_string().contains("No space");
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "model file".to_string());
     if is_full {
-        AppError::model_insufficient_disk_space(format!(
-            "disk full while writing {}",
-            dest.display()
-        ))
+        AppError::model_insufficient_disk_space(format!("disk full while writing {name}"))
     } else {
-        AppError::model_download_failed(format!("cannot write {}: {e}", dest.display()))
+        AppError::model_download_failed(format!("cannot write {name}: {e}"))
     }
 }
 
