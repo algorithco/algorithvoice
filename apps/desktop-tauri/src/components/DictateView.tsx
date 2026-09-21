@@ -289,7 +289,8 @@ export function DictateView({
             role="alert"
             className="av-small mt-3 rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
           >
-            No local model selected — download one in Settings → Local, then click “Use this model”.
+            No local model selected — download one in Settings → Local, then
+            click “Use this model”.
           </p>
         ) : isLocal ? (
           <p className="av-small mt-3 text-gray-500">

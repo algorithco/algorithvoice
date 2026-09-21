@@ -146,7 +146,9 @@ function writeLocalPrefs(prefs: Prefs): void {
 //   NEVER written in Tauri (avoids dual-persistence divergence); it is only
 //   read once as a one-time migration when the store is empty.
 // - Browser preview: localStorage is the only store.
-export async function loadPrefs(opts?: { allowMigration?: boolean }): Promise<Prefs> {
+export async function loadPrefs(opts?: {
+  allowMigration?: boolean;
+}): Promise<Prefs> {
   const allowMigration = opts?.allowMigration ?? true;
   if (isTauri()) {
     try {
@@ -229,7 +231,8 @@ export async function saveOnboarded(): Promise<void> {
     await store.set("onboarded", true);
     await store.save();
     const roundtrip = await store.get<boolean>("onboarded");
-    if (roundtrip !== true) throw new Error("onboarded store verification failed");
+    if (roundtrip !== true)
+      throw new Error("onboarded store verification failed");
     return;
   }
   try {

@@ -275,7 +275,11 @@ async function wavBase64FromMono(
     mono = Float32Array.from(samples) as Float32Array<ArrayBuffer>;
   } else if (samples.buffer instanceof ArrayBuffer) {
     // Use view directly if length matches, otherwise slice copy.
-    mono = new Float32Array(samples.buffer, samples.byteOffset, samples.length) as Float32Array<ArrayBuffer>;
+    mono = new Float32Array(
+      samples.buffer,
+      samples.byteOffset,
+      samples.length,
+    ) as Float32Array<ArrayBuffer>;
     // Ensure we own a clean ArrayBuffer (not a slice of larger buffer)
     if (mono.buffer.byteLength !== mono.length * 4) {
       mono = Float32Array.from(samples) as Float32Array<ArrayBuffer>;

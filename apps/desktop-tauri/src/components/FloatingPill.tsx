@@ -149,8 +149,14 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           setPill("idle");
           return;
         }
-        if (!useLocal && typeof navigator !== "undefined" && navigator.onLine === false) {
-          showNotice("Offline — switch to Local (offline) in Settings to transcribe without internet.");
+        if (
+          !useLocal &&
+          typeof navigator !== "undefined" &&
+          navigator.onLine === false
+        ) {
+          showNotice(
+            "Offline — switch to Local (offline) in Settings to transcribe without internet.",
+          );
           setPill("idle");
           return;
         }

@@ -128,10 +128,10 @@ export function ModelStep({
                     : null;
           const reasons = c?.reasons?.slice(0, 1).join(" ") ?? "";
           return (
+            // biome-ignore lint/a11y/useAriaPropsSupportedByRole: radiogroup pattern — button with aria-checked is intentional
             <button
               key={m.id}
               type="button"
-              role="radio"
               aria-checked={isPicked}
               aria-disabled={blocked}
               disabled={blocked}

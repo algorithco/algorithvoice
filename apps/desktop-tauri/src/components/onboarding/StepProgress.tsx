@@ -8,12 +8,13 @@ export function StepProgress({
   const steps = total === 4 ? [0, 1, 2, 3] : [0, 1, 2];
   const last = steps.length - 1;
   return (
-    <ol
-      className="flex items-center gap-0"
-      aria-label="Onboarding progress"
-    >
+    <ol className="flex items-center gap-0" aria-label="Onboarding progress">
       {steps.map((i) => (
-        <li key={i} className="flex items-center" aria-current={i === current ? "step" : undefined}>
+        <li
+          key={i}
+          className="flex items-center"
+          aria-current={i === current ? "step" : undefined}
+        >
           <div
             className={`h-2.5 w-2.5 rounded-full transition-colors ${
               i === current
