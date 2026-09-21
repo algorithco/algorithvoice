@@ -229,6 +229,45 @@ export function ModelManager({
 
   const activeId = prefs.activeModelId;
 
+  // Auto-select a ready model when none is active — fixes "No local model
+  // selected" after a fresh download or when switching to Local mode with a
+  // ready model already on disk. Respects compatibility and avoids loops.
+  useEffect(() => {
+    if (!isTauri() || !models || prefs.activeModelId) return;
+    const readyEntry = Object.entries(statusMap).find(
+      ([, s]) => s.status === "ready",
+    );
+    if (!readyEntry) return;
+    const [readyId] = readyEntry;
+    const level = compatMap[readyId]?.level;
+    if (level === "unsupported") return;
+    if (busyId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        setBusyId(readyId);
+        setLoadStage("resolving-files");
+        const s = await selectActiveModel(readyId);
+        if (cancelled) return;
+        setStatusMap((m) => ({ ...m, [readyId]: s }));
+        onPrefs({ ...prefs, activeModelId: readyId });
+        setNotice(`Auto-selected ${readyId} for local mode.`);
+        const ws = await getTranscriptionStatus().catch(() => null);
+        if (ws && !cancelled) setWorkerStatus(ws);
+      } catch (e) {
+        if (!cancelled) setError(getErrorMessage(e));
+      } finally {
+        if (!cancelled) {
+          setBusyId(null);
+          setLoadStage(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [models, statusMap, compatMap, prefs, onPrefs, busyId]);
+
   const hardwareSummary = useMemo(() => {
     if (!hardware) return null;
     const ramGb = (hardware.totalRamBytes / 1_000_000_000).toFixed(1);

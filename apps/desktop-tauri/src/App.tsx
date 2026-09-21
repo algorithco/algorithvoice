@@ -143,7 +143,6 @@ export default function App() {
   }, [prefs]);
   const updatePrefs = useCallback(
     (p: Prefs) => {
-      const prev = lastSavedRef.current;
       setPrefs(p);
       const task = saveQueueRef.current.then(async () => {
         await savePrefs(p);
@@ -155,8 +154,8 @@ export default function App() {
         lastSavedRef.current = p;
       });
       task.catch((e: unknown) => {
-        console.error("algorith-voice: savePrefs failed — reverting", e);
-        setPrefs(prev);
+        console.error("algorith-voice: savePrefs failed", e);
+        // keep optimistic UI — do not revert; next reload will reconcile
       });
       // Keep queue chain alive even after failure
       saveQueueRef.current = task.catch(() => {});
