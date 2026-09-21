@@ -1,6 +1,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { saveHistory } from "../lib/history.js";
+import { loadPrefs } from "../lib/prefs.js";
 import {
   blobToBase64,
   blobToWav16kMono,
@@ -250,6 +251,14 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     // here, before any async work starts.
     if (stateRef.current !== "idle" || startingRef.current) return;
     startingRef.current = true;
+    // Re-read prefs from the store on every press. The pill window keeps
+    // its own copy and a Settings change in another window may not have
+    // arrived yet — never route a transcription on a stale mode.
+    try {
+      prefsRef.current = await loadPrefs();
+    } catch {
+      // Store unreadable — fall back to last known prefs.
+    }
     const token = ++pressTokenRef.current;
     discardRef.current = false;
     pressStartRef.current = Date.now();

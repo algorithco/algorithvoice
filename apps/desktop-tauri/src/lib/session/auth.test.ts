@@ -126,13 +126,13 @@ describe("login/signup/logout", () => {
     );
   });
 
-  it("sessionStatus falls back to logged-out in browser when no demo", async () => {
+  it("sessionStatus falls back to logged-out in browser", async () => {
     mockInvoke.mockRejectedValue(new Error("not in Tauri shell"));
     const s = await sessionStatus();
     expect(s).toEqual({ loggedIn: false });
   });
 
-  it("logout clears demo + history keys (browser)", async () => {
+  it("logout clears history keys (browser)", async () => {
     window.localStorage.setItem("algorith-voice-history", "[]");
     mockInvoke.mockResolvedValue(undefined);
     globalThis.fetch = vi.fn().mockResolvedValue({

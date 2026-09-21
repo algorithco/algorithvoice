@@ -3,12 +3,8 @@ import { Button, Input } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { login, logout, sessionStatus, signup } from "../lib/session/auth.js";
-import { DEMO_EMAIL, loginDemo } from "../lib/session/demo-account.js";
 import { isTauri } from "../lib/session/env.js";
-import type { SessionInfo } from "../lib/session/types.js";
 import { LocalUsageSection } from "./LocalUsageSection.js";
-import { OAuthButtons } from "./OAuthButtons.js";
 import { triggerUpdateCheck } from "./UpdateAnnouncement.js";
 
 const ModelManager = lazy(() =>
@@ -23,94 +19,6 @@ export interface Prefs {
   activeModelId: string | null;
 }
 
-function LoginForm({ onDone }: { onDone: (s: SessionInfo) => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isSignup, setIsSignup] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const s = isSignup
-        ? await signup(email, password, "Desktop")
-        : await login(email, password);
-      onDone(s);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
-      <OAuthButtons onDone={onDone} />
-      <div className="my-6 flex items-center gap-3" aria-hidden="true">
-        <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
-        <span className="text-xs uppercase tracking-wide text-gray-500">
-          or with email
-        </span>
-        <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
-      </div>
-      <div className="flex flex-col gap-4">
-        <label className="text-sm text-gray-500" htmlFor="av-login-email">
-          Email
-          <Input
-            id="av-login-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            className="mt-2"
-          />
-        </label>
-        <label className="text-sm text-gray-500" htmlFor="av-login-password">
-          Password
-          <Input
-            id="av-login-password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={isSignup ? "new-password" : "current-password"}
-            className="mt-2"
-          />
-        </label>
-      </div>
-      {error ? <p className="mt-3 text-sm text-red-500">{error}</p> : null}
-      <div className="mt-6 flex flex-wrap gap-2">
-        <Button onClick={submit} disabled={busy || !email || !password}>
-          {busy ? "Please wait" : isSignup ? "Create account" : "Log in"}
-        </Button>
-        <Button variant="secondary" onClick={() => setIsSignup(!isSignup)}>
-          {isSignup ? "Have an account?" : "New here?"}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            setError(null);
-            void loginDemo()
-              .then(onDone)
-              .catch((e: unknown) =>
-                setError(
-                  e instanceof Error ? e.message : "Demo sign-in failed.",
-                ),
-              );
-          }}
-          disabled={busy}
-        >
-          Demo
-        </Button>
-      </div>
-      <p className="mt-3 text-xs text-gray-500">
-        Demo uses {DEMO_EMAIL} locally — no backend required.
-      </p>
-    </div>
-  );
-}
-
 export function SettingsView({
   prefs,
   onPrefs,
@@ -118,7 +26,6 @@ export function SettingsView({
   prefs: Prefs;
   onPrefs: (p: Prefs) => void;
 }) {
-  const [session, setSession] = useState<SessionInfo>({ loggedIn: false });
   const [autostart, setAutostart] = useState(false);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [hotkeyInput, setHotkeyInput] = useState(prefs.hotkey);
@@ -137,9 +44,6 @@ export function SettingsView({
   }, []);
 
   useEffect(() => {
-    void sessionStatus()
-      .then(setSession)
-      .catch(() => {});
     if (isTauri()) {
       void isEnabled()
         .then(setAutostart)
@@ -152,9 +56,6 @@ export function SettingsView({
     if (isTauri()) {
       void import("@tauri-apps/api/event").then(({ listen }) =>
         listen("settings-refresh", () => {
-          void sessionStatus()
-            .then(setSession)
-            .catch(() => {});
           void isEnabled()
             .then(setAutostart)
             .catch(() => {});
@@ -263,43 +164,8 @@ export function SettingsView({
         Settings
       </h1>
       <p className="mt-2 text-sm text-gray-500 lg:text-[15px]">
-        Manage your account and preferences. Changes save automatically.
+        Manage your preferences. Changes save automatically.
       </p>
-
-      <section className="mt-8 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
-          Account
-        </h2>
-        <div className="mt-4">
-          {session.loggedIn ? (
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-                <div>
-                  <p className="text-sm font-medium text-black dark:text-white">
-                    {session.email}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Signed in • Plan: free
-                  </p>
-                </div>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    void logout().then(() => setSession({ loggedIn: false }));
-                  }}
-                >
-                  Log out
-                </Button>
-              </div>
-              <p className="text-xs text-gray-500">
-                Session stored securely in OS keyring. Tokens never touch disk.
-              </p>
-            </div>
-          ) : (
-            <LoginForm onDone={setSession} />
-          )}
-        </div>
-      </section>
 
       <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">

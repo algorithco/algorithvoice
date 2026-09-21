@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// Minimal E2E smoke (jsdom): launch → demo auth → onboarding → dashboard.
-// A full tauri-driver + WebDriver harness is deferred (see CHANGELOG — NEEDS
-// PRODUCT INPUT for CI runner with native binary); this proves the critical
-// path boots and composes.
+// Minimal boot smoke (jsdom): the app shell renders (auth gate when signed
+// out, dashboard when a session exists). A full tauri-driver + WebDriver
+// harness is deferred (see CHANGELOG — NEEDS PRODUCT INPUT for CI runner
+// with native binary); this proves the critical path boots and composes.
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -56,7 +56,6 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 }));
 
 import App from "./App.js";
-import { loginDemo } from "./lib/session/demo-account.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -65,12 +64,8 @@ afterEach(() => {
 });
 
 describe("critical-path smoke", () => {
-  it("demo login persists, onboarding completes, dashboard renders", async () => {
-    // 1. Demo auth works without backend.
-    const session = await loginDemo();
-    expect(session.loggedIn).toBe(true);
-
-    // 2. Full app boots to dashboard when already onboarded.
+  it("signed-out shell renders the auth view", async () => {
+    // No session in a fresh browser preview: the auth gate shows login.
     window.localStorage.setItem(
       "algorith-voice-prefs",
       JSON.stringify({
@@ -97,8 +92,8 @@ describe("critical-path smoke", () => {
     });
 
     const text = div.textContent ?? "";
-    // Signed-in (demo) + onboarded → shell with sidebar/dashboard.
-    expect(text).toContain("Algorith Voice");
+    // Signed out → auth view with the desktop sign-in card.
+    expect(text).toContain("Welcome back");
     await act(async () => {
       root.unmount();
     });

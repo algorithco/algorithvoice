@@ -84,7 +84,6 @@ describe("settings window boot", () => {
 
     const text = div.textContent ?? "";
     expect(text).toContain("Settings");
-    expect(text).toContain("Account");
     expect(text).not.toContain("Loading");
 
     await act(async () => {
