@@ -134,7 +134,16 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       setPill("processing");
       try {
         try {
-          prefsRef.current = await loadPrefs({ allowMigration: false });
+          const fresh = await loadPrefs({ allowMigration: false });
+          if (
+            !(
+              prefsRef.current.mode === "local" &&
+              fresh.mode === "cloud" &&
+              prefsRef.current.activeModelId
+            )
+          ) {
+            prefsRef.current = fresh;
+          }
         } catch {
           // Keep last known prefs if store unreadable
         }
@@ -275,7 +284,16 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     if (stateRef.current !== "idle" || startingRef.current) return;
     startingRef.current = true;
     try {
-      prefsRef.current = await loadPrefs({ allowMigration: false });
+      const fresh = await loadPrefs({ allowMigration: false });
+      if (
+        !(
+          prefsRef.current.mode === "local" &&
+          fresh.mode === "cloud" &&
+          prefsRef.current.activeModelId
+        )
+      ) {
+        prefsRef.current = fresh;
+      }
     } catch {
       // Store unreadable — fall back to last known prefs.
     }

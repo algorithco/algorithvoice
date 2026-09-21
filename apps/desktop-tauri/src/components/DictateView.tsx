@@ -98,6 +98,9 @@ export function DictateView({
     let unTranscript: (() => void) | undefined;
     void listen<string>(PTT_ERROR_EVENT, (event) => {
       setPillMsg(String(event.payload ?? "Dictation failed."));
+      setTray("idle");
+      void setTrayState("idle");
+      setPreview("Hold the hotkey and speak — text lands here.");
     })
       .then((fn) => {
         unError = fn;

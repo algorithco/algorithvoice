@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import type { Prefs } from "../components/SettingsView.js";
 import {
+  buildPrefs,
   DEFAULT_PREFS,
   loadOnboarded,
   loadPrefs,
@@ -45,7 +46,17 @@ export function useSplashSequence(opts: {
         });
       let unlisten: (() => void) | undefined;
       let listenCancelled = false;
-      void listen("settings-refresh", () => {
+      void listen<Prefs>("settings-refresh", (event) => {
+        const payload = event.payload as unknown as Partial<Prefs> | undefined;
+        if (
+          payload &&
+          typeof payload === "object" &&
+          payload !== null &&
+          "mode" in payload
+        ) {
+          if (!listenCancelled) setPrefs(buildPrefs(payload));
+          return;
+        }
         void loadPrefs({ allowMigration: false })
           .then((p) => {
             if (!listenCancelled) setPrefs(p);

@@ -147,7 +147,7 @@ export default function App() {
       const task = saveQueueRef.current.then(async () => {
         await savePrefs(p);
         if (isTauri()) {
-          await emit("settings-refresh").catch((e: unknown) => {
+          await emit("settings-refresh", p).catch((e: unknown) => {
             console.warn("algorith-voice: settings-refresh emit failed", e);
           });
         }
