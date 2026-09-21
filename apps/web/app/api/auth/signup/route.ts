@@ -23,14 +23,14 @@ export async function POST(req: Request) {
       const data = JSON.parse(text) as { accessToken?: string };
       const token = data.accessToken;
       if (token) {
-        const isProd = process.env.NODE_ENV === "production";
+        // __Host- requires Secure (see login route) — same fix applies here.
         const response = new NextResponse(text, {
           status: res.status,
           headers,
         });
         response.cookies.set(COOKIE_NAME, token, {
           httpOnly: true,
-          secure: isProd,
+          secure: true,
           sameSite: "lax",
           path: "/",
           maxAge: COOKIE_MAX_AGE,

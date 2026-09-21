@@ -23,14 +23,16 @@ export async function POST(req: Request) {
       const data = JSON.parse(text) as { accessToken?: string };
       const token = data.accessToken;
       if (token) {
-        const isProd = process.env.NODE_ENV === "production";
+        // __Host- cookies are rejected by browsers unless Secure is set —
+        // even in local dev. localhost is a trustworthy origin, so
+        // Secure-over-http still works there.
         const response = new NextResponse(text, {
           status: res.status,
           headers,
         });
         response.cookies.set(COOKIE_NAME, token, {
           httpOnly: true,
-          secure: isProd,
+          secure: true,
           sameSite: "lax",
           path: "/",
           maxAge: COOKIE_MAX_AGE,

@@ -7,6 +7,10 @@ const config: NextConfig = {
   output: "standalone",
   typedRoutes: true,
   transpilePackages: ["@algorith-voice/ui", "@algorith-voice/shared-types"],
+  // Tunnel dev: the app is opened via https://app.trqsh.uz while Next runs
+  // on localhost:3000. Without this, dev-mode client resources are blocked
+  // cross-origin and the page renders SSR-only (no animations/interaction).
+  allowedDevOrigins: ["app.trqsh.uz", "api.trqsh.uz"],
 };
 
 export default config;

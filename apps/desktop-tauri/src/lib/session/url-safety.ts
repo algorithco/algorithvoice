@@ -14,7 +14,13 @@ export function isAllowedOpenUrl(url: string): boolean {
       return false;
     }
     if (u.protocol !== "https:") return false;
-    const allowed = ["api.algorithvoice.com", "github.com", "huggingface.co"];
+    const allowed = [
+      "api.algorithvoice.com",
+      "api.trqsh.uz",
+      "app.trqsh.uz",
+      "github.com",
+      "huggingface.co",
+    ];
     if (allowed.some((h) => host === h || host.endsWith(`.${h}`))) return true;
     return false;
   } catch {

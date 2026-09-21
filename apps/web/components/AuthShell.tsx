@@ -129,6 +129,37 @@ export function OAuthButtons({ mode }: { mode: "login" | "register" }) {
               ? "GitHub"
               : "Social";
         setNotice(`${name} sign-in isn't available yet — use email for now.`);
+      } else if (error === "oauth_failed" || error === "no_verified_email") {
+        setNotice(
+          error === "no_verified_email"
+            ? "GitHub sign-in needs a verified email on your GitHub account."
+            : "GitHub sign-in failed — please try again or use email.",
+        );
+      }
+      // GitHub success: backend redirected back with ?access_token=&email=.
+      // Complete the session through the BFF (sets the httpOnly cookie),
+      // then land on the dashboard. The token never stays in history:
+      // replace the URL before navigating.
+      const token = q.get("access_token");
+      if (token && !error) {
+        setNotice("Finishing GitHub sign-in…");
+        void fetch("/api/auth/oauth/session", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ accessToken: token }),
+        })
+          .then((res) => {
+            if (!res.ok) throw new Error("session");
+            const clean = new URL(window.location.href);
+            clean.searchParams.delete("access_token");
+            clean.searchParams.delete("email");
+            clean.searchParams.delete("provider");
+            window.history.replaceState(null, "", clean.toString());
+            window.location.href = "/dashboard";
+          })
+          .catch(() => {
+            setNotice("GitHub sign-in failed — please try again or use email.");
+          });
       }
     } catch {
       // Non-browser context or malformed query — no notice.
