@@ -393,13 +393,13 @@ export default async function DownloadPage() {
                     <a
                       href={
                         linux.find((a) => /\.deb$/i.test(a.name))
-                          ?.browser_download_url
+                          ?.browser_download_url ?? "#"
                       }
                       className="mt-2.5 block text-center font-mono text-xs text-faint underline decoration-line underline-offset-4 hover:text-sub"
                     >
                       .deb ·{" "}
                       {formatMB(
-                        linux.find((a) => /\.deb$/i.test(a.name))?.size,
+                        linux.find((a) => /\.deb$/i.test(a.name))?.size ?? 0,
                       )}{" "}
                       — system install
                     </a>
