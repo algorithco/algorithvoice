@@ -40,9 +40,12 @@ jobs:
       - name: signing secrets preflight
         shell: bash
         run: |
-          # With createUpdaterArtifacts:true a tag build without signing keys
-          # ships no .sig/latest.json and breaks auto-update in the field.
           [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ] || { echo "TAURI_SIGNING_PRIVATE_KEY missing — updater artifacts would be unsigned"; exit 1; }
+      - name: manifest signature check
+        shell: bash
+        run: |
+          pip install pynacl
+          python apps/desktop-tauri/src-tauri/scripts/sign-manifest.py check --manifest apps/desktop-tauri/src-tauri/src/local_asr/default_manifest.json --pubkey apps/desktop-tauri/src-tauri/src/local_asr/manifest_signing_pubkey.hex
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:

@@ -397,15 +397,20 @@ where
         .chain(req.fallback_url.as_deref())
         .collect();
     let mut last_err: Option<AppError> = None;
-    for url_raw in urls {
+    for (idx, url_raw) in urls.iter().enumerate() {
         let url = check_https(url_raw)?;
         match download_from_url(client, req, &url, &part, &meta_path, &on_progress).await {
             Ok(()) => return Ok(()),
             Err(e) => {
-                // Checksum mismatch and disk-full are terminal: retrying the
-                // same bytes cannot help (mismatch also deletes the part).
-                if e.code == "model-checksum-mismatch" || e.code == "model-insufficient-disk-space"
-                {
+                if e.code == "model-insufficient-disk-space" {
+                    return Err(e);
+                }
+                if e.code == "model-checksum-mismatch" {
+                    // Primary CDN corrupt — try fallback mirror before failing
+                    if idx + 1 < urls.len() {
+                        last_err = Some(e);
+                        continue;
+                    }
                     return Err(e);
                 }
                 last_err = Some(e);
