@@ -133,12 +133,8 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       if (!mountedRef.current) return;
       setPill("processing");
       try {
-        // Re-read prefs right before engine routing — user may have toggled
-        // Local ↔ Cloud while holding. StartPress already reloaded, but a
-        // mid-press toggle would otherwise route to stale engine and surface
-        // the opposite-mode error (e.g. cloud key message while in Local).
         try {
-          prefsRef.current = await loadPrefs();
+          prefsRef.current = await loadPrefs({ allowMigration: false });
         } catch {
           // Keep last known prefs if store unreadable
         }
@@ -267,11 +263,8 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     // here, before any async work starts.
     if (stateRef.current !== "idle" || startingRef.current) return;
     startingRef.current = true;
-    // Re-read prefs from the store on every press. The pill window keeps
-    // its own copy and a Settings change in another window may not have
-    // arrived yet — never route a transcription on a stale mode.
     try {
-      prefsRef.current = await loadPrefs();
+      prefsRef.current = await loadPrefs({ allowMigration: false });
     } catch {
       // Store unreadable — fall back to last known prefs.
     }

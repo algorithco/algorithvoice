@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { motion } from "motion/react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { AppSidebar } from "./components/AppSidebar.js";
 import { AuthView } from "./components/AuthView.js";
 import { ArrowLeft } from "./components/animate-ui/icons/arrow-left.js";
@@ -89,6 +89,7 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return;
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
     void listen<SessionInfo>("session-changed", (event) => {
       const payload = event.payload as unknown as SessionInfo;
       if (payload && typeof payload.loggedIn === "boolean") {
@@ -97,39 +98,45 @@ export default function App() {
       }
     })
       .then((fn) => {
-        unlisten = fn;
+        if (cancelled) fn();
+        else unlisten = fn;
       })
       .catch((e) =>
         console.warn("algorith-voice: session-changed listen failed", e),
       );
     return () => {
+      cancelled = true;
       if (unlisten) unlisten();
     };
   }, [setSession]);
 
-  const updatePrefs = (p: Prefs) => {
-    const prev = prefs;
-    setPrefs(p);
-    void savePrefs(p)
-      .then(() => {
-        // The floating-pill window runs its own JS context: it loads prefs
-        // once at boot and only resyncs on `settings-refresh`. Without this
-        // emit the pill keeps a stale mode (e.g. "cloud") after the user
-        // switches to Local in Settings, so PTT takes the Groq path and
-        // fails with "missing Groq API key" despite local mode selected.
-        // Also re-read per-press in FloatingPill as safety net.
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastSavedRef = useRef<Prefs>(prefs);
+  useEffect(() => {
+    lastSavedRef.current = prefs;
+  }, [prefs]);
+  const updatePrefs = useCallback(
+    (p: Prefs) => {
+      const prev = lastSavedRef.current;
+      setPrefs(p);
+      const task = saveQueueRef.current.then(async () => {
+        await savePrefs(p);
         if (isTauri()) {
-          void emit("settings-refresh").catch((e: unknown) => {
+          await emit("settings-refresh").catch((e: unknown) => {
             console.warn("algorith-voice: settings-refresh emit failed", e);
           });
         }
-      })
-      .catch((e: unknown) => {
+        lastSavedRef.current = p;
+      });
+      task.catch((e: unknown) => {
         console.error("algorith-voice: savePrefs failed — reverting", e);
-        // Verification failed (store diverged) — revert UI so it matches disk
         setPrefs(prev);
       });
-  };
+      // Keep queue chain alive even after failure
+      saveQueueRef.current = task.catch(() => {});
+    },
+    [setPrefs],
+  );
 
   const handleLogout = () => {
     void logout()

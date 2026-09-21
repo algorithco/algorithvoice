@@ -19,18 +19,18 @@ export function useSplashSequence(opts: {
   const isSecondary = isSettingsWindow || isFloatingPill;
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [onboarded, setOnboarded] = useState(true);
-  const [ready, setReady] = useState(isSecondary);
+  const [ready, setReady] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(
     isSecondary ? { loggedIn: false } : null,
   );
   const [splashDone, setSplashDone] = useState(isSecondary);
 
   useEffect(() => {
+    let cancelled = false;
     if (isSecondary) {
-      // Secondary windows must not render with DEFAULT_PREFS cloud flash:
-      // wait for store read (withTimeout guards never-block) before ready.
       void withTimeout(
         Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
+          if (cancelled) return;
           setPrefs(p);
           setOnboarded(o);
         }),
@@ -40,29 +40,36 @@ export function useSplashSequence(opts: {
         .catch((e) =>
           console.warn("algorith-voice: secondary prefs load failed", e),
         )
-        .finally(() => setReady(true));
+        .finally(() => {
+          if (!cancelled) setReady(true);
+        });
       let unlisten: (() => void) | undefined;
+      let listenCancelled = false;
       void listen("settings-refresh", () => {
-        void loadPrefs()
-          .then(setPrefs)
+        void loadPrefs({ allowMigration: false })
+          .then((p) => {
+            if (!listenCancelled) setPrefs(p);
+          })
           .catch((e) =>
             console.warn("algorith-voice: settings-refresh reload failed", e),
           );
       })
         .then((fn) => {
-          unlisten = fn;
+          if (listenCancelled) fn();
+          else unlisten = fn;
         })
         .catch((e) =>
           console.warn("algorith-voice: settings-refresh listen failed", e),
         );
       return () => {
+        cancelled = true;
+        listenCancelled = true;
         if (unlisten) unlisten();
       };
     }
-    // Prefs must never block first paint: 3s deadline, then defaults.
-    // (Session already had its own 3s fallback below.)
     void withTimeout(
       Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
+        if (cancelled) return;
         setPrefs(p);
         setOnboarded(o);
       }),
@@ -70,23 +77,29 @@ export function useSplashSequence(opts: {
       undefined,
     )
       .catch((e) => console.warn("algorith-voice: prefs load failed", e))
-      .finally(() => setReady(true));
-    // Session must never block splash forever — 3s fallback to logged-out
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
     let settled = false;
     void sessionStatus()
       .then((s) => {
+        if (cancelled) return;
         settled = true;
         setSession(s);
       })
       .catch(() => {
+        if (cancelled) return;
         settled = true;
         setSession({ loggedIn: false });
       });
     const fallback = window.setTimeout(() => {
-      if (!settled) setSession({ loggedIn: false });
+      if (!cancelled && !settled) setSession({ loggedIn: false });
     }, 3000);
-    const t = setTimeout(() => setSplashDone(true), 3800);
+    const t = setTimeout(() => {
+      if (!cancelled) setSplashDone(true);
+    }, 3800);
     return () => {
+      cancelled = true;
       clearTimeout(t);
       clearTimeout(fallback);
     };
