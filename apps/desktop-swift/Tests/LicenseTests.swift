@@ -67,12 +67,12 @@ final class LicenseTests: XCTestCase {
         )
         XCTAssertEqual(
             BackendConfig.apiBaseURL(environment: [:], development: false).absoluteString,
-            "https://api.algorithvoice.com"
+            "https://api.trqsh.uz"
         )
         // Blank overrides fall through instead of producing an invalid URL.
         XCTAssertEqual(
             BackendConfig.apiBaseURL(environment: ["ALGORITHVOICE_API_URL": "  "]).absoluteString,
-            "https://api.algorithvoice.com"
+            "https://api.trqsh.uz"
         )
     }
 

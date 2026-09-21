@@ -48,7 +48,7 @@ fn license_status() -> AppResult<LicenseStatus> {
     // this release (no subscription endpoint, no local license file format).
     // Returning a silent fake `{valid:false}` would look like a real check;
     // fail loudly instead so callers and QA cannot mistake it for enforcement.
-    // When the product defines the source (e.g. api.algorithvoice.com
+    // When the product defines the source (e.g. api.trqsh.uz
     // subscription check or local license JWT + offline grace), implement it
     // here and remove this error. See CHANGELOG (P4.14).
     Err(AppError::not_implemented(

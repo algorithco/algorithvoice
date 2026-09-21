@@ -35,7 +35,7 @@ Tests/          XCTest suites, one file per Core module
 - `packages/shared-types` (Zod) is the wire-format reference. Swift `Codable`
   types must accept exactly what the backend sends — see `Core/VoiceProtocol.swift`.
 - Backend base URL follows the Tauri convention (`auth.ts`): `ALGORITHVOICE_API_URL`
-  (or `VITE_API_URL`) → dev `http://127.0.0.1:3001` → prod `https://api.algorithvoice.com`.
+  (or `VITE_API_URL`) → dev `http://127.0.0.1:3001` → prod `https://api.trqsh.uz`.
 - Cloud STT: `POST /stt/token` → short-lived JWT → `GET /stt/stream?token=`
   (frozen backend auth strategy); audio is binary PCM16 16kHz mono;
   `hello` uses `sampleRate: 16000, codec: "pcm16"` literally.
