@@ -52,7 +52,7 @@ export function DictateView({
       .then((fn) => {
         unlistenPressed = fn;
       })
-      .catch(() => {});
+      .catch((e) => console.warn("algorith-voice: ptt-pressed listen failed", e));
     void listen("ptt-released", () => {
       setTray("processing");
       void setTrayState("processing");
@@ -61,7 +61,7 @@ export function DictateView({
       .then((fn) => {
         unlistenReleased = fn;
       })
-      .catch(() => {});
+      .catch((e) => console.warn("algorith-voice: ptt-released listen failed", e));
     return () => {
       unlistenPressed?.();
       unlistenReleased?.();
@@ -84,7 +84,7 @@ export function DictateView({
       .then((fn) => {
         unError = fn;
       })
-      .catch(() => {});
+      .catch((e) => console.warn("algorith-voice: ptt-error listen failed", e));
     void listen<PttTranscriptPayload>(PTT_TRANSCRIPT_EVENT, (event) => {
       const payload = event.payload;
       if (!payload || !payload.text) return;
@@ -100,7 +100,7 @@ export function DictateView({
       .then((fn) => {
         unTranscript = fn;
       })
-      .catch(() => {});
+      .catch((e) => console.warn("algorith-voice: ptt-transcript listen failed", e));
     return () => {
       unError?.();
       unTranscript?.();
@@ -247,7 +247,15 @@ export function DictateView({
           </Button>
         </div>
         {pillMsg ? (
-          <p className="av-small mt-2 text-gray-500">{pillMsg}</p>
+          <p
+            className={`av-small mt-2 rounded-md px-2 py-1.5 text-xs ${
+              pillMsg.includes("Groq") || pillMsg.includes("model") || pillMsg.includes("Microphone") || pillMsg.includes("failed")
+                ? "bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800"
+                : "text-gray-500"
+            }`}
+          >
+            {pillMsg}
+          </p>
         ) : null}
         {isLocal ? (
           <p className="av-small mt-3 text-gray-500">

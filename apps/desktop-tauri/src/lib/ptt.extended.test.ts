@@ -61,6 +61,7 @@ describe("groq key path (keyring, never localStorage)", () => {
     mockInvoke.mockResolvedValue(undefined);
     await setGroqApiKey("sk-test");
     expect(mockInvoke).toHaveBeenCalledWith("set_groq_api_key", {
+      api_key: "sk-test",
       apiKey: "sk-test",
     });
     mockInvoke.mockResolvedValue(true);

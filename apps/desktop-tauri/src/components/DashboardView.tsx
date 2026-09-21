@@ -10,6 +10,7 @@ import { ClipboardList } from "./animate-ui/icons/clipboard-list.js";
 
 type Props = {
   hotkey: string;
+  mode?: "local" | "cloud" | "byok";
   email?: string | null;
   onNavigate: (view: "dashboard" | "dictate" | "history" | "settings") => void;
 };
@@ -51,7 +52,7 @@ function formatTime(iso: string): string {
   }
 }
 
-export function DashboardView({ hotkey, email, onNavigate }: Props) {
+export function DashboardView({ hotkey, mode, email, onNavigate }: Props) {
   const [stats, setStats] = useState<{
     total: number;
     today: number;
@@ -106,7 +107,7 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
           <span className="text-gray-300 dark:text-white/20">•</span>
           <span className="font-mono text-[13px]">{hotkey}</span>
           <span className="text-gray-300 dark:text-white/20">•</span>
-          <span>Cloud</span>
+          <span>{mode === "local" ? "Local" : mode === "byok" ? "BYOK" : "Cloud"}</span>
         </div>
       </div>
 

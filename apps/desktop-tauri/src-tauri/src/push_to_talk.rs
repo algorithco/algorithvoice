@@ -92,8 +92,15 @@ fn resolve_groq_key(explicit: Option<String>) -> AppResult<String> {
 }
 
 #[tauri::command]
-pub fn set_groq_api_key(api_key: String) -> AppResult<()> {
-    let key = api_key.trim().to_owned();
+#[allow(non_snake_case)]
+pub fn set_groq_api_key(
+    api_key: Option<String>,
+    apiKey: Option<String>,
+) -> AppResult<()> {
+    let key = api_key
+        .or(apiKey)
+        .ok_or_else(|| AppError::new("transcribe", "missing Groq API key"))?;
+    let key = key.trim().to_owned();
     if key.is_empty() {
         return Err(AppError::new(
             "transcribe",
@@ -353,16 +360,28 @@ pub(crate) async fn transcribe_local(
 /// picks the local model and is required when mode is local.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn transcribe_audio(
-    audio_base64: String,
+    audio_base64: Option<String>,
+    #[allow(non_snake_case)] audioBase64: Option<String>,
     language: Option<String>,
     api_key: Option<String>,
+    #[allow(non_snake_case)] apiKey: Option<String>,
     mime_type: Option<String>,
+    #[allow(non_snake_case)] mimeType: Option<String>,
     mode: Option<String>,
     model_id: Option<String>,
+    #[allow(non_snake_case)] modelId: Option<String>,
     app: AppHandle,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
+    // Accept both snake_case and camelCase (frontend sends both for back-compat)
+    let audio_base64 = audio_base64.or(audioBase64).ok_or_else(|| {
+        AppError::new("transcribe", "missing audio_base64")
+    })?;
+    let api_key = api_key.or(apiKey);
+    let mime_type = mime_type.or(mimeType);
+    let model_id = model_id.or(modelId);
     match resolve_transcribe_path(mode.as_deref())? {
         TranscribePath::Cloud => {
             let key = resolve_groq_key(api_key)?;
@@ -418,7 +437,13 @@ pub async fn transcribe_audio(
 /// apps and over RDP). Restore also runs when the keystroke itself
 /// fails, so the original clipboard is never left clobbered.
 #[tauri::command]
-pub async fn paste_text(text: String, restore_clipboard: Option<bool>) -> AppResult<()> {
+#[allow(non_snake_case)]
+pub async fn paste_text(
+    text: String,
+    restore_clipboard: Option<bool>,
+    #[allow(non_snake_case)] restoreClipboard: Option<bool>,
+) -> AppResult<()> {
+    let restore_clipboard = restore_clipboard.or(restoreClipboard);
     // Off the async executor like the combo path: ~470ms of sleeps must
     // never saturate Tauri's sync worker pool (see transcribe_and_paste).
     tokio::task::spawn_blocking(move || paste_text_blocking(text, restore_clipboard))
@@ -489,24 +514,41 @@ fn paste_keystroke() -> AppResult<()> {
 /// Returns the transcript for preview / history.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn transcribe_and_paste(
-    audio_base64: String,
+    audio_base64: Option<String>,
+    #[allow(non_snake_case)] audioBase64: Option<String>,
     language: Option<String>,
     api_key: Option<String>,
+    #[allow(non_snake_case)] apiKey: Option<String>,
     mime_type: Option<String>,
+    #[allow(non_snake_case)] mimeType: Option<String>,
     restore_clipboard: Option<bool>,
+    #[allow(non_snake_case)] restoreClipboard: Option<bool>,
     mode: Option<String>,
     model_id: Option<String>,
+    #[allow(non_snake_case)] modelId: Option<String>,
     app: AppHandle,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
+    let audio_base64 = audio_base64.or(audioBase64).ok_or_else(|| {
+        AppError::new("transcribe", "missing audio_base64")
+    })?;
+    let api_key = api_key.or(apiKey);
+    let mime_type = mime_type.or(mimeType);
+    let restore_clipboard = restore_clipboard.or(restoreClipboard);
+    let model_id = model_id.or(modelId);
     let result = transcribe_audio(
-        audio_base64,
+        Some(audio_base64),
+        None,
         language,
         api_key,
+        None,
         mime_type,
+        None,
         mode,
         model_id,
+        None,
         app,
         worker,
     )

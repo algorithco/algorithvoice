@@ -99,13 +99,14 @@ export default function App() {
       .then((fn) => {
         unlisten = fn;
       })
-      .catch(() => {});
+      .catch((e) => console.warn("algorith-voice: session-changed listen failed", e));
     return () => {
       if (unlisten) unlisten();
     };
   }, [setSession]);
 
   const updatePrefs = (p: Prefs) => {
+    const prev = prefs;
     setPrefs(p);
     void savePrefs(p)
       .then(() => {
@@ -114,10 +115,18 @@ export default function App() {
         // emit the pill keeps a stale mode (e.g. "cloud") after the user
         // switches to Local in Settings, so PTT takes the Groq path and
         // fails with "missing Groq API key" despite local mode selected.
-        if (isTauri()) void emit("settings-refresh").catch(() => {});
+        // Also re-read per-press in FloatingPill as safety net.
+        if (isTauri()) {
+          void emit("settings-refresh")
+            .catch((e: unknown) => {
+              console.warn("algorith-voice: settings-refresh emit failed", e);
+            });
+        }
       })
       .catch((e: unknown) => {
-        console.error("algorith-voice: savePrefs failed", e);
+        console.error("algorith-voice: savePrefs failed — reverting", e);
+        // Verification failed (store diverged) — revert UI so it matches disk
+        setPrefs(prev);
       });
   };
 
@@ -294,6 +303,7 @@ export default function App() {
             {view === "dashboard" ? (
               <DashboardView
                 hotkey={prefs.hotkey}
+                mode={prefs.mode}
                 email={session?.email ?? null}
                 onNavigate={setView}
               />
