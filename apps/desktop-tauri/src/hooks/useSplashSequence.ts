@@ -37,18 +37,24 @@ export function useSplashSequence(opts: {
         3000,
         undefined,
       )
-        .catch((e) => console.warn("algorith-voice: secondary prefs load failed", e))
+        .catch((e) =>
+          console.warn("algorith-voice: secondary prefs load failed", e),
+        )
         .finally(() => setReady(true));
       let unlisten: (() => void) | undefined;
       void listen("settings-refresh", () => {
         void loadPrefs()
           .then(setPrefs)
-          .catch((e) => console.warn("algorith-voice: settings-refresh reload failed", e));
+          .catch((e) =>
+            console.warn("algorith-voice: settings-refresh reload failed", e),
+          );
       })
         .then((fn) => {
           unlisten = fn;
         })
-        .catch((e) => console.warn("algorith-voice: settings-refresh listen failed", e));
+        .catch((e) =>
+          console.warn("algorith-voice: settings-refresh listen failed", e),
+        );
       return () => {
         if (unlisten) unlisten();
       };

@@ -291,7 +291,10 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       } catch (e) {
         const name = e instanceof DOMException ? e.name : "";
         if (name === "OverconstrainedError" || name === "NotFoundError") {
-          console.warn("algorith-voice: ideal audio constraints failed, retrying defaults", e);
+          console.warn(
+            "algorith-voice: ideal audio constraints failed, retrying defaults",
+            e,
+          );
           stream = await navigator.mediaDevices.getUserMedia({
             audio: {
               echoCancellation: true,
@@ -393,14 +396,18 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       .then((fn) => {
         unPressed = fn;
       })
-      .catch((e) => console.warn("algorith-voice: pill ptt-pressed listen failed", e));
+      .catch((e) =>
+        console.warn("algorith-voice: pill ptt-pressed listen failed", e),
+      );
     void listen("ptt-released", () => {
       stopPress();
     })
       .then((fn) => {
         unReleased = fn;
       })
-      .catch((e) => console.warn("algorith-voice: pill ptt-released listen failed", e));
+      .catch((e) =>
+        console.warn("algorith-voice: pill ptt-released listen failed", e),
+      );
     return () => {
       unPressed?.();
       unReleased?.();
