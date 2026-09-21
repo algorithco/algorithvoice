@@ -87,7 +87,9 @@ export function SiteNav({ signedIn }: { signedIn?: boolean }) {
 
   const activeValue = (() => {
     const p = pathname ?? "";
-    const found = NAV_ITEMS.find((it) => p === it.href || (it.href !== "/" && p.startsWith(it.href)));
+    const found = NAV_ITEMS.find(
+      (it) => p === it.href || (it.href !== "/" && p.startsWith(it.href)),
+    );
     return found?.href ?? "__none__";
   })();
 
@@ -132,7 +134,10 @@ export function SiteNav({ signedIn }: { signedIn?: boolean }) {
         <div className="flex shrink-0 items-center gap-2 md:gap-4">
           <div className="hidden md:block">
             <JellyRadio
-              items={NAV_ITEMS.map((it) => ({ value: it.href, label: it.label }))}
+              items={NAV_ITEMS.map((it) => ({
+                value: it.href,
+                label: it.label,
+              }))}
               value={activeValue}
               onChange={(val) => router.push(val as never)}
               ariaLabel="Primary navigation"

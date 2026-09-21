@@ -20,7 +20,9 @@ export function LogoutHold() {
   if (done) {
     return (
       <div className="rounded-xl border border-line bg-canvas px-4 py-3 text-center">
-        <p className="font-mono text-xs font-medium text-ink">Logged out — redirecting…</p>
+        <p className="font-mono text-xs font-medium text-ink">
+          Logged out — redirecting…
+        </p>
       </div>
     );
   }

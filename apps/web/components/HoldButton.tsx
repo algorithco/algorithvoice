@@ -7,7 +7,7 @@ import "./HoldButton.css";
 const TAP_MS = 250;
 const HIT_PAD = 10;
 const LINEAR = (t: number) => t;
-const EASE_OUT = (t: number) => 1 - Math.pow(1 - t, 3);
+const EASE_OUT = (t: number) => 1 - (1 - t) ** 3;
 
 export default function HoldButton({
   children = "Hold to delete",
@@ -61,12 +61,19 @@ export default function HoldButton({
   const phaseRef = useRef("idle");
   const inputRef = useRef<string | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const gesture = useRef<{ pointerId: number | null; start: number; rect: DOMRect | null }>({
+  const gesture = useRef<{
+    pointerId: number | null;
+    start: number;
+    rect: DOMRect | null;
+  }>({
     pointerId: null,
     start: 0,
     rect: null,
   });
-  const timers = useRef<{ complete: number; reset: number }>({ complete: 0, reset: 0 });
+  const timers = useRef<{ complete: number; reset: number }>({
+    complete: 0,
+    reset: 0,
+  });
   const hintId = useId();
 
   const go = (next: string, kind: string | null = null) => {
@@ -81,7 +88,13 @@ export default function HoldButton({
     clearTimeout(timers.current.reset);
   };
 
-  const motion = useRef<{ raf: number; p: number; from: number; to: number; start: number }>({ raf: 0, p: 0, from: 0, to: 0, start: 0 });
+  const motion = useRef<{
+    raf: number;
+    p: number;
+    from: number;
+    to: number;
+    start: number;
+  }>({ raf: 0, p: 0, from: 0, to: 0, start: 0 });
   const drive = (to: number, duration: number, ease: (t: number) => number) => {
     const m = motion.current;
     cancelAnimationFrame(m.raf);
@@ -124,7 +137,10 @@ export default function HoldButton({
     gesture.current.rect = button.getBoundingClientRect();
     go("holding", kind);
     drive(1, holdTime, LINEAR);
-    timers.current.complete = window.setTimeout(complete, holdTime + 100) as unknown as number;
+    timers.current.complete = window.setTimeout(
+      complete,
+      holdTime + 100,
+    ) as unknown as number;
     return true;
   };
 
@@ -140,7 +156,8 @@ export default function HoldButton({
   releaseRef.current = release;
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0 || !e.isPrimary || gesture.current.pointerId !== null) return;
+    if (e.button !== 0 || !e.isPrimary || gesture.current.pointerId !== null)
+      return;
     if (!begin("pointer")) return;
     gesture.current.pointerId = e.pointerId;
     try {
@@ -148,7 +165,10 @@ export default function HoldButton({
     } catch {}
   };
 
-  const endPointer = (e: React.PointerEvent, options?: { drifted?: boolean }) => {
+  const endPointer = (
+    e: React.PointerEvent,
+    options?: { drifted?: boolean },
+  ) => {
     if (e.pointerId !== gesture.current.pointerId) return;
     gesture.current.pointerId = null;
     try {
@@ -162,7 +182,11 @@ export default function HoldButton({
     if (e.pointerId !== gesture.current.pointerId) return;
     const r = gesture.current.rect;
     if (!r) return;
-    const out = e.clientX < r.left - HIT_PAD || e.clientX > r.right + HIT_PAD || e.clientY < r.top - HIT_PAD || e.clientY > r.bottom + HIT_PAD;
+    const out =
+      e.clientX < r.left - HIT_PAD ||
+      e.clientX > r.right + HIT_PAD ||
+      e.clientY < r.top - HIT_PAD ||
+      e.clientY > r.bottom + HIT_PAD;
     if (out) endPointer(e, { drifted: true });
   };
 
@@ -233,7 +257,9 @@ export default function HoldButton({
         {children}
       </span>
       <span className="hold-button__done" aria-hidden={phase !== "done"}>
-        {doneIcon ? <span className="hold-button__icon">{doneIcon}</span> : null}
+        {doneIcon ? (
+          <span className="hold-button__icon">{doneIcon}</span>
+        ) : null}
         {doneLabel}
       </span>
     </>
@@ -278,10 +304,14 @@ export default function HoldButton({
       <span className="hold-button__label">{labels}</span>
       <span className="hold-button__clip" aria-hidden="true">
         <span className="hold-button__fill">
-          <span className="hold-button__label hold-button__label--fill">{labels}</span>
+          <span className="hold-button__label hold-button__label--fill">
+            {labels}
+          </span>
         </span>
         <span className="hold-button__crest" aria-hidden="true">
-          <span className="hold-button__label hold-button__label--fill">{labels}</span>
+          <span className="hold-button__label hold-button__label--fill">
+            {labels}
+          </span>
         </span>
       </span>
       <span id={hintId} className="hold-button__sr">

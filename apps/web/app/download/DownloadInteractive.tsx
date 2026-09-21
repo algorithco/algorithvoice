@@ -22,7 +22,10 @@ function formatMB(bytes: number) {
 function detectOS(): "windows" | "linux" | "mac" | "unknown" {
   if (typeof navigator === "undefined") return "unknown";
   const ua = navigator.userAgent.toLowerCase();
-  const platform = (navigator as unknown as { userAgentData?: { platform: string } }).userAgentData?.platform?.toLowerCase() ?? "";
+  const platform =
+    (
+      navigator as unknown as { userAgentData?: { platform: string } }
+    ).userAgentData?.platform?.toLowerCase() ?? "";
   if (ua.includes("win") || platform.includes("win")) return "windows";
   if (ua.includes("mac") || platform.includes("mac")) return "mac";
   if (ua.includes("linux") || platform.includes("linux")) return "linux";
@@ -31,10 +34,18 @@ function detectOS(): "windows" | "linux" | "mac" | "unknown" {
 
 function pickForOS(assets: Asset[], os: string) {
   if (os === "windows") {
-    return assets.find((a) => /\.exe$/i.test(a.name)) ?? assets.find((a) => /\.msi$/i.test(a.name)) ?? null;
+    return (
+      assets.find((a) => /\.exe$/i.test(a.name)) ??
+      assets.find((a) => /\.msi$/i.test(a.name)) ??
+      null
+    );
   }
   if (os === "linux") {
-    return assets.find((a) => /\.AppImage$/i.test(a.name)) ?? assets.find((a) => /\.deb$/i.test(a.name)) ?? null;
+    return (
+      assets.find((a) => /\.AppImage$/i.test(a.name)) ??
+      assets.find((a) => /\.deb$/i.test(a.name)) ??
+      null
+    );
   }
   if (os === "mac") {
     return assets.find((a) => /\.dmg$/i.test(a.name)) ?? null;
@@ -42,8 +53,14 @@ function pickForOS(assets: Asset[], os: string) {
   return null;
 }
 
-export default function DownloadInteractive({ assets, tag, publishedAt }: Props) {
-  const [os, setOs] = useState<"windows" | "linux" | "mac" | "unknown">("unknown");
+export default function DownloadInteractive({
+  assets,
+  tag,
+  publishedAt,
+}: Props) {
+  const [os, setOs] = useState<"windows" | "linux" | "mac" | "unknown">(
+    "unknown",
+  );
   const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,7 +70,13 @@ export default function DownloadInteractive({ assets, tag, publishedAt }: Props)
   const primary = useMemo(() => pickForOS(assets, os), [assets, os]);
 
   const label =
-    os === "windows" ? "Windows" : os === "linux" ? "Linux" : os === "mac" ? "macOS" : "your OS";
+    os === "windows"
+      ? "Windows"
+      : os === "linux"
+        ? "Linux"
+        : os === "mac"
+          ? "macOS"
+          : "your OS";
 
   if (assets.length === 0) return null;
 
@@ -62,18 +85,30 @@ export default function DownloadInteractive({ assets, tag, publishedAt }: Props)
       {/* Auto-detected pill */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-2 rounded-full border border-line bg-raised px-3 py-1.5">
-          <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" aria-hidden />
+          <span
+            className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"
+            aria-hidden="true"
+          />
           <span className="font-mono text-xs font-medium tracking-wide text-ink">
             Detected: <span className="text-ink">{label}</span>
           </span>
-          {tag ? <span className="hidden text-xs text-faint sm:inline">· {tag}</span> : null}
+          {tag ? (
+            <span className="hidden text-xs text-faint sm:inline">· {tag}</span>
+          ) : null}
           {publishedAt ? (
             <span className="hidden text-xs text-faint sm:inline">
-              · {new Date(publishedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+              ·{" "}
+              {new Date(publishedAt).toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}
             </span>
           ) : null}
         </span>
-        <span className="t-cap text-faint">We picked the best installer for you</span>
+        <span className="t-cap text-faint">
+          We picked the best installer for you
+        </span>
       </div>
 
       {/* Primary download */}
@@ -116,22 +151,42 @@ export default function DownloadInteractive({ assets, tag, publishedAt }: Props)
                 className="group inline-flex min-h-[52px] items-center justify-center gap-2 rounded-full bg-ink px-8 text-[15px] font-semibold text-canvas shadow-[0_8px_24px_rgba(255,255,255,0.12)] transition-all duration-200 hover:translate-y-[-1px] hover:bg-white hover:shadow-[0_12px_32px_rgba(255,255,255,0.18)] active:translate-y-px"
                 download
               >
-                <svg aria-hidden viewBox="0 0 24 24" fill="none" className="h-5 w-5 shrink-0" stroke="currentColor" strokeWidth="1.8">
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="h-5 w-5 shrink-0"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                >
                   <path d="M12 3v14" strokeLinecap="round" />
-                  <path d="M7 12l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" strokeLinecap="round" />
+                  <path
+                    d="M7 12l5 5 5-5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                    strokeLinecap="round"
+                  />
                 </svg>
                 Download for {label}
               </a>
               <span className="text-center font-mono text-xs text-faint">
                 {formatMB(primary.size)} ·{" "}
-                {os === "windows" ? "Windows 10 1809+" : os === "linux" ? "Ubuntu 22.04+ · x64" : "macOS 13+ · Universal"}
+                {os === "windows"
+                  ? "Windows 10 1809+"
+                  : os === "linux"
+                    ? "Ubuntu 22.04+ · x64"
+                    : "macOS 13+ · Universal"}
               </span>
               <button
                 type="button"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(primary.browser_download_url);
+                    await navigator.clipboard.writeText(
+                      primary.browser_download_url,
+                    );
                     setCopied("primary");
                     setTimeout(() => setCopied(null), 1500);
                   } catch {}
@@ -146,7 +201,9 @@ export default function DownloadInteractive({ assets, tag, publishedAt }: Props)
       ) : (
         <div className="mt-6 rounded-2xl border border-dashed border-line bg-surface/50 p-6 text-center">
           <p className="t-body text-sub">
-            No auto-matched installer for <span className="font-medium text-ink">{label}</span> — pick manually below.
+            No auto-matched installer for{" "}
+            <span className="font-medium text-ink">{label}</span> — pick
+            manually below.
           </p>
         </div>
       )}
@@ -155,7 +212,8 @@ export default function DownloadInteractive({ assets, tag, publishedAt }: Props)
       <div className="mt-4 flex flex-wrap gap-2">
         {(["windows", "linux", "mac"] as const).map((o) => {
           const isActive = o === os;
-          const name = o === "windows" ? "Windows" : o === "linux" ? "Linux" : "macOS";
+          const name =
+            o === "windows" ? "Windows" : o === "linux" ? "Linux" : "macOS";
           return (
             <button
               key={o}
@@ -173,7 +231,10 @@ export default function DownloadInteractive({ assets, tag, publishedAt }: Props)
             </button>
           );
         })}
-        <a href="#all-downloads" className="rounded-full border border-line bg-surface px-4 py-2 font-mono text-xs font-medium text-sub hover:text-ink">
+        <a
+          href="#all-downloads"
+          className="rounded-full border border-line bg-surface px-4 py-2 font-mono text-xs font-medium text-sub hover:text-ink"
+        >
           View all →
         </a>
       </div>
