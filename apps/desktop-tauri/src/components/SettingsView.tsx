@@ -177,7 +177,7 @@ export function SettingsView({
             htmlFor="av-hotkey"
           >
             Push-to-talk hotkey
-            <div className="flex gap-2">
+            <div className="flex min-w-0 gap-2">
               <Input
                 id="av-hotkey"
                 value={hotkeyInput}
@@ -189,7 +189,7 @@ export function SettingsView({
                   if (e.key === "Enter") void handleHotkeySave();
                 }}
                 onBlur={() => void handleHotkeySave()}
-                className="flex-1 font-mono"
+                className="min-w-0 flex-1 font-mono"
                 spellCheck={false}
                 placeholder="Ctrl+Space"
               />
@@ -212,7 +212,7 @@ export function SettingsView({
 
           <div>
             <p className="text-sm text-gray-500">Transcription mode</p>
-            <div className="mt-2 flex gap-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               <Button
                 variant={prefs.mode === "cloud" ? "primary" : "secondary"}
                 onClick={() => onPrefs({ ...prefs, mode: "cloud" })}

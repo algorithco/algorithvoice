@@ -257,7 +257,7 @@ export default function App() {
         <ErrorBoundary>
           <main className={shell}>
             {updateBanner}
-            <div className="flex min-h-screen overflow-hidden">
+            <div className="flex h-screen overflow-hidden">
               <div className="hidden md:flex">
                 <AppSidebar
                   active={view}
@@ -361,7 +361,7 @@ export default function App() {
     <ErrorBoundary>
       <main className={shell}>
         {updateBanner}
-        <div className="flex min-h-screen overflow-hidden">
+        <div className="flex h-screen overflow-hidden">
           {/* Desktop sidebar */}
           <div className="hidden md:flex">
             <AppSidebar
