@@ -35,10 +35,25 @@ fn installed_catalog_model_loads_and_decodes() {
         .find(|model| model.id == id)
         .unwrap_or_else(|| panic!("{id} is not in the bundled model catalog"));
 
+    let language = std::env::var("SHERPA_TEST_LANGUAGE").unwrap_or_else(|_| "auto".to_string());
     let transcriber =
-        SherpaTranscriber::load(model, &dir, "auto").expect("installed model must load");
-    let silence = vec![0.0_f32; 8_000];
-    transcriber
-        .transcribe(&silence, "auto")
-        .expect("installed model must run one decode");
+        SherpaTranscriber::load(model, &dir, &language).expect("installed model must load");
+    if let Ok(wav_path) = std::env::var("SHERPA_TEST_WAV") {
+        let wav = std::fs::read(&wav_path).expect("test WAV must be readable");
+        let audio = algorith_voice_desktop_lib::local_asr::audio::decode_wav(&wav)
+            .expect("test WAV must decode through the production audio pipeline");
+        let transcript = transcriber
+            .transcribe(&audio.samples, &language)
+            .expect("installed model must transcribe the test WAV");
+        eprintln!("local model transcript: {}", transcript.text);
+        assert!(
+            !transcript.text.trim().is_empty(),
+            "spoken test WAV must produce a transcript"
+        );
+    } else {
+        let silence = vec![0.0_f32; 8_000];
+        transcriber
+            .transcribe(&silence, &language)
+            .expect("installed model must run one decode");
+    }
 }

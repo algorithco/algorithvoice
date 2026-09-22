@@ -6,6 +6,7 @@ import {
   loadPrefs,
   safeJsonParse,
   sanitizeHotkey,
+  sanitizeLanguage,
   sanitizeModelId,
   savePrefs,
 } from "./prefs.js";
@@ -41,6 +42,14 @@ describe("prefs sanitizers", () => {
     );
   });
 
+  it("normalizes explicit transcription languages and defaults to auto", () => {
+    expect(sanitizeLanguage("RU-ru")).toBe("ru");
+    expect(sanitizeLanguage(" uz ")).toBe("uz");
+    expect(sanitizeLanguage("auto")).toBe("auto");
+    expect(sanitizeLanguage("../en")).toBe("auto");
+    expect(sanitizeLanguage(undefined)).toBe("auto");
+  });
+
   it("strips __proto__/constructor/prototype keys", () => {
     const raw = `{"hotkey":"Ctrl+Space","__proto__":{"polluted":true}}`;
     const parsed = safeJsonParse<Record<string, unknown>>(raw);
@@ -59,6 +68,7 @@ describe("prefs sanitizers", () => {
       hotkey: "Alt+Space",
       theme: "light",
       mode: "local",
+      language: "auto",
       activeModelId: "whisper-small",
     });
     expect("extra" in built).toBe(false);

@@ -106,6 +106,27 @@ function statusTone(s: ModelStatusInfo["status"]): string {
   }
 }
 
+const languageNames =
+  typeof Intl.DisplayNames === "function"
+    ? new Intl.DisplayNames(["en"], { type: "language" })
+    : null;
+
+function languageLabel(code: string): string {
+  const name = languageNames?.of(code);
+  return name && name.toLowerCase() !== code.toLowerCase()
+    ? `${name} (${code})`
+    : code;
+}
+
+function languageForModel(language: string, model?: LocalModel): string {
+  if (language === "auto" || !model) return "auto";
+  return model.languages.some(
+    (supported) => supported.toLowerCase() === language.toLowerCase(),
+  )
+    ? language.toLowerCase()
+    : "auto";
+}
+
 export function ModelManager({
   prefs,
   onPrefs,
@@ -228,6 +249,19 @@ export function ModelManager({
   }, []);
 
   const activeId = prefs.activeModelId;
+  const activeModel = useMemo(
+    () => models?.find((model) => model.id === activeId),
+    [models, activeId],
+  );
+
+  // Never send a language retained from another model when the newly active
+  // model cannot recognize it. Reset visibly before the first dictation.
+  useEffect(() => {
+    if (!activeModel || prefs.language === "auto") return;
+    if (languageForModel(prefs.language, activeModel) === "auto") {
+      onPrefs({ ...prefs, language: "auto" });
+    }
+  }, [activeModel, prefs, onPrefs]);
 
   // Auto-select a ready model when none is active — fixes "No local model
   // selected" after a fresh download or when switching to Local mode with a
@@ -250,7 +284,12 @@ export function ModelManager({
         const s = await selectActiveModel(readyId);
         if (cancelled) return;
         setStatusMap((m) => ({ ...m, [readyId]: s }));
-        onPrefs({ ...prefs, activeModelId: readyId });
+        const readyModel = models.find((model) => model.id === readyId);
+        onPrefs({
+          ...prefs,
+          activeModelId: readyId,
+          language: languageForModel(prefs.language, readyModel),
+        });
         setNotice(`Auto-selected ${readyId} for local mode.`);
         const ws = await getTranscriptionStatus().catch(() => null);
         if (ws && !cancelled) setWorkerStatus(ws);
@@ -319,7 +358,7 @@ export function ModelManager({
       const s = await deleteModel(id);
       setStatusMap((m) => ({ ...m, [id]: s }));
       if (activeId === id) {
-        const next = { ...prefs, activeModelId: null };
+        const next = { ...prefs, activeModelId: null, language: "auto" };
         onPrefs(next);
         setNotice(
           `Deleted active model ${id} — local mode now has no model. Pick another or switch to Cloud in Settings.`,
@@ -368,7 +407,12 @@ export function ModelManager({
     try {
       const s = await selectActiveModel(id);
       setStatusMap((m) => ({ ...m, [id]: s }));
-      onPrefs({ ...prefs, activeModelId: id });
+      const selectedModel = models?.find((model) => model.id === id);
+      onPrefs({
+        ...prefs,
+        activeModelId: id,
+        language: languageForModel(prefs.language, selectedModel),
+      });
       setNotice(`Active model: ${id} (on-device)`);
       const ws = await getTranscriptionStatus().catch(() => null);
       if (ws) setWorkerStatus(ws);
@@ -463,6 +507,36 @@ export function ModelManager({
           Audio stays on this device in local mode — no uploads.
         </p>
       </div>
+
+      {activeModel ? (
+        <label
+          className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500 dark:border-white/10 dark:bg-black"
+          htmlFor="av-transcription-language"
+        >
+          <span className="font-medium text-black dark:text-white">
+            Transcription language
+          </span>
+          <select
+            id="av-transcription-language"
+            value={languageForModel(prefs.language, activeModel)}
+            onChange={(event) =>
+              onPrefs({ ...prefs, language: event.target.value })
+            }
+            className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-black dark:border-white/15 dark:bg-black dark:text-white sm:max-w-[360px]"
+          >
+            <option value="auto">Auto-detect</option>
+            {activeModel.languages.map((language) => (
+              <option key={language} value={language}>
+                {languageLabel(language)}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs leading-relaxed text-gray-500">
+            Choose the language you speak for more reliable short dictation.
+            Auto-detect asks {activeModel.name} to guess from every recording.
+          </span>
+        </label>
+      ) : null}
 
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">

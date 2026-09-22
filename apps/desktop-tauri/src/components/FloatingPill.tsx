@@ -178,10 +178,12 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           ? await blobToWav16kMono(blob)
           : await blobToBase64(blob);
         if (!mountedRef.current) return;
+        const language =
+          curPrefs.language === "auto" ? undefined : curPrefs.language;
         const result = await transcribeAndPaste(
           base64,
           useLocal ? "audio/wav" : mimeType,
-          undefined,
+          language,
           useLocal
             ? { mode: "local", modelId: curPrefs.activeModelId }
             : undefined,
