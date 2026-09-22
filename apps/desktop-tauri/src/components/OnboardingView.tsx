@@ -378,7 +378,7 @@ export function OnboardingView({
             Welcome to Algorith Voice
           </h1>
           <div className="h-3" />
-          <p className="text-xs sm:text-sm tracking-wide text-white/40">
+          <p className="text-xs sm:text-sm tracking-wide text-white/60">
             Step {step + 1} of {STEPS.length} · {STEPS[step]}
           </p>
           <div className="h-12" />

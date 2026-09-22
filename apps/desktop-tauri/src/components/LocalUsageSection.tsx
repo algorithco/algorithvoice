@@ -66,7 +66,7 @@ export function LocalUsageSection() {
         On-device transcription on this computer — audio in, text out. Counted
         locally, never uploaded.
       </p>
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex flex-wrap gap-2">
         {LOCAL_USAGE_PERIODS.map((p) => (
           <Button
             key={p}
@@ -79,7 +79,7 @@ export function LocalUsageSection() {
           </Button>
         ))}
       </div>
-      <dl className="mt-4 grid grid-cols-3 gap-3">
+      <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
           <dt className="text-xs text-gray-500">Sessions</dt>
           <dd className="mt-1 text-lg font-semibold text-black dark:text-white">
@@ -104,12 +104,12 @@ export function LocalUsageSection() {
           {summary.by_model.map((m) => (
             <li
               key={`${m.model_id} ${m.engine}`}
-              className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm dark:border-white/10 dark:bg-white/[0.03]"
+              className="flex flex-col gap-1 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-white/10 dark:bg-white/[0.03]"
             >
-              <span className="font-mono text-xs text-black dark:text-white">
+              <span className="min-w-0 break-words font-mono text-xs text-black dark:text-white">
                 {m.model_id}
               </span>
-              <span className="text-xs text-gray-500">
+              <span className="shrink-0 text-xs text-gray-500">
                 {m.sessions} sessions • {formatAudioDuration(m.audio_seconds)} •{" "}
                 {m.text_words} words
               </span>

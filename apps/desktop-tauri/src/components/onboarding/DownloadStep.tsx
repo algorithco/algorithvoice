@@ -60,7 +60,7 @@ export function DownloadStep({
           Downloading {modelName} failed.
         </p>
         <p className="mt-3 max-w-[560px] text-sm text-amber-300">{error}</p>
-        <p className="mt-2 max-w-[560px] text-xs text-white/40">
+        <p className="mt-2 max-w-[560px] text-xs text-white/60">
           Partial files are kept, so retrying resumes where it stopped.
         </p>
         <div className="mt-6 flex w-full justify-center gap-3">
@@ -76,7 +76,7 @@ export function DownloadStep({
           type="button"
           onClick={onUseCloud}
           disabled={!!busy}
-          className="mt-3 text-xs text-white/40 hover:text-white/70 disabled:opacity-40"
+          className="mt-3 text-xs text-white/60 hover:text-white/70 disabled:opacity-40"
         >
           Use Cloud instead
         </button>
@@ -91,7 +91,7 @@ export function DownloadStep({
       <p className="max-w-[560px] text-[16px] leading-relaxed text-white/50 md:text-[17px]">
         {verifying ? `Verifying ${modelName}…` : `Downloading ${modelName}…`}
       </p>
-      <p className="mt-2 max-w-[560px] text-xs leading-relaxed text-white/30">
+      <p className="mt-2 max-w-[560px] text-xs leading-relaxed text-white/60">
         {verifying
           ? "Checking every file against its signature before setup."
           : "Large download — keep the app open. You only do this once."}
@@ -111,7 +111,7 @@ export function DownloadStep({
             />
           )}
         </div>
-        <div className="mt-2 flex items-center justify-between font-mono text-[11px] text-white/40">
+        <div className="mt-2 flex items-center justify-between font-mono text-[11px] text-white/60">
           <span>
             {formatBytes(downloaded)}
             {total > 0 ? ` / ${formatBytes(total)}` : ""}
@@ -119,7 +119,7 @@ export function DownloadStep({
           <span>{pct == null ? "starting…" : `${pct}%`}</span>
         </div>
         {!verifying && progress ? (
-          <p className="mt-1 font-mono text-[11px] text-white/40">
+          <p className="mt-1 font-mono text-[11px] text-white/60">
             {formatSpeed(progress.bytesPerSecond)} • ETA{" "}
             {formatEta(progress.etaSeconds)}
           </p>
@@ -138,7 +138,7 @@ export function DownloadStep({
         type="button"
         onClick={onUseCloud}
         disabled={!!busy}
-        className="mt-3 text-xs text-white/40 hover:text-white/70 disabled:opacity-40"
+        className="mt-3 text-xs text-white/60 hover:text-white/70 disabled:opacity-40"
       >
         Use Cloud instead
       </button>

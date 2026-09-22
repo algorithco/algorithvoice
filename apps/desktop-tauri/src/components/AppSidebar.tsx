@@ -65,7 +65,7 @@ export function AppSidebar({
 
   return (
     <div
-      className="sticky top-0 h-screen shrink-0 overflow-hidden border-r border-gray-200 bg-white dark:border-white/10 dark:bg-black"
+      className="sticky top-0 h-full shrink-0 overflow-hidden border-r border-gray-200 bg-white dark:border-white/10 dark:bg-black"
       style={{
         width: collapsed ? COLLAPSED : EXPANDED,
         transition: `width ${DURATION}ms ${EASE}`,

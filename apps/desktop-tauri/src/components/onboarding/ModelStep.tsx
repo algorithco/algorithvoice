@@ -100,7 +100,7 @@ export function ModelStep({
       <p className="max-w-[560px] text-[16px] leading-relaxed text-white/50 md:text-[17px]">
         Which model will you use? We recommend one based on your system.
       </p>
-      <p className="mt-2 max-w-[560px] text-xs leading-relaxed text-white/30">
+      <p className="mt-2 max-w-[560px] text-xs leading-relaxed text-white/60">
         {hardwareLine}
       </p>
       <div className="h-6" />
@@ -128,10 +128,11 @@ export function ModelStep({
                     : null;
           const reasons = c?.reasons?.slice(0, 1).join(" ") ?? "";
           return (
-            // biome-ignore lint/a11y/useAriaPropsSupportedByRole: radiogroup pattern — button with aria-checked is intentional
+            // biome-ignore lint/a11y/useSemanticElements: rich model cards can't be native inputs — radiogroup > radio pattern is intentional
             <button
               key={m.id}
               type="button"
+              role="radio"
               aria-checked={isPicked}
               aria-disabled={blocked}
               disabled={blocked}
@@ -183,13 +184,13 @@ export function ModelStep({
                 </span>
               </span>
               <span
-                className={`mt-1 font-mono text-[11px] ${isPicked ? "text-black/60" : "text-white/40"}`}
+                className={`mt-1 font-mono text-[11px] ${isPicked ? "text-black/60" : "text-white/60"}`}
               >
                 {m.id} • {m.engine} • {formatBytes(total)} •{" "}
                 {m.languages.length} langs • {m.license}
               </span>
               <span
-                className={`mt-0.5 text-[11px] ${isPicked ? "text-black/50" : "text-white/40"}`}
+                className={`mt-0.5 text-[11px] ${isPicked ? "text-black/50" : "text-white/60"}`}
               >
                 RAM {m.minRamGb}→{m.recommendedRamGb} GB
                 {m.minVramGb > 0
@@ -225,7 +226,7 @@ export function ModelStep({
         type="button"
         onClick={onSkip}
         disabled={!!busy}
-        className="mt-3 text-xs text-white/40 hover:text-white/70 disabled:opacity-40"
+        className="mt-3 text-xs text-white/60 hover:text-white/70 disabled:opacity-40"
       >
         Not now — use Cloud
       </button>

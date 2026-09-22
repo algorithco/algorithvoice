@@ -42,7 +42,7 @@ export function ModeStep({
           Local (on-device) — audio never leaves this PC
         </button>
       </div>
-      <p className="mt-4 max-w-[560px] text-sm leading-relaxed text-white/40">
+      <p className="mt-4 max-w-[560px] text-sm leading-relaxed text-white/60">
         {cloudOnly
           ? "Cloud uses Groq Whisper securely. Audio is sent only while you hold the hotkey and transcripts are stored only locally."
           : "Local mode transcribes fully on-device. Pick and download a model in Settings to start dictating offline."}

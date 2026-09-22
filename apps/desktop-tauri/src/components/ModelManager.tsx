@@ -255,7 +255,14 @@ export function ModelManager({
         const ws = await getTranscriptionStatus().catch(() => null);
         if (ws && !cancelled) setWorkerStatus(ws);
       } catch (e) {
-        if (!cancelled) setError(getErrorMessage(e));
+        if (!cancelled) {
+          setError(getErrorMessage(e));
+          // Refresh the worker badge too: without this it keeps showing
+          // the previous lifecycle while the error banner tells another
+          // story (e.g. stale "failed" during a fresh attempt).
+          const ws = await getTranscriptionStatus().catch(() => null);
+          if (ws && !cancelled) setWorkerStatus(ws);
+        }
       } finally {
         if (!cancelled) {
           setBusyId(null);
@@ -367,6 +374,10 @@ export function ModelManager({
       if (ws) setWorkerStatus(ws);
     } catch (e) {
       setError(getErrorMessage(e));
+      // Same staleness guard as the auto-select path: the worker badge
+      // must reflect the failed attempt, not whatever it showed before.
+      const ws = await getTranscriptionStatus().catch(() => null);
+      if (ws) setWorkerStatus(ws);
     } finally {
       setBusyId(null);
       setLoadStage(null);
