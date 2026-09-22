@@ -1,6 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { Worker } from "bullmq";
-import { Redis } from "ioredis";
+import { type RedisOptions, Worker } from "bullmq";
 import pino from "pino";
 import { loadEnv } from "../config/env.js";
 import { getStripe } from "../modules/billing/stripe.js";
@@ -11,29 +10,15 @@ import { processStripeEvent } from "./stripe-events.js";
 const env = loadEnv();
 const log = pino({ level: env.LOG_LEVEL });
 
-function makeWorkerRedis() {
-  const client = new Redis(env.REDIS_URL, {
+/** BullMQ owns its ioredis 5 clients; pass options instead of an ioredis 6 instance. */
+function makeWorkerConnection(): RedisOptions {
+  return {
+    url: env.REDIS_URL,
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
+    keepAlive: 10_000,
     retryStrategy: (times) => Math.min(times * 100, 2000),
-  });
-  // Same guard as the API process: without an 'error' listener ioredis
-  // emits "Unhandled error event" on every reconnect and floods the log.
-  let lastWarn = 0;
-  client.on("error", (err: Error) => {
-    const now = Date.now();
-    if (now - lastWarn > 30_000) {
-      lastWarn = now;
-      log.warn(
-        {
-          err: (err as Error & { code?: string }).code ?? err.message,
-          url: env.REDIS_URL,
-        },
-        "worker redis unavailable — retrying in background",
-      );
-    }
-  });
-  return client;
+  };
 }
 
 function observe(name: string, worker: Worker) {
@@ -60,7 +45,11 @@ const workers = [
         log.info({ jobId: job.id, data: job.data }, "metering event received");
         return { ok: true, id: job.id, processed: false };
       },
-      { connection: makeWorkerRedis(), concurrency: 5, lockDuration: 60_000 },
+      {
+        connection: makeWorkerConnection(),
+        concurrency: 5,
+        lockDuration: 60_000,
+      },
     ),
   ),
   observe(
@@ -79,7 +68,7 @@ const workers = [
         }
       },
       {
-        connection: makeWorkerRedis(),
+        connection: makeWorkerConnection(),
         concurrency: 5,
         limiter: { max: 20, duration: 1000 },
         lockDuration: 60_000,
@@ -95,7 +84,11 @@ const workers = [
         log.info({ jobId: job.id }, "usage rollup tick");
         return { ok: true, id: job.id, processed: false };
       },
-      { connection: makeWorkerRedis(), concurrency: 1, lockDuration: 60_000 },
+      {
+        connection: makeWorkerConnection(),
+        concurrency: 1,
+        lockDuration: 60_000,
+      },
     ),
   ),
   observe(
@@ -192,7 +185,7 @@ const workers = [
         return { text, latencyMs };
       },
       {
-        connection: makeWorkerRedis(),
+        connection: makeWorkerConnection(),
         concurrency: 5,
         limiter: { max: 10, duration: 1000 },
         lockDuration: 60_000,
