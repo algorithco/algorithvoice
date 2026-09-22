@@ -15,6 +15,8 @@ export interface Prefs {
   hotkey: string;
   mode: SttMode;
   theme: "dark" | "light";
+  /** ISO language code to force during recognition, or "auto" to detect. */
+  language: string;
   /** Manifest id of the local model to transcribe with (null = none). */
   activeModelId: string | null;
 }

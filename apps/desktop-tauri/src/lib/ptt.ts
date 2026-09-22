@@ -265,13 +265,21 @@ export async function blobToWav16kMono(blob: Blob): Promise<string> {
   }
 }
 
+/** Safely detect shared backing memory when the webview exposes that API. */
+export function isSharedAudioBuffer(buffer: ArrayBufferLike): boolean {
+  return (
+    typeof SharedArrayBuffer !== "undefined" &&
+    buffer instanceof SharedArrayBuffer
+  );
+}
+
 async function wavBase64FromMono(
   samples: Float32Array<ArrayBufferLike>,
   sampleRate: number,
 ): Promise<string> {
   // Avoid copy when already ArrayBuffer-backed; SharedArrayBuffer needs clone.
   let mono: Float32Array<ArrayBuffer>;
-  if (samples.buffer instanceof SharedArrayBuffer) {
+  if (isSharedAudioBuffer(samples.buffer)) {
     mono = Float32Array.from(samples) as Float32Array<ArrayBuffer>;
   } else if (samples.buffer instanceof ArrayBuffer) {
     // Use view directly if length matches, otherwise slice copy.
