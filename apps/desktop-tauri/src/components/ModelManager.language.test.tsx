@@ -98,9 +98,9 @@ describe("ModelManager transcription language", () => {
       "#av-transcription-language",
     );
     expect(select).not.toBeNull();
-    expect(Array.from(select?.options ?? []).map((option) => option.value)).toEqual(
-      ["auto", "en", "ru", "uz"],
-    );
+    expect(
+      Array.from(select?.options ?? []).map((option) => option.value),
+    ).toEqual(["auto", "en", "ru", "uz"]);
 
     await act(async () => {
       if (!select) return;
