@@ -1,4 +1,4 @@
-import { type JobsOptions, Queue } from "bullmq";
+import { type JobsOptions, Queue, type RedisOptions } from "bullmq";
 import { Redis } from "ioredis";
 import { z } from "zod";
 import { loadEnv } from "../config/env.js";
@@ -56,22 +56,16 @@ export function makeApiRedis() {
   );
 }
 
-/** BullMQ client factory (BullMQ requires maxRetriesPerRequest: null). */
-export function makeQueueRedis(label: string) {
-  return guardRedis(
-    new Redis(env.REDIS_URL, {
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false,
-      // Same NAT idle-death workaround as makeApiRedis.
-      keepAlive: 10_000,
-      retryStrategy: (times) => Math.min(times * 100, 2000),
-    }),
-    label,
-  );
-}
-
-function makeRedis() {
-  return makeQueueRedis("queue");
+/** BullMQ connection options (BullMQ creates its own ioredis 5 clients). */
+export function makeQueueConnection(): RedisOptions {
+  return {
+    url: env.REDIS_URL,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    // Same NAT idle-death workaround as makeApiRedis.
+    keepAlive: 10_000,
+    retryStrategy: (times) => Math.min(times * 100, 2000),
+  };
 }
 
 /** Shared by API process (enqueue + /ready ping). Workers use their own. */
@@ -108,19 +102,19 @@ const queueDefaults: JobsOptions = {
 
 export const QUEUES = {
   stripeWebhook: new Queue("stripe.webhook-process", {
-    connection: makeRedis(),
+    connection: makeQueueConnection(),
     defaultJobOptions: queueDefaults,
   }),
   usageRollup: new Queue("usage.report-to-stripe", {
-    connection: makeRedis(),
+    connection: makeQueueConnection(),
     defaultJobOptions: queueDefaults,
   }),
   metering: new Queue("metering", {
-    connection: makeRedis(),
+    connection: makeQueueConnection(),
     defaultJobOptions: queueDefaults,
   }),
   stt: new Queue("stt.transcribe", {
-    connection: makeRedis(),
+    connection: makeQueueConnection(),
     defaultJobOptions: {
       attempts: 3,
       backoff: { type: "exponential", delay: 2000 },
