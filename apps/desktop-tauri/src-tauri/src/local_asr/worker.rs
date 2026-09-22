@@ -331,7 +331,7 @@ impl SherpaTranscriber {
         }
         let recognizer = recognizer.ok_or_else(|| {
             AppError::engine_init_failed(format!(
-                "sherpa could not initialise model {} (bad weights or unsupported hardware)",
+                "sherpa could not initialise model {} (bad weights, too little free memory, or unsupported hardware)",
                 model.id
             ))
         })?;
@@ -347,6 +347,25 @@ impl SherpaTranscriber {
             provider,
         })
     }
+}
+
+/// RAM preflight for a load, as a pure function for testability.
+/// See the call site for why total (not available) memory is the basis.
+/// Returns the user-facing error message when the machine provably cannot
+/// fit the model, `None` when load may proceed.
+fn ram_preflight_error(model: &LocalModel, total_bytes: u64) -> Option<String> {
+    if model.min_ram_gb > 0.0 {
+        let need = (model.min_ram_gb * 1024.0 * 1024.0 * 1024.0) as u64;
+        if total_bytes < need {
+            return Some(format!(
+                "not enough memory to load {} (need ~{:.0} GB RAM, this machine has ~{:.1} GB)",
+                model.id,
+                model.min_ram_gb,
+                total_bytes as f64 / 1_073_741_824.0
+            ));
+        }
+    }
+    None
 }
 
 /// Execution provider preference for a fresh load: CUDA when an NVIDIA GPU
@@ -603,19 +622,18 @@ impl TranscriptionWorker {
                 _ => {}
             }
         }
-        // Refuse to even try when RAM provably cannot fit the weights.
-        if model.min_ram_gb > 0.0 {
+        // Refuse to even try when the machine provably cannot fit the weights.
+        // Gated on TOTAL installed RAM (a stable capability), deliberately
+        // not on currently-available RAM: availability fluctuates with
+        // unrelated load (browser, IDE), so gating on it bricks activation
+        // nondeterministically on capable machines — e.g. a 16 GB machine
+        // with 4.1 GB momentarily free must still load a 4 GB-minimum
+        // model. `compat::evaluate` (the UI's green light) also gates on
+        // total, so any other basis contradicts what the user was told.
+        {
             let mut sys = sysinfo::System::new();
             sys.refresh_memory();
-            let available = sys.available_memory();
-            let need = (model.min_ram_gb * 1024.0 * 1024.0 * 1024.0) as u64;
-            if available < need {
-                let message = format!(
-                    "not enough free memory to load {} (need ~{:.0} GB, have ~{:.1} GB)",
-                    model.id,
-                    model.min_ram_gb,
-                    available as f64 / 1_073_741_824.0
-                );
+            if let Some(message) = ram_preflight_error(model, sys.total_memory()) {
                 self.fail(&message);
                 return Err(AppError::out_of_memory(message));
             }
@@ -1306,6 +1324,30 @@ mod tests {
             .expect_err("impossible RAM fails");
         assert_eq!(err.code, "out-of-memory");
         assert_eq!(worker.status().lifecycle, WorkerLifecycle::Failed);
+    }
+
+    #[test]
+    fn ram_preflight_gates_on_total_memory_not_available() {
+        // Regression: a 16.8 GB machine with only ~4.1 GB momentarily free
+        // must still load a 4 GB-minimum model. Gating on available memory
+        // bricked activation nondeterministically and contradicted the
+        // (total-based) compatibility verdict shown in the UI.
+        let model = parakeet_model();
+        assert_eq!(model.min_ram_gb, 4.0);
+        // 16.8 GB total, 4.1 GB free: proceeds (returns no error).
+        assert_eq!(ram_preflight_error(&model, 16_800_000_000), None);
+        // 2 GB total: refused, with the machine's memory in the message.
+        let err = ram_preflight_error(&model, 2_000_000_000)
+            .expect("2 GB machine cannot fit a 4 GB-minimum model");
+        assert!(err.contains("parakeet-tdt-0.6b-v3"), "{err}");
+        assert!(err.contains("this machine"), "{err}");
+    }
+
+    #[test]
+    fn ram_preflight_skipped_without_minimum() {
+        let mut model = parakeet_model();
+        model.min_ram_gb = 0.0;
+        assert_eq!(ram_preflight_error(&model, 0), None);
     }
 
     #[test]
