@@ -322,6 +322,15 @@ export function ModelManager({
       }
     } catch (e) {
       setError(getErrorMessage(e));
+      // A failed delete can still be partial (some files gone, some not):
+      // re-read the on-disk status so the UI reflects reality instead of
+      // the stale pre-delete state.
+      try {
+        const s = await getModelStatus(id);
+        setStatusMap((m) => ({ ...m, [id]: s }));
+      } catch {
+        // Best-effort: the error banner above already explains the failure.
+      }
     } finally {
       setBusyId(null);
     }

@@ -101,8 +101,8 @@ fn check_https(raw: &str) -> AppResult<reqwest::Url> {
     #[cfg(test)]
     let allow_loopback = true;
     #[cfg(not(test))]
-    let allow_loopback = url.scheme() == "http"
-        && std::env::var("ALLOW_HTTP_LOOPBACK").as_deref() == Ok("1");
+    let allow_loopback =
+        url.scheme() == "http" && std::env::var("ALLOW_HTTP_LOOPBACK").as_deref() == Ok("1");
     if allow_loopback
         && url.scheme() == "http"
         && matches!(
@@ -751,9 +751,18 @@ impl DownloadManager {
         Ok(())
     }
 
-    /// Abort a running download. Returns true when a live task was stopped;
-    /// the partial file is kept so the user can resume. Never an error.
-    pub fn cancel(&self, id: &str) -> bool {
+    /// Abort a running download and wait until it has actually stopped.
+    /// Returns true when a live task was stopped; the partial file is kept
+    /// so the user can resume. Never an error.
+    ///
+    /// The wait matters: `abort()` alone only *schedules* cancellation, so
+    /// the task may still hold an open `tokio::fs::File` when this returns.
+    /// Callers that touch the model directory next (e.g. `delete_model`'s
+    /// `remove_dir_all`, which fails outright on Windows while a handle is
+    /// open) must observe a fully-stopped task. The wait is bounded (abort
+    /// delivery is prompt once scheduled) so a stuck task can never hang
+    /// the caller.
+    pub async fn cancel(&self, id: &str) -> bool {
         let handle = self
             .tasks
             .lock()
@@ -762,6 +771,10 @@ impl DownloadManager {
         match handle {
             Some(h) if !h.is_finished() => {
                 h.abort();
+                // Await the aborted task so its file handles are dropped
+                // before returning. `JoinHandle::abort` + `.await` resolves
+                // once the task is actually done (cancelled or finished).
+                let _ = tokio::time::timeout(Duration::from_secs(3), h).await;
                 true
             }
             Some(_) => false,
@@ -1265,9 +1278,12 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         assert!(landed, "some bytes must land before cancel");
-        assert!(manager.cancel("m"), "live task must cancel");
+        assert!(manager.cancel("m").await, "live task must cancel");
         assert!(!manager.is_running("m"));
-        assert!(!manager.cancel("m"), "second cancel reports nothing live");
+        assert!(
+            !manager.cancel("m").await,
+            "second cancel reports nothing live"
+        );
         // The aborted task must never report completion: poll briefly and
         // require silence (abort delivery itself is prompt).
         for _ in 0..20 {
@@ -1283,6 +1299,63 @@ mod tests {
         assert!(part_len > 0, "some bytes must have landed, got {part_len}");
         assert!(!dir.join("model.bin").exists(), "final must not exist");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn cancel_then_delete_leaves_no_files_behind() {
+        // Regression test for `delete_model` racing an in-flight download:
+        // `cancel()` must await the aborted task (releasing its open file
+        // handle) so the subsequent `remove_dir_all` wipes everything. On
+        // Windows the removal fails outright while a handle is still open,
+        // leaving the directory partially intact and disk unreclaimed.
+        let dir = test_dir("cancel-delete");
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let (fx, _body) = start_server(payload(1024)).await;
+        let manager = DownloadManager::new();
+        let req = DownloadRequest {
+            url: format!("http://127.0.0.1:{}/slow", fx.addr.port()),
+            fallback_url: None,
+            dest_final: dir.join("model.bin"),
+            resume_key: "test-v1".to_string(),
+            expected_sha256: "ab".repeat(32),
+            expected_size: Some(8 * 1024 * 1024),
+            timeout: Duration::from_secs(60),
+            max_retries: 0,
+        };
+        manager
+            .start_model(
+                "m".to_string(),
+                vec![ModelFileRequest {
+                    request: req,
+                    completed_offset: 0,
+                    model_total: 8 * 1024 * 1024,
+                }],
+                |_| {},
+                |_| {},
+            )
+            .expect("start ok");
+        // Wait for bytes to land so the task holds an open file handle,
+        // mirroring a mid-download delete.
+        let part_path = dir.join("model.bin.part");
+        let mut landed = false;
+        for _ in 0..200 {
+            if let Ok(md) = std::fs::metadata(&part_path) {
+                if md.len() > 0 {
+                    landed = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(landed, "some bytes must land before cancel");
+        // The `delete_model` sequence: awaited cancel, then wipe the dir.
+        assert!(manager.cancel("m").await, "live task must cancel");
+        std::fs::remove_dir_all(&dir).expect("dir must wipe after awaited cancel");
+        assert!(!dir.exists(), "no leftover files or folders may remain");
+        // Grace period: a zombie task still holding the handle would keep
+        // writing and resurrect the directory; nothing may reappear.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!dir.exists(), "aborted task must not resurrect files");
     }
 
     #[tokio::test]
@@ -1312,7 +1385,7 @@ mod tests {
             .start_model("m".to_string(), vec![mk()], |_| {}, |_| {})
             .expect_err("second start must fail");
         assert_eq!(err.code, "model-download-failed");
-        manager.cancel("m");
+        manager.cancel("m").await;
         let _ = std::fs::remove_dir_all(&dir);
     }
 
