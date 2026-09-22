@@ -317,19 +317,14 @@ impl SherpaTranscriber {
         }
         config.model_config.num_threads = default_threads();
         config.model_config.debug = false;
-        // Prefer CUDA when an NVIDIA GPU is present; fall back to CPU when
-        // the linked ONNX Runtime has no CUDA execution provider (creation
-        // fails fast, before any weights load) or the GPU run fails.
-        // The effective provider is recorded and reported in status.
-        let mut provider = select_provider();
+        // The sherpa-onnx crate's bundled desktop artifact is CPU-only.
+        // Asking it for CUDA on a machine with an NVIDIA driver makes the
+        // native layer silently fall back while leaving us no API to query
+        // that fallback, so reporting `cuda` would be false. Keep provider
+        // selection aligned with the runtime that is actually linked.
+        let provider = select_provider();
         config.model_config.provider = Some(provider.clone());
-        let mut recognizer = sherpa_onnx::OfflineRecognizer::create(&config);
-        if recognizer.is_none() && provider != "cpu" {
-            provider = "cpu".to_string();
-            config.model_config.provider = Some(provider.clone());
-            recognizer = sherpa_onnx::OfflineRecognizer::create(&config);
-        }
-        let recognizer = recognizer.ok_or_else(|| {
+        let recognizer = sherpa_onnx::OfflineRecognizer::create(&config).ok_or_else(|| {
             AppError::engine_init_failed(format!(
                 "sherpa could not initialise model {} (bad weights, too little free memory, or unsupported hardware)",
                 model.id
@@ -368,15 +363,11 @@ fn ram_preflight_error(model: &LocalModel, total_bytes: u64) -> Option<String> {
     None
 }
 
-/// Execution provider preference for a fresh load: CUDA when an NVIDIA GPU
-/// is detectable, CPU otherwise. Creation failure still falls back to CPU
-/// (see `load`), so a CPU-only ONNX Runtime build never breaks loading.
+/// Execution provider bundled by the crates.io sherpa-onnx desktop artifact.
+/// GPU presence is still useful compatibility information, but it does not
+/// mean this CPU-only ONNX Runtime exposes a CUDA execution provider.
 fn select_provider() -> String {
-    if crate::local_asr::hardware::has_nvidia_gpu() {
-        "cuda".to_string()
-    } else {
-        "cpu".to_string()
-    }
+    "cpu".to_string()
 }
 
 fn require_file(dir: &Path, name: &str, model_id: &str) -> Result<(), AppError> {
@@ -1429,6 +1420,11 @@ mod tests {
         assert_eq!(normalize_language("EN"), "en");
         assert_eq!(normalize_language("en-US"), "en");
         assert_eq!(normalize_language("uz"), "uz");
+    }
+
+    #[test]
+    fn bundled_runtime_reports_its_cpu_provider() {
+        assert_eq!(select_provider(), "cpu");
     }
 
     #[test]
