@@ -144,10 +144,6 @@ pub async fn download_model(
     }
     let data = app_data_dir(&app)?;
     let dir = models::model_dir(&data, &model.id)?;
-    let known = model.known_total_bytes();
-    if known > 0 {
-        models::check_free_space(&dir, known)?;
-    }
     models::prune_stale_parts(&data, &manifest);
 
     // Skip files that are already present AND verified. Hashing is async
@@ -175,6 +171,13 @@ pub async fn download_model(
             fetch.push((file, offset));
         }
         offset += file.size_bytes;
+    }
+    // Free-space preflight covers only the bytes still missing, not the
+    // whole model: already-verified files are already on disk, so a 95%
+    // present model must not fail as if starting from zero.
+    let remaining = remaining_fetch_bytes(&fetch);
+    if remaining > 0 {
+        models::check_free_space(&dir, remaining)?;
     }
     let total = model.known_total_bytes();
     if fetch.is_empty() {
@@ -269,6 +272,12 @@ pub async fn download_model(
     models::status_info(&data, &model, true)
 }
 
+/// Bytes still missing for a pending fetch list: the free-space preflight
+/// budget. Already-verified files are on disk and cost nothing more.
+fn remaining_fetch_bytes(fetch: &[(&crate::local_asr::manifest::ModelFile, u64)]) -> u64 {
+    fetch.iter().map(|(file, _)| file.size_bytes).sum()
+}
+
 fn error_status(model: &LocalModel, e: &AppError) -> ModelStatusInfo {
     ModelStatusInfo {
         id: model.id.clone(),
@@ -290,8 +299,9 @@ pub async fn cancel_download(
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
     // Cancelling an idle download is a successful no-op; partial bytes stay
-    // on disk for resume either way.
-    downloads.cancel(&model.id);
+    // on disk for resume either way. Awaited so any open file handle is
+    // released before the status read below.
+    downloads.cancel(&model.id).await;
     let data = app_data_dir(&app)?;
     let info = models::status_info(&data, &model, false)?;
     emit_status(&app, &info);
@@ -307,7 +317,11 @@ pub async fn delete_model(
 ) -> AppResult<ModelStatusInfo> {
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
-    downloads.cancel(&model.id);
+    // Awaited: `cancel` only returns once the aborted task has actually
+    // stopped and dropped its open file handles. Deleting while a handle
+    // is open fails outright on Windows (sharing violation) and leaves
+    // the directory partially intact, so disk is never reclaimed.
+    downloads.cancel(&model.id).await;
     // Drop the in-memory engine when it serves the deleted model. Without
     // this the worker keeps transcribing with files that no longer exist
     // (and reports ready for a model that is gone).
@@ -316,13 +330,28 @@ pub async fn delete_model(
     }
     let data = app_data_dir(&app)?;
     let dir = models::model_dir(&data, &model.id)?;
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(AppError::model_download_failed(format!(
-                "cannot delete model files: {e}"
-            )))
+    // Defense in depth: external lockers (antivirus, search indexers) can
+    // hold a file briefly on Windows even with no download running.
+    // Retry with backoff before surfacing a user-visible error.
+    let mut attempt: u32 = 0;
+    loop {
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => break,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(e) => {
+                attempt += 1;
+                if attempt >= 3 {
+                    return Err(AppError::model_download_failed(format!(
+                        "cannot delete model files: {e}"
+                    )));
+                }
+                let delay_ms = match attempt {
+                    1 => 100,
+                    2 => 300,
+                    _ => 800,
+                };
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
         }
     }
     let info = models::status_info(&data, &model, false)?;
@@ -552,4 +581,46 @@ pub async fn get_model_compatibilities(app: AppHandle) -> AppResult<Vec<ModelCom
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::local_asr::manifest::ModelFile;
+
+    fn test_file(name: &str, size: u64) -> ModelFile {
+        ModelFile {
+            filename: name.to_string(),
+            url: "https://cdn.example.com/models/demo/x.onnx".to_string(),
+            fallback_url: None,
+            sha256: "ab".repeat(32),
+            size_bytes: size,
+        }
+    }
+
+    #[test]
+    fn remaining_fetch_bytes_counts_only_missing_files() {
+        // N-1 of N files already verified: the preflight budget is the 1
+        // remaining file, not the whole model.
+        let a = test_file("a.onnx", 1_000);
+        let b = test_file("b.onnx", 2_000);
+        let c = test_file("c.onnx", 4_000);
+        let fetch = vec![(&c, 3_000u64)];
+        assert_eq!(remaining_fetch_bytes(&fetch), 4_000);
+        let _ = (&a, &b); // verified files cost nothing more
+    }
+
+    #[test]
+    fn remaining_fetch_bytes_empty_when_nothing_missing() {
+        let fetch: Vec<(&ModelFile, u64)> = Vec::new();
+        assert_eq!(remaining_fetch_bytes(&fetch), 0);
+    }
+
+    #[test]
+    fn remaining_fetch_bytes_sums_every_missing_file() {
+        let a = test_file("a.onnx", 1_000);
+        let b = test_file("b.onnx", 2_000);
+        let fetch = vec![(&a, 0u64), (&b, 1_000u64)];
+        assert_eq!(remaining_fetch_bytes(&fetch), 3_000);
+    }
 }

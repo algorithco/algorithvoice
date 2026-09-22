@@ -146,11 +146,7 @@ fn decode_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
 }
 
 fn decode_local_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
-    decode_audio_payload_with_limit(
-        audio_base64,
-        MAX_LOCAL_AUDIO_BYTES,
-        "local limit is 128 MB",
-    )
+    decode_audio_payload_with_limit(audio_base64, MAX_LOCAL_AUDIO_BYTES, "local limit is 128 MB")
 }
 
 fn decode_audio_payload_with_limit(

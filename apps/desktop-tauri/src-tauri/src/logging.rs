@@ -23,10 +23,6 @@ pub fn log_dir(app: &AppHandle) -> PathBuf {
         .unwrap_or_else(|_| std::env::temp_dir().join("algorith-voice-logs"))
 }
 
-fn log_file(app: &AppHandle) -> PathBuf {
-    log_dir(app).join(LOG_FILE)
-}
-
 fn escape_json(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     for c in s.chars() {
@@ -102,10 +98,7 @@ pub fn read_recent_logs(app: &AppHandle, max_bytes: u64) -> String {
         combined.extend_from_slice(&b);
     }
     if combined.is_empty() {
-        return format!(
-            "no logs yet ({})",
-            std::fs::read(&current).unwrap_err().to_string()
-        );
+        return format!("no logs yet ({})", std::fs::read(&current).unwrap_err());
     }
     let start = combined.len().saturating_sub(max);
     String::from_utf8_lossy(&combined[start..]).into_owned()

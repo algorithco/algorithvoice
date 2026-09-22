@@ -1,0 +1,21 @@
+# Gitleaks false-positive allowlist.
+#
+# The Tauri updater `pubkey` in tauri.conf.json is a minisign PUBLIC key
+# (base64 opens with "untrusted comment: minisign public key: ..."). It must
+# ship inside the app bundle so clients can verify updates — it is not a
+# secret and cannot sign anything. The generic-api-key rule flags it purely
+# on entropy, which fails the fail-closed secret-scan gate on every run.
+#
+# Narrowly scoped: only the pubkey line, only in the two known
+# tauri.conf.json locations (current path + historic path from before the
+# apps/ rename, still scanned via full-history checkout).
+
+[allowlist]
+description = "Tauri updater minisign public key (public by design, ships in bundle)"
+paths = [
+  '''apps/desktop-tauri/src-tauri/tauri\.conf\.json''',
+  '''apps/desktop/src-tauri/tauri\.conf\.json''',
+]
+regexes = [
+  '''dW50cnVzdGVkIGNvbW1lbnQ6''',
+]
