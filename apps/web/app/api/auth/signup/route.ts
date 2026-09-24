@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 
 const API = process.env.API_URL ?? "https://api.trqsh.uz";
 const COOKIE_NAME = "__Host-av_at";
+const REFRESH_COOKIE_NAME = "__Host-av_rt";
 const COOKIE_MAX_AGE = 60 * 15;
+const REFRESH_COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30d sliding refresh
 
 export async function POST(req: Request) {
   const body = await req.text();
@@ -20,7 +22,10 @@ export async function POST(req: Request) {
 
   if (res.ok) {
     try {
-      const data = JSON.parse(text) as { accessToken?: string };
+      const data = JSON.parse(text) as {
+        accessToken?: string;
+        refreshToken?: string;
+      };
       const token = data.accessToken;
       if (token) {
         // __Host- requires Secure (see login route) — same fix applies here.
@@ -35,6 +40,15 @@ export async function POST(req: Request) {
           path: "/",
           maxAge: COOKIE_MAX_AGE,
         });
+        if (data.refreshToken) {
+          response.cookies.set(REFRESH_COOKIE_NAME, data.refreshToken, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "lax",
+            path: "/",
+            maxAge: REFRESH_COOKIE_MAX_AGE,
+          });
+        }
         return response;
       }
     } catch {

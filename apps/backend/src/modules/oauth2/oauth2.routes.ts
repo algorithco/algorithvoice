@@ -211,13 +211,26 @@ export async function oauth2Routes(
       config: { rateLimit: { max: 30, timeWindow: "10 minutes" } },
     },
     async (req, reply) => {
-      const { request_id: requestId, approved } = req.body;
+      const {
+        request_id: requestId,
+        approved,
+        via,
+      } = req.body as {
+        request_id: string;
+        approved: boolean;
+        via?: "button" | "close";
+      };
       const { sub } = req.user as { sub: string };
       const ip = req.ip;
       const ua = req.headers["user-agent"];
 
       const raw = await redis.get(reqKey(requestId));
       if (!raw) {
+        // Idempotent deny for tab-close beacons and double-submits: the
+        // request is already consumed or expired, so there is nothing left
+        // to deny. Return a no-op (not 400) so close-beacons stay silent.
+        // Approvals still fail closed — a missing request can never mint.
+        if (!approved) return { redirect_to: "/" };
         return reply.code(400).send({ error: "invalid_request" });
       }
       let pending: PendingRequest;
@@ -230,12 +243,18 @@ export async function oauth2Routes(
       await redis.del(reqKey(requestId));
 
       if (!approved) {
+        const abandoned = via === "close";
         await writeOAuthAudit(app.prisma, {
-          action: OAuth2Audit.AUTHORIZE_DENIED,
+          action: abandoned
+            ? OAuth2Audit.AUTHORIZE_ABANDONED
+            : OAuth2Audit.AUTHORIZE_DENIED,
           actorUserId: sub,
           ip,
           userAgent: ua,
-          metadata: auditMeta({ request_id: requestId }),
+          metadata: auditMeta({
+            request_id: requestId,
+            ...(via ? { via } : {}),
+          }),
         });
         return {
           redirect_to: `${pending.redirectUri}?error=${encodeURIComponent(

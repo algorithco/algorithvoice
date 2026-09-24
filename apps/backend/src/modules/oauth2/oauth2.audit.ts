@@ -10,6 +10,7 @@ export const OAuth2Audit = {
   AUTHORIZE_ERROR: "oauth2.authorize_error",
   AUTHORIZE_APPROVED: "oauth2.authorize_approved",
   AUTHORIZE_DENIED: "oauth2.authorize_denied",
+  AUTHORIZE_ABANDONED: "oauth2.authorize_abandoned",
   CODE_ISSUED: "oauth2.code_issued",
   CODE_EXCHANGED: "oauth2.code_exchanged",
   TOKEN_REFRESHED: "oauth2.token_refreshed",

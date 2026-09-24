@@ -234,12 +234,24 @@ async function fetchEmailForAccessToken(
   }
 }
 
+function mapOAuthError(raw: string): string {
+  if (raw === "access_denied")
+    return "Authorization denied in browser — you closed the tab or pressed Deny. Press Cancel and try again.";
+  return raw;
+}
+
 /**
  * First-party desktop sign-in. Generates a PKCE pair, opens the system
  * browser to the web consent page, and completes when the backend redirects
  * to `algorithvoice://auth-callback?code=&state=`.
+ *
+ * Pass an AbortSignal to allow Cancel: abort rejects the pending promise
+ * and releases the deep-link listener + timeout immediately instead of
+ * waiting the full 5 minutes.
  */
-export async function signInDesktop(): Promise<SessionInfo> {
+export async function signInDesktop(options?: {
+  signal?: AbortSignal;
+}): Promise<SessionInfo> {
   if (!isTauri()) {
     window.open(`${API}/oauth2/authorize`, "_blank", "noopener");
     throw new Error("Desktop sign-in needs the desktop app shell.");
@@ -265,16 +277,21 @@ export async function signInDesktop(): Promise<SessionInfo> {
     rejectSession = reject;
   });
   const unlisten = await listen<string[]>("auth-callback", (event) => {
-    for (const raw of event.payload ?? []) {
+    const urls = event.payload ?? [];
+    for (const raw of urls) {
       const parsed = parseOAuthCodeCallback(raw);
       if (!parsed) continue;
       if (parsed.error) {
-        rejectSession(new Error(parsed.error));
+        rejectSession(new Error(mapOAuthError(parsed.error)));
         return;
       }
+      // Try every URL in the payload: a stale deep-link delivered first must
+      // not kill a fresh one behind it. Only reject on mismatch when this
+      // event carries a single URL; otherwise ignore the spoofed entry.
       if (parsed.state !== state) {
-        rejectSession(new Error("State mismatch — please try again."));
-        return;
+        if (urls.length === 1)
+          rejectSession(new Error("State mismatch — please try again."));
+        continue;
       }
       if (!parsed.code) continue;
       void exchangeOAuthCode(parsed.code, verifier, REDIRECT_URI)
@@ -296,14 +313,29 @@ export async function signInDesktop(): Promise<SessionInfo> {
     }
   });
   // Mirror signInWithOAuth: never wait forever (e.g. callback emitted to a
-  // different window than the one listening).
+  // different window than the one listening, or the browser tab was closed).
   const timeout = window.setTimeout(() => {
-    rejectSession(new Error("Sign-in timed out — please try again."));
+    rejectSession(
+      new Error(
+        "Sign-in timed out — the browser tab was closed or no approval was received. Please try again.",
+      ),
+    );
   }, 300_000);
+  const signal = options?.signal;
+  const onAbort = () => {
+    rejectSession(new Error("Sign-in cancelled — please try again."));
+  };
+  if (signal?.aborted) {
+    clearTimeout(timeout);
+    unlisten();
+    throw new Error("Sign-in cancelled — please try again.");
+  }
+  signal?.addEventListener("abort", onAbort, { once: true });
   try {
     await safeOpenUrl(authorizeUrl);
   } catch {
     clearTimeout(timeout);
+    signal?.removeEventListener("abort", onAbort);
     unlisten();
     throw new Error("Could not open the system browser.");
   }
@@ -311,6 +343,7 @@ export async function signInDesktop(): Promise<SessionInfo> {
     return await completed;
   } finally {
     clearTimeout(timeout);
+    signal?.removeEventListener("abort", onAbort);
     unlisten();
   }
 }

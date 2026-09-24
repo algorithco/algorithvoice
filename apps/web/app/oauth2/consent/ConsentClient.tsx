@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import SlideCommit from "../../../components/SlideCommit";
 
@@ -14,10 +14,16 @@ export function ConsentClient({
   const [loading, setLoading] = useState<"allow" | "deny" | null>(null);
   const [done, setDone] = useState<"allow" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Tracks terminal state for unload handlers (state closures go stale in
+  // pagehide). Once allow/deny is sent, closing the tab must not re-deny.
+  const doneRef = useRef<"allow" | "deny" | null>(null);
+  const requestRef = useRef(requestId);
+  requestRef.current = requestId;
 
   // Auto-redirect to home (and try to close popup) whenever we reach done
   useEffect(() => {
     if (!done) return;
+    doneRef.current = done;
     const t = window.setTimeout(() => {
       try {
         window.close();
@@ -28,6 +34,47 @@ export function ConsentClient({
     return () => window.clearTimeout(t);
   }, [done]);
 
+  // Closing the tab without deciding = deny. The website records the
+  // rejection so the desktop app unblocks immediately instead of waiting
+  // for the 5-minute timeout. sendBeacon survives page unload; keepalive
+  // fetch is the fallback. Backend treats a missing (already consumed)
+  // request as a silent no-op for denies.
+  useEffect(() => {
+    const sendDenyBeacon = () => {
+      if (doneRef.current) return;
+      doneRef.current = "deny";
+      const payload = JSON.stringify({
+        request_id: requestRef.current,
+        approved: false,
+        via: "close",
+      });
+      try {
+        if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
+          const blob = new Blob([payload], { type: "application/json" });
+          if (navigator.sendBeacon("/api/oauth2/approve", blob)) return;
+        }
+      } catch {}
+      try {
+        void fetch("/api/oauth2/approve", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: payload,
+          keepalive: true,
+        });
+      } catch {}
+    };
+    const onPageHide = () => sendDenyBeacon();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") sendDenyBeacon();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   async function actDeny() {
     setError(null);
     setLoading("deny");
@@ -35,7 +82,11 @@ export function ConsentClient({
       const res = await fetch("/api/oauth2/approve", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ request_id: requestId, approved: false }),
+        body: JSON.stringify({
+          request_id: requestId,
+          approved: false,
+          via: "button",
+        }),
       });
       const body = (await res.json().catch(() => ({}))) as {
         redirect_to?: string;
@@ -62,29 +113,38 @@ export function ConsentClient({
 
   async function confirmAllow() {
     setError(null);
-    const res = await fetch("/api/oauth2/approve", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ request_id: requestId, approved: true }),
-    });
-    const body = (await res.json().catch(() => ({}))) as {
-      redirect_to?: string;
-      error?: string;
-    };
-    if (!res.ok) throw new Error(body.error ?? "Request failed");
-    const redirectTo = body.redirect_to;
-    if (redirectTo && redirectTo !== "/") {
-      try {
-        // Use iframe for custom scheme so we stay on page for home redirect
-        const iframe = document.createElement("iframe");
-        iframe.style.display = "none";
-        iframe.src = redirectTo;
-        document.body.appendChild(iframe);
-        setTimeout(() => iframe.remove(), 1500);
-      } catch {}
+    // Suppress close-beacon while the approval is in flight; a late deny
+    // must never overwrite an allow (backend also fails deny-safe).
+    doneRef.current = "allow";
+    try {
+      const res = await fetch("/api/oauth2/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ request_id: requestId, approved: true }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        redirect_to?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(body.error ?? "Request failed");
+      const redirectTo = body.redirect_to;
+      if (redirectTo && redirectTo !== "/") {
+        try {
+          // Use iframe for custom scheme so we stay on page for home redirect
+          const iframe = document.createElement("iframe");
+          iframe.style.display = "none";
+          iframe.src = redirectTo;
+          document.body.appendChild(iframe);
+          setTimeout(() => iframe.remove(), 1500);
+        } catch {}
+      }
+      setDone("allow");
+      return;
+    } catch (e) {
+      // Allow retry / close-deny after a failed approval.
+      doneRef.current = null;
+      throw e;
     }
-    setDone("allow");
-    return;
   }
 
   function handleAllowDone() {

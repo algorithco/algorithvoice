@@ -8,6 +8,14 @@ import {
 import type { AuthProvider, DeviceType } from "@prisma/client";
 import * as argon2 from "argon2";
 import type { FastifyInstance } from "fastify";
+import { getAppEnv } from "../../config/env.js";
+import {
+  hashRefreshToken,
+  newFamilyId,
+  newOpaqueToken,
+  REFRESH_ABSOLUTE_SEC,
+  REFRESH_SLIDING_SEC,
+} from "../oauth2/oauth2.store.js";
 
 // ---- GitHub OAuth (Phase 3, minimal) ----
 // Browser (web) + desktop deep-link flows share one callback. The client
@@ -91,6 +99,48 @@ function githubRedirectUri(apiUrl: string): string {
   return `${apiUrl.replace(/\/$/, "")}/auth/oauth/github/callback`;
 }
 
+// ---- Web sliding sessions (fixes 15m hard logout) ----
+// Email/password web logins mint a short-lived access JWT (15m) plus an
+// opaque rotating refresh token stored hashed in the Session table (30d
+// sliding, 90d absolute cap — same windows as the desktop OAuth2 flow).
+// Raw refresh values never touch the DB or logs; revocation kills the
+// whole family so token theft cannot be replayed.
+async function mintWebSession(
+  prisma: {
+    session: {
+      create: (args: {
+        data: {
+          userId: string;
+          refreshHash: string;
+          familyId: string;
+          deviceInfo?: string;
+          ip?: string;
+          expiresAt: Date;
+          absoluteLimitAt: Date;
+        };
+      }) => Promise<unknown>;
+    };
+  },
+  userId: string,
+  pepper: string,
+  opts?: { deviceInfo?: string; ip?: string },
+): Promise<string> {
+  const refreshToken = newOpaqueToken();
+  const now = new Date();
+  await prisma.session.create({
+    data: {
+      userId,
+      refreshHash: hashRefreshToken(refreshToken, pepper),
+      familyId: newFamilyId(),
+      deviceInfo: (opts?.deviceInfo ?? "web").slice(0, 200),
+      ip: opts?.ip,
+      expiresAt: new Date(now.getTime() + REFRESH_SLIDING_SEC * 1000),
+      absoluteLimitAt: new Date(now.getTime() + REFRESH_ABSOLUTE_SEC * 1000),
+    },
+  });
+  return refreshToken;
+}
+
 async function exchangeGitHubCode(
   code: string,
   clientId: string,
@@ -172,12 +222,20 @@ export async function authRoutes(app: FastifyInstance) {
       config: { rateLimit: { max: 10, timeWindow: "1 hour" } },
     },
     async (req, reply) => {
-      const { email, password, name, deviceName, deviceType } = req.body as {
+      const {
+        email,
+        password,
+        name,
+        deviceName,
+        deviceType,
+        deviceFingerprint,
+      } = req.body as {
         email: string;
         password: string;
         name?: string;
         deviceName?: string;
         deviceType?: string;
+        deviceFingerprint?: string;
       };
       const passwordHash = await argon2.hash(password, { ...HASH_OPTS });
       try {
@@ -193,6 +251,7 @@ export async function authRoutes(app: FastifyInstance) {
                 userId: created.id,
                 name: deviceName,
                 type: toDeviceType(deviceType),
+                fingerprint: deviceFingerprint ?? null,
                 lastSeenAt: new Date(),
               },
             });
@@ -206,7 +265,16 @@ export async function authRoutes(app: FastifyInstance) {
           return created;
         });
         const accessToken = app.jwt.sign({ sub: user.id });
-        return reply.code(201).send({ user: toUserSchema(user), accessToken });
+        const env = getAppEnv();
+        const refreshToken = await mintWebSession(
+          app.prisma,
+          user.id,
+          env.JWT_REFRESH_PEPPER,
+          { deviceInfo: "web-signup", ip: req.ip },
+        );
+        return reply
+          .code(201)
+          .send({ user: toUserSchema(user), accessToken, refreshToken });
       } catch (e: unknown) {
         if (
           typeof e === "object" &&
@@ -243,19 +311,102 @@ export async function authRoutes(app: FastifyInstance) {
         return reply.code(401).send({ error: "invalid_credentials" });
       }
       const accessToken = app.jwt.sign({ sub: user.id });
-      return { user: toUserSchema(user), accessToken };
+      const env = getAppEnv();
+      const refreshToken = await mintWebSession(
+        app.prisma,
+        user.id,
+        env.JWT_REFRESH_PEPPER,
+        { deviceInfo: "web-login", ip: req.ip },
+      );
+      return { user: toUserSchema(user), accessToken, refreshToken };
     },
   );
 
-  app.post("/logout", async () => {
-    // Phase 3 adds server-side jti blocklist + refresh revocation.
-    // Desktop clears its keyring session; web clears httpOnly cookies.
+  app.post("/logout", async (req) => {
+    // Revoke the web refresh family when the client sends it; always 200
+    // so logout never blocks on an already-expired token. Cookie clearing
+    // stays with the web BFF / desktop keyring clear.
+    try {
+      const body = (req.body ?? {}) as { refresh_token?: unknown };
+      const presented =
+        typeof body.refresh_token === "string" ? body.refresh_token : null;
+      if (presented) {
+        const env = getAppEnv();
+        const row = await app.prisma.session.findUnique({
+          where: {
+            refreshHash: hashRefreshToken(presented, env.JWT_REFRESH_PEPPER),
+          },
+          select: { familyId: true },
+        });
+        if (row) {
+          await app.prisma.session.updateMany({
+            where: { familyId: row.familyId, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        }
+      }
+    } catch {
+      // Best-effort: logout must not fail.
+    }
     return { ok: true };
   });
 
-  app.post("/refresh", async (_req, reply) => {
-    return reply.code(501).send({ error: "not_implemented" });
-  });
+  app.post(
+    "/refresh",
+    { config: { rateLimit: { max: 30, timeWindow: "10 minutes" } } },
+    async (req, reply) => {
+      const body = (req.body ?? {}) as { refresh_token?: unknown };
+      const presented =
+        typeof body.refresh_token === "string" ? body.refresh_token : null;
+      if (!presented) {
+        return reply.code(400).send({ error: "invalid_request" });
+      }
+      const env = getAppEnv();
+      const row = await app.prisma.session.findUnique({
+        where: {
+          refreshHash: hashRefreshToken(presented, env.JWT_REFRESH_PEPPER),
+        },
+      });
+      const now = new Date();
+      // Unknown, revoked, expired, or past absolute cap: kill the family so
+      // a stolen token cannot be replayed, then fail closed.
+      if (
+        !row ||
+        row.revokedAt !== null ||
+        row.expiresAt <= now ||
+        row.absoluteLimitAt <= now
+      ) {
+        if (row) {
+          await app.prisma.session.updateMany({
+            where: { familyId: row.familyId, revokedAt: null },
+            data: { revokedAt: now },
+          });
+        }
+        return reply.code(401).send({ error: "invalid_grant" });
+      }
+      const next = newOpaqueToken();
+      await app.prisma.$transaction([
+        app.prisma.session.update({
+          where: { id: row.id },
+          data: { revokedAt: now },
+        }),
+        app.prisma.session.create({
+          data: {
+            userId: row.userId,
+            refreshHash: hashRefreshToken(next, env.JWT_REFRESH_PEPPER),
+            familyId: row.familyId,
+            deviceInfo: row.deviceInfo,
+            ip: req.ip,
+            expiresAt: new Date(now.getTime() + REFRESH_SLIDING_SEC * 1000),
+            // Absolute cap never extends.
+            absoluteLimitAt: row.absoluteLimitAt,
+          },
+        }),
+      ]);
+      const accessToken = app.jwt.sign({ sub: row.userId });
+      return { accessToken, refreshToken: next };
+    },
+  );
 
   app.post("/oauth/:provider", async (_req, reply) => {
     return reply.code(501).send({ error: "not_implemented" });
@@ -364,6 +515,50 @@ export async function authRoutes(app: FastifyInstance) {
         await app.prisma.auditLog.create({
           data: { actorUserId: userId, action: "auth.oauth_login" },
         });
+      }
+      // Desktop deep-link logins predate /license/activate on older builds:
+      // ensure the first desktop link registers a Device so the dashboard
+      // stops showing 0 linked. Web callbacks must not create devices.
+      // Bookkeeping never breaks login.
+      try {
+        if (st.cb.toLowerCase().startsWith("algorithvoice:")) {
+          const count = await app.prisma.device.count({
+            where: { userId },
+          });
+          if (count === 0) {
+            const created = await app.prisma.device.create({
+              data: {
+                userId,
+                name: "Desktop",
+                type: toDeviceType(undefined),
+                fingerprint: `oauth-${Date.now().toString(36)}-${userId.slice(0, 8)}`,
+                lastSeenAt: new Date(),
+              },
+              select: { id: true },
+            });
+            await app.prisma.auditLog.create({
+              data: {
+                actorUserId: userId,
+                deviceId: created.id,
+                action: "device.create",
+              },
+            });
+          } else {
+            const latest = await app.prisma.device.findFirst({
+              where: { userId },
+              orderBy: { lastSeenAt: "desc" },
+              select: { id: true },
+            });
+            if (latest) {
+              await app.prisma.device.update({
+                where: { id: latest.id },
+                data: { lastSeenAt: new Date() },
+              });
+            }
+          }
+        }
+      } catch {
+        // Ignore — the redirect below still completes sign-in.
       }
       const accessToken = app.jwt.sign({ sub: userId });
       const sep = st.cb.includes("?") ? "&" : "?";

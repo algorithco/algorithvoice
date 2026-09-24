@@ -33,6 +33,9 @@ export type AuthorizeQuery = z.infer<typeof authorizeQuerySchema>;
 export const approveBodySchema = z.object({
   request_id: z.string().uuid().max(64),
   approved: z.boolean(),
+  // How the decision was produced: explicit Reject button vs tab-close beacon.
+  // Optional for backwards compat with older web builds.
+  via: z.enum(["button", "close"]).optional(),
 });
 
 export type ApproveBody = z.infer<typeof approveBodySchema>;
