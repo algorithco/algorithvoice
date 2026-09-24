@@ -154,18 +154,18 @@ export default async function DashboardPage() {
     ok: true,
   }));
 
-  // Real devices — from Device table
+  // Real devices — from Device table. Backend speaks kebab-case per the
+  // shared deviceSchema; older rows/clients may still send DESKTOP_*.
   const devicesReal = (devicesData?.devices ?? []).map((d) => ({
     id: d.id,
     name: d.name || "Unnamed device",
-    os:
-      d.type === "DESKTOP_WINDOWS"
-        ? "Windows"
-        : d.type === "DESKTOP_LINUX"
-          ? "Linux"
-          : d.type === "DESKTOP_MACOS"
-            ? "macOS"
-            : d.type.replace("DESKTOP_", ""),
+    os: (() => {
+      const t = d.type.toLowerCase().replace(/_/g, "-");
+      if (t === "desktop-windows") return "Windows";
+      if (t === "desktop-linux") return "Linux";
+      if (t === "desktop-macos") return "macOS";
+      return d.type;
+    })(),
     active: d.lastSeenAt ? timeAgo(d.lastSeenAt) : "Never",
     createdAt: d.createdAt,
   }));

@@ -25,6 +25,7 @@
       "identifier": "opener:allow-open-url",
       "allow": [
         { "url": "https://api.trqsh.uz/*" },
+        { "url": "https://app.trqsh.uz/*" },
         { "url": "https://github.com/*" },
         { "url": "https://objects.githubusercontent.com/*" },
         { "url": "https://huggingface.co/*" },
