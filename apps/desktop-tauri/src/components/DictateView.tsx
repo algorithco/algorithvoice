@@ -16,6 +16,26 @@ import {
 import { isTauri } from "../lib/session/env.js";
 import { setTrayState, type TrayState } from "../lib/session/tray.js";
 
+// Notices from the pill/hotkey pipeline are mode-agnostic events: an error
+// raised under one mode can arrive after the user already switched to the
+// other (mode saves are async; in-flight attempts finish late). Rendering
+// the other mode's error reads as the app contradicting itself — e.g. a
+// "Cloud mode needs a Groq key" banner while in Local mode — so such
+// notices are dropped instead of shown. Patterns are deliberately tight:
+// generic microphone/clipboard/paste errors pass through in both modes,
+// and cloud's legit "Offline — switch to Local…" hint (which contains
+// "offline" but no "groq"/"cloud") is never suppressed.
+export function isNoticeRelevantToMode(
+  message: string,
+  isLocal: boolean,
+): boolean {
+  const lower = message.toLowerCase();
+  if (isLocal) {
+    return !lower.includes("groq") && !lower.includes("cloud");
+  }
+  return !lower.includes("no local model");
+}
+
 // Core interaction moment: PTT simulator wired to the real tray command.
 // Phase 2 replaces the timers with cpal → VAD → STT → inject.
 // The global hotkey registered in Rust emits `ptt-pressed` / `ptt-released`,
@@ -48,6 +68,9 @@ export function DictateView({
   }, [pillMsg]);
 
   useEffect(() => {
+    // A mode switch invalidates the other mode's notices (see
+    // isNoticeRelevantToMode); drop any that is still visible.
+    setPillMsg(null);
     if (isLocal) setGroqReady(null);
     else setGroqInput("");
   }, [isLocal]);
@@ -112,6 +135,8 @@ export function DictateView({
       setLastTranscript(payload.text);
       setTray("idle");
       void setTrayState("idle");
+      // A fresh transcript supersedes any earlier error notice.
+      setPillMsg(null);
       setPreview(
         payload.pasted
           ? payload.text
@@ -273,7 +298,7 @@ export function DictateView({
             Hide pill
           </Button>
         </div>
-        {pillMsg ? (
+        {pillMsg && isNoticeRelevantToMode(pillMsg, isLocal) ? (
           <p
             role="alert"
             className={`av-small mt-2 rounded-md px-2 py-1.5 text-xs ${

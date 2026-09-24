@@ -9,6 +9,7 @@ export const DEFAULT_PREFS: Prefs = {
   hotkey: "Ctrl+Space",
   mode: "cloud",
   theme: "dark",
+  language: "auto",
   activeModelId: null,
 };
 
@@ -87,6 +88,13 @@ export function sanitizeTheme(value: unknown): Prefs["theme"] {
   return value === "light" || value === "dark" ? value : "dark";
 }
 
+export function sanitizeLanguage(value: unknown): string {
+  if (value === "auto") return "auto";
+  if (typeof value !== "string") return "auto";
+  const normalized = value.trim().toLowerCase().split("-")[0];
+  return /^[a-z]{2,3}$/.test(normalized) ? normalized : "auto";
+}
+
 export function safeJsonParse<T>(raw: string): T | null {
   try {
     return JSON.parse(raw, (key, val) => {
@@ -108,6 +116,7 @@ export function buildPrefs(saved: Partial<Prefs> | null | undefined): Prefs {
     hotkey: sanitizeHotkey(filtered.hotkey),
     theme: sanitizeTheme(filtered.theme),
     mode: sanitizeMode(filtered.mode),
+    language: sanitizeLanguage(filtered.language),
     activeModelId: sanitizeModelId(filtered.activeModelId),
   };
 }
@@ -196,6 +205,7 @@ export async function savePrefs(prefs: Prefs): Promise<void> {
       verified.hotkey !== canonical.hotkey ||
       verified.theme !== canonical.theme ||
       verified.mode !== canonical.mode ||
+      verified.language !== canonical.language ||
       verified.activeModelId !== canonical.activeModelId
     ) {
       throw new Error("prefs store verification failed after write");

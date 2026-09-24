@@ -76,6 +76,10 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     }
   }, []);
 
+  // Every notice is mirrored to the Dictate view via PTT_ERROR_EVENT.
+  // The pill itself is a 56 px button and can only show a badge/tooltip,
+  // so without the mirror, outcomes like "tap too short" or "no speech
+  // detected" vanish without a trace on the screen the user is watching.
   const showNotice = useCallback((message: string) => {
     if (!mountedRef.current) return;
     setNotice(message);
@@ -83,6 +87,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     noticeTimerRef.current = window.setTimeout(() => {
       if (mountedRef.current) setNotice(null);
     }, NOTICE_MS);
+    if (isTauri()) void emit(PTT_ERROR_EVENT, message);
   }, []);
 
   const stopTracks = useCallback(() => {
@@ -173,10 +178,12 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           ? await blobToWav16kMono(blob)
           : await blobToBase64(blob);
         if (!mountedRef.current) return;
+        const language =
+          curPrefs.language === "auto" ? undefined : curPrefs.language;
         const result = await transcribeAndPaste(
           base64,
           useLocal ? "audio/wav" : mimeType,
-          undefined,
+          language,
           useLocal
             ? { mode: "local", modelId: curPrefs.activeModelId }
             : undefined,
@@ -247,7 +254,6 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           message = "Transcription failed — check microphone and try again.";
         }
         showNotice(message);
-        if (isTauri()) void emit(PTT_ERROR_EVENT, message);
         setPill("idle");
       }
     },
