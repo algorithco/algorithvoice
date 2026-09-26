@@ -3,6 +3,7 @@ import {
   usageSummarySchema,
 } from "@algorith-voice/shared-types";
 import type { FastifyInstance } from "fastify";
+import { getActiveSubscription } from "../billing/guard.js";
 
 export function monthWindowUTC(now = new Date()) {
   const periodStart = new Date(
@@ -24,7 +25,7 @@ export async function usageRoutes(app: FastifyInstance) {
     async (req) => {
       const { sub } = req.user as { sub: string };
       const { periodStart, periodEnd } = monthWindowUTC();
-      const [agg, user] = await Promise.all([
+      const [agg, activeSub] = await Promise.all([
         app.prisma.usageRecord.aggregate({
           where: {
             userId: sub,
@@ -34,19 +35,19 @@ export async function usageRoutes(app: FastifyInstance) {
           _sum: { quantity: true },
           _count: true,
         }),
-        app.prisma.user.findUniqueOrThrow({ where: { id: sub } }),
+        getActiveSubscription(app.prisma, sub),
       ]);
       const rawQty = agg._sum.quantity;
       const used =
         typeof rawQty === "number" ? rawQty : (rawQty?.toNumber() ?? 0);
-      const isPro = user.planTier === "pro";
+      const isPro = activeSub !== null;
       return {
         periodStart: periodStart.toISOString(),
         periodEnd: periodEnd.toISOString(),
         cloudSecondsUsed: used,
         cloudSecondsLimit: isPro ? -1 : FREE_CLOUD_SECONDS_PER_MONTH,
         requests: agg._count,
-        planTier: user.planTier,
+        planTier: isPro ? ("pro" as const) : ("free" as const),
       };
     },
   );

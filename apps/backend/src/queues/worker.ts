@@ -5,7 +5,7 @@ import pino from "pino";
 import { loadEnv } from "../config/env.js";
 import { getStripe } from "../modules/billing/stripe.js";
 import { QUEUES, redis } from "./connection.js";
-import { processStripeEvent } from "./stripe-events.js";
+import { processStripeEvent, syncStaleSubscriptions } from "./stripe-events.js";
 
 // Separate process: `pnpm worker`. Same image, different CMD on Fly.
 const env = loadEnv();
@@ -84,6 +84,26 @@ const workers = [
         limiter: { max: 20, duration: 1000 },
         lockDuration: 60_000,
       },
+    ),
+  ),
+  observe(
+    "billing.reconcile",
+    new Worker(
+      "billing.reconcile",
+      async () => {
+        const stripe = getStripe();
+        if (!stripe) {
+          log.warn("billing reconcile skipped: STRIPE_SECRET_KEY not configured");
+          return { ok: true, skipped: true };
+        }
+        const prisma = new PrismaClient();
+        try {
+          return await syncStaleSubscriptions(prisma, stripe, log);
+        } finally {
+          await prisma.$disconnect();
+        }
+      },
+      { connection: makeWorkerRedis(), concurrency: 1, lockDuration: 60_000 },
     ),
   ),
   observe(
@@ -209,6 +229,15 @@ void QUEUES.usageRollup
     { repeat: { every: 3600_000 }, jobId: "rollup-hourly" },
   )
   .catch((err: unknown) => log.error({ err }, "failed to schedule rollup"));
+
+// Hourly billing reconcile (missed-webhook safety net).
+void QUEUES.billingReconcile
+  .add(
+    "reconcile-hourly",
+    {},
+    { repeat: { every: 3600_000 }, jobId: "reconcile-hourly" },
+  )
+  .catch((err: unknown) => log.error({ err }, "failed to schedule reconcile"));
 
 async function shutdown(signal: string) {
   log.info({ signal }, "worker shutting down");

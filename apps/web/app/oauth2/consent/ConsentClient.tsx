@@ -13,32 +13,46 @@ export function ConsentClient({
 }) {
   const [loading, setLoading] = useState<"allow" | "deny" | null>(null);
   const [done, setDone] = useState<"allow" | "deny" | null>(null);
+  const [redirectTo, setRedirectTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Tracks terminal state for unload handlers (state closures go stale in
   // pagehide). Once allow/deny is sent, closing the tab must not re-deny.
   const doneRef = useRef<"allow" | "deny" | null>(null);
   const requestRef = useRef(requestId);
   requestRef.current = requestId;
+  // Deep-link handoff must fire exactly once (StrictMode double-effects).
+  const firedRef = useRef(false);
 
-  // Auto-redirect to home (and try to close popup) whenever we reach done
+  // Handoff + auto-close whenever we reach done. The desktop deep-link
+  // (algorithvoice://auth-callback?code=&state=) fires as a top-level
+  // navigation — hidden iframes to custom schemes are blocked by Chrome, so
+  // the old iframe approach silently dropped the handoff. Afterwards we try
+  // to close the tab. Never navigate to home: the user came from the desktop
+  // app and belongs back there. window.close() only succeeds on
+  // script-opened tabs; otherwise the success copy tells them to close it.
   useEffect(() => {
     if (!done) return;
     doneRef.current = done;
+    if (redirectTo && redirectTo !== "/" && !firedRef.current) {
+      firedRef.current = true;
+      try {
+        window.location.href = redirectTo;
+      } catch {}
+    }
     const t = window.setTimeout(() => {
       try {
         window.close();
       } catch {}
-      // Use assign to ensure navigation even if opener was _blank
-      window.location.assign("/");
-    }, 900);
+    }, 600);
     return () => window.clearTimeout(t);
-  }, [done]);
+  }, [done, redirectTo]);
 
   // Closing the tab without deciding = deny. The website records the
   // rejection so the desktop app unblocks immediately instead of waiting
   // for the 5-minute timeout. sendBeacon survives page unload; keepalive
   // fetch is the fallback. Backend treats a missing (already consumed)
-  // request as a silent no-op for denies.
+  // request as a silent no-op for denies. beforeunload covers Chrome cases
+  // where pagehide fires too late; visibilitychange covers tab-switch close.
   useEffect(() => {
     const sendDenyBeacon = () => {
       if (doneRef.current) return;
@@ -64,13 +78,16 @@ export function ConsentClient({
       } catch {}
     };
     const onPageHide = () => sendDenyBeacon();
+    const onBeforeUnload = () => sendDenyBeacon();
     const onVisibility = () => {
       if (document.visibilityState === "hidden") sendDenyBeacon();
     };
     window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onBeforeUnload);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
@@ -93,16 +110,10 @@ export function ConsentClient({
         error?: string;
       };
       if (!res.ok) throw new Error(body.error ?? "Request failed");
-      const redirectTo = body.redirect_to;
-      if (redirectTo && redirectTo !== "/") {
-        try {
-          // For desktop deep-link, use hidden iframe to avoid leaving page before home redirect
-          const iframe = document.createElement("iframe");
-          iframe.style.display = "none";
-          iframe.src = redirectTo;
-          document.body.appendChild(iframe);
-          setTimeout(() => iframe.remove(), 1500);
-        } catch {}
+      // Hand the deep-link to the done-effect: it fires as a top-level
+      // navigation (reliable custom-scheme handoff) instead of an iframe.
+      if (body.redirect_to && body.redirect_to !== "/") {
+        setRedirectTo(body.redirect_to);
       }
       setDone("deny");
     } catch (e) {
@@ -127,16 +138,9 @@ export function ConsentClient({
         error?: string;
       };
       if (!res.ok) throw new Error(body.error ?? "Request failed");
-      const redirectTo = body.redirect_to;
-      if (redirectTo && redirectTo !== "/") {
-        try {
-          // Use iframe for custom scheme so we stay on page for home redirect
-          const iframe = document.createElement("iframe");
-          iframe.style.display = "none";
-          iframe.src = redirectTo;
-          document.body.appendChild(iframe);
-          setTimeout(() => iframe.remove(), 1500);
-        } catch {}
+      // Same top-level handoff as deny (see above).
+      if (body.redirect_to && body.redirect_to !== "/") {
+        setRedirectTo(body.redirect_to);
       }
       setDone("allow");
       return;
@@ -175,7 +179,7 @@ export function ConsentClient({
             {done === "allow" ? "Access granted" : "Access denied"}
           </p>
           <p className="mt-1 font-mono text-xs leading-4 text-faint">
-            Redirecting to home…
+            Return to the desktop app — this tab closes automatically.
           </p>
         </div>
         <div className="h-1 w-full overflow-hidden rounded-full bg-raised">
@@ -282,7 +286,7 @@ export function ConsentClient({
       </div>
 
       <p className="text-center font-mono text-[11px] leading-4 text-faint">
-        Slide to approve · you’ll be redirected to home automatically.
+        Slide to approve · you’ll return to the desktop app automatically.
       </p>
     </div>
   );

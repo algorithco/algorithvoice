@@ -39,6 +39,11 @@ enum PlanTier {
   pro
 }
 
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
 enum UserRole {
   user
   admin
@@ -115,15 +120,16 @@ model Device {
 }
 
 model Subscription {
-  id                   String     @id @default(cuid())
+  id                   String           @id @default(cuid())
   userId               String
-  user                 User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  stripeSubscriptionId String     @unique
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeSubscriptionId String           @unique
   stripePriceId        String?
   status               SubStatus
+  billingInterval      BillingInterval?
   currentPeriodStart   DateTime
   currentPeriodEnd     DateTime
-  cancelAtPeriodEnd    Boolean    @default(false)
+  cancelAtPeriodEnd    Boolean          @default(false)
   usageRecords         UsageRecord[]
   createdAt            DateTime   @default(now())
   updatedAt            DateTime   @updatedAt

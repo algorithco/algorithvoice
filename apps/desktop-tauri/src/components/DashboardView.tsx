@@ -98,7 +98,7 @@ export function DashboardView({
       : 0;
 
   return (
-    <div className="mx-auto w-full max-w-[1100px] p-4 sm:p-6 lg:p-8 xl:p-10 2xl:max-w-[1280px]">
+    <div className="mx-auto w-full min-w-0 max-w-[1100px] p-4 sm:p-6 lg:p-8 xl:p-10 2xl:max-w-[1280px]">
       {/* Header — status lives here so the hero holds the only CTA */}
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0 flex-1">
@@ -122,7 +122,7 @@ export function DashboardView({
           <span className="hidden text-gray-300 dark:text-white/20 sm:inline">
             •
           </span>
-          <span className="max-w-[90px] truncate font-mono text-[11px] sm:max-w-none sm:text-[13px]">
+          <span className="min-w-0 max-w-[140px] truncate font-mono text-[11px] sm:max-w-none sm:text-[13px]">
             {hotkey}
           </span>
           <span className="hidden text-gray-300 dark:text-white/20 sm:inline">

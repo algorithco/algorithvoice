@@ -1,10 +1,10 @@
 import {
-  LICENSE_SEATS,
   licenseActivateSchema,
   OFFLINE_GRACE_DAYS,
 } from "@algorith-voice/shared-types";
 import type { DeviceType } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
+import { deviceLimitForUser } from "../billing/guard.js";
 
 // Phase 3 adds RS256 license JWTs with 7d offline grace. Seat counting and
 // fingerprint binding are live: activate upserts by (userId, fingerprint).
@@ -76,11 +76,12 @@ export async function licenseRoutes(app: FastifyInstance) {
         const count = await app.prisma.device.count({
           where: { userId: sub },
         });
-        if (count >= LICENSE_SEATS) {
+        const seatsMax = await deviceLimitForUser(app.prisma, sub);
+        if (count >= seatsMax) {
           return reply.code(403).send({
             error: "seats_exhausted",
             seatsUsed: count,
-            seatsMax: LICENSE_SEATS,
+            seatsMax,
           });
         }
         try {
@@ -131,6 +132,7 @@ export async function licenseRoutes(app: FastifyInstance) {
       const seatsUsed = await app.prisma.device.count({
         where: { userId: sub },
       });
+      const seatsMax = await deviceLimitForUser(app.prisma, sub);
       return {
         licenseJwt: "stub.license.jwt",
         device: {
@@ -141,7 +143,7 @@ export async function licenseRoutes(app: FastifyInstance) {
           createdAt: device.createdAt.toISOString(),
         },
         seatsUsed,
-        seatsMax: LICENSE_SEATS,
+        seatsMax,
       };
     },
   );
@@ -155,6 +157,7 @@ export async function licenseRoutes(app: FastifyInstance) {
   // shared deviceSchema; the dashboard accepts both casings during rollout.
   app.get("/devices", { onRequest: [app.authenticate] }, async (req) => {
     const { sub } = req.user as { sub: string };
+    const seatsMax = await deviceLimitForUser(app.prisma, sub);
     const devices = await app.prisma.device.findMany({
       where: { userId: sub },
       orderBy: { lastSeenAt: "desc" },
@@ -165,7 +168,7 @@ export async function licenseRoutes(app: FastifyInstance) {
         lastSeenAt: true,
         createdAt: true,
       },
-      take: 10,
+      take: seatsMax,
     });
     return {
       devices: devices.map((d) => ({
@@ -176,7 +179,7 @@ export async function licenseRoutes(app: FastifyInstance) {
         createdAt: d.createdAt.toISOString(),
       })),
       total: devices.length,
-      seatsMax: LICENSE_SEATS,
+      seatsMax,
     };
   });
 
@@ -206,7 +209,8 @@ export async function licenseRoutes(app: FastifyInstance) {
       const seatsUsed = await app.prisma.device.count({
         where: { userId: sub },
       });
-      return { ok: true, seatsUsed, seatsMax: LICENSE_SEATS };
+      const seatsMax = await deviceLimitForUser(app.prisma, sub);
+      return { ok: true, seatsUsed, seatsMax };
     },
   );
 }

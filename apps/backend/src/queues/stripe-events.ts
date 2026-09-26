@@ -12,6 +12,8 @@ const HANDLED = new Set([
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
+  "customer.subscription.resumed",
+  "invoice.payment_succeeded",
   "invoice.payment_failed",
 ]);
 
@@ -44,6 +46,7 @@ async function syncSubscriptionFromStripe(
         userId: user.id,
         stripeSubscriptionId: snap.id,
         stripePriceId: snap.priceId,
+        billingInterval: snap.billingInterval,
         status,
         currentPeriodStart: snap.currentPeriodStart,
         currentPeriodEnd: snap.currentPeriodEnd,
@@ -51,6 +54,7 @@ async function syncSubscriptionFromStripe(
       },
       update: {
         stripePriceId: snap.priceId,
+        billingInterval: snap.billingInterval,
         status,
         currentPeriodStart: snap.currentPeriodStart,
         currentPeriodEnd: snap.currentPeriodEnd,
@@ -64,7 +68,7 @@ async function syncSubscriptionFromStripe(
         action: "billing.subscription_sync",
         model: "Subscription",
         recordId: snap.id,
-        metadata: { status },
+        metadata: { status, billingInterval: snap.billingInterval },
       },
     }),
   ]);
@@ -100,7 +104,9 @@ export async function processStripeEvent(
     } else if (
       stored.type === "checkout.session.completed" ||
       stored.type === "customer.subscription.created" ||
-      stored.type === "customer.subscription.updated"
+      stored.type === "customer.subscription.updated" ||
+      stored.type === "customer.subscription.resumed" ||
+      stored.type === "invoice.payment_succeeded"
     ) {
       const payload = stored.payload as {
         data?: { object?: { subscription?: unknown; id?: string } };
@@ -151,17 +157,33 @@ export async function processStripeEvent(
           where: { stripeSubscriptionId: subscriptionId },
         });
         if (existing) {
-          await prisma.subscription.update({
-            where: { stripeSubscriptionId: subscriptionId },
-            data: { status: "PAST_DUE" },
-          });
+          // Strict: past_due is NOT entitled — downgrade immediately.
+          // The subscription row stays PAST_DUE for UI banner; tier is free.
+          await prisma.$transaction([
+            prisma.subscription.update({
+              where: { stripeSubscriptionId: subscriptionId },
+              data: { status: "PAST_DUE" },
+            }),
+            prisma.user.update({
+              where: { id: existing.userId },
+              data: { planTier: "free" },
+            }),
+            prisma.auditLog.create({
+              data: {
+                actorUserId: existing.userId,
+                action: "billing.payment_failed",
+                model: "Subscription",
+                recordId: subscriptionId,
+              },
+            }),
+          ]);
         }
       }
     }
 
     await prisma.stripeEvent.update({
       where: { id: eventId },
-      data: { status: "done" },
+      data: { status: "done", processedAt: new Date() },
     });
     return { handled: true };
   } catch (err) {
@@ -172,4 +194,44 @@ export async function processStripeEvent(
     });
     throw err;
   }
+}
+
+/**
+ * Hourly reconcile: re-fetch Stripe for subs that look stale
+ * (ACTIVE/TRIALING but periodEnd in the past) so a missed webhook
+ * can't grant pro forever. Called by the billing-reconcile job.
+ */
+export async function syncStaleSubscriptions(
+  prisma: PrismaClient,
+  stripe: Stripe,
+  log: pino.Logger,
+  limit = 50,
+): Promise<{ checked: number; synced: number }> {
+  const stale = await prisma.subscription.findMany({
+    where: {
+      status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
+      currentPeriodEnd: { lt: new Date() },
+    },
+    orderBy: { currentPeriodEnd: "asc" },
+    take: limit,
+    select: { stripeSubscriptionId: true },
+  });
+  let synced = 0;
+  for (const row of stale) {
+    try {
+      await syncSubscriptionFromStripe(
+        prisma,
+        stripe,
+        row.stripeSubscriptionId,
+        log,
+      );
+      synced += 1;
+    } catch (err) {
+      log.warn(
+        { err, subscriptionId: row.stripeSubscriptionId },
+        "reconcile sync failed",
+      );
+    }
+  }
+  return { checked: stale.length, synced };
 }

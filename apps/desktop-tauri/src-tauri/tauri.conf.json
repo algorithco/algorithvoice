@@ -18,6 +18,8 @@
         "height": 720,
         "minWidth": 360,
         "minHeight": 520,
+        "maxWidth": 1280,
+        "maxHeight": 900,
         "center": true,
         "resizable": true,
         "maximized": false,

@@ -294,7 +294,7 @@ test(
 );
 
 test(
-  "floating pill spawns with 72x72 bottom-right geometry",
+  "floating pill spawns with 160x40 bottom-right geometry",
   { timeout: 120_000 },
   async () => {
     const before = await driver.getAllWindowHandles();
@@ -309,7 +309,7 @@ test(
     );
     // The pill webview needs a moment to navigate and boot React. Both windows
     // share document.title ("Algorith Voice"), so identify the pill by its
-    // drag-region root, which only FloatingPill renders. (Target ids can churn
+    // pill root, which only FloatingPill renders. (Target ids can churn
     // across navigation commit, so match by content, not by handle diff.)
     const pillHandle = await waitFor(
       async () => {
@@ -317,7 +317,7 @@ test(
         for (const h of hs) {
           await driver.switchTo().window(h);
           const found = await driver.executeScript(
-            "return !!document.querySelector('[data-tauri-drag-region=\"deep\"]');",
+            "return !!document.querySelector('[data-testid=\"floating-pill\"]');",
           );
           if (found) return h;
         }
@@ -327,45 +327,48 @@ test(
     );
     assert.ok(pillHandle, "pill webview with FloatingPill content not found");
     const rect = await driver.manage().window().getRect();
-    // NOTE: width currently measures 136px against a 72px spec (see changelog
-    // P4 — cosmetic only; content is centered and fully on-screen). Height and
-    // anchor position match the Rust pill_position() math exactly.
+    // Idle pill is 160x40; anchor matches Rust pill_position() math exactly
+    // (x = screen.w - 160 - 24, y = screen.h - 40 - 96).
     console.log(`pill rect: ${JSON.stringify(rect)}`);
-    assert.equal(Math.round(rect.height), 72);
+    assert.equal(Math.round(rect.height), 40);
+    assert.equal(Math.round(rect.width), 160);
     // Bottom-right of the primary screen (mirrors pill_position in Rust:
-    // x = screen.w - 72 - 24, y = screen.h - 72 - 96).
+    // x = screen.w - 160 - 24, y = screen.h - 40 - 96).
     const screen = await driver.executeScript(
       "return { w: window.screen.width, h: window.screen.height };",
     );
     assert.ok(
-      Math.abs(rect.x - (screen.w - 96)) <= 12,
-      `pill x=${rect.x}, expected ~${screen.w - 96}`,
+      Math.abs(rect.x - (screen.w - 184)) <= 12,
+      `pill x=${rect.x}, expected ~${screen.w - 184}`,
     );
     assert.ok(
-      Math.abs(rect.y - (screen.h - 168)) <= 12,
-      `pill y=${rect.y}, expected ~${screen.h - 168}`,
+      Math.abs(rect.y - (screen.h - 136)) <= 12,
+      `pill y=${rect.y}, expected ~${screen.h - 136}`,
     );
     await shot("02-floating-pill");
 
-    // Drag the pill by its frame (not the button, which opts out of dragging).
-    // The pill is `focusable:false` so WebDriver pointer actions are best-effort:
-    // some drivers ignore unfocused windows. We attempt a drag and soft-check
-    // the result — the hard guarantee is the drag-region attributes + the
+    // Drag the pill by its idle handle (the whole idle pill is draggable;
+    // waveform/cancel/stop opt out). The pill is `focusable:false` so
+    // WebDriver pointer actions are best-effort: some drivers ignore
+    // unfocused windows. We attempt a drag and soft-check the result — the
+    // hard guarantee is the drag-region attributes + the
     // `allow-start-dragging` capability (without which `start_dragging` is
     // denied entirely). If the OS did move the window, assert the delta.
+    // Regression: outer window container must NOT be draggable (that was
+    // the ~15px corner overshoot); only the idle pill / logo may drag.
     const hasDragRegion = await driver.executeScript(
-      "return !!document.querySelector('[data-tauri-drag-region=\"deep\"]') && !!document.querySelector('button[data-tauri-drag-region=\"false\"]');",
+      "return !!document.querySelector('[data-testid=\"pill-idle\"][data-tauri-drag-region=\"true\"]') && document.querySelector('[data-tauri-drag-region=\"false\"]') !== null && !document.querySelector('[data-tauri-drag-region=\"deep\"]');",
     );
-    assert.ok(hasDragRegion, "pill drag regions missing");
+    assert.ok(hasDragRegion, "pill drag regions missing or overshoot regressed");
     const root = await driver.executeScript(
-      "return document.querySelector('[data-tauri-drag-region=\"deep\"]');",
+      "return document.querySelector('[data-testid=\"pill-idle\"]');",
     );
     const DX = 24,
       DY = 16;
     try {
       const actions = driver.actions({ async: true });
       await actions
-        .move({ origin: root, x: -30, y: -20 })
+        .move({ origin: root })
         .press()
         .move({ origin: "pointer", x: DX, y: DY })
         .release()

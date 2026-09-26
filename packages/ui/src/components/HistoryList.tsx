@@ -35,8 +35,9 @@ export function HistoryList({
             aria-label="Copy transcript"
             className={cn(
               "rounded-control p-2 text-gray-500 opacity-0 transition-opacity duration-150 ease-app",
-              "hover:text-black focus-visible:opacity-100 group-hover:opacity-100",
+              "hover:text-black focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
               "dark:hover:text-white",
+              "[@media(hover:none)]:opacity-100",
               "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--av-focus-ring)",
             )}
           >

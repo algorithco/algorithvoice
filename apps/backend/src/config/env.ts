@@ -57,6 +57,9 @@ const envSchema = z
     STRIPE_SECRET_KEY: optStr(),
     STRIPE_WEBHOOK_SECRET: optStr(),
     STRIPE_PRICE_PRO: optStr(),
+    STRIPE_PRICE_PRO_MONTHLY: optStr(),
+    STRIPE_PRICE_PRO_YEARLY: optStr(),
+    STRIPE_PORTAL_CONFIG: optStr(),
     R2_ACCOUNT_ID: optStr(),
     R2_ACCESS_KEY_ID: optStr(),
     R2_SECRET_ACCESS_KEY: optStr(),
@@ -91,6 +94,16 @@ const envSchema = z
         code: "custom",
         message:
           "STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET must be set together",
+      });
+    }
+    if (
+      env.STRIPE_PRICE_PRO_MONTHLY !== undefined &&
+      env.STRIPE_PRICE_PRO_YEARLY !== undefined &&
+      env.STRIPE_PRICE_PRO_MONTHLY === env.STRIPE_PRICE_PRO_YEARLY
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "STRIPE_PRICE_PRO_MONTHLY and STRIPE_PRICE_PRO_YEARLY must differ",
       });
     }
     const r2Keys = [

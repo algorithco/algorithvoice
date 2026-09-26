@@ -4,8 +4,9 @@
 //! untouched — this file only *adds* new commands which `lib.rs` wires
 //! into `invoke_handler`. Frontend drives the flow:
 //!
-//! 1. `ensure_floating_pill` creates the 72x72 frameless always-on-top
-//!    window (`focus: false` so the previously active app keeps focus).
+//! 1. `ensure_floating_pill` creates the 160x40 (idle) / 260x40
+//!    (recording) frameless always-on-top window (`focus: false` so the
+//!    previously active app keeps focus).
 //! 2. Frontend records with `MediaRecorder` (Variant A — no native audio
 //!    dep needed) and sends base64 audio to `transcribe_audio`.
 //! 3. `paste_text` (or the `transcribe_and_paste` convenience combo)
@@ -626,28 +627,49 @@ pub fn get_foreground_info() -> AppResult<ForegroundInfo> {
 /// Create (or reveal) the frameless always-on-top pill.
 ///
 /// Properties per spec: decorations=false, transparent, always_on_top,
-/// skip_taskbar, non-resizable 72x72, `focused(false)` + `focusable(false)`
-/// so it never steals focus, `visible_on_all_workspaces` where supported.
+/// skip_taskbar, non-resizable short-wide pill (160x40 idle, 260x40
+/// recording), `focused(false)` + `focusable(false)` so it never steals
+/// focus, `visible_on_all_workspaces` where supported.
 ///
 /// NOTE: Windows needs no private-API opt-in for `.transparent()` — the
 /// old `macos-private-api` Cargo feature / `macOSPrivateApi` config were
 /// macOS-only and have been removed (macOS lives in the Swift app).
-pub(crate) const PILL_SIZE: f64 = 72.0;
+pub(crate) const PILL_WIDTH_IDLE: f64 = 160.0;
+pub(crate) const PILL_HEIGHT: f64 = 40.0;
+pub(crate) const PILL_WIDTH_RECORDING: f64 = 260.0;
 pub(crate) const PILL_MARGIN_RIGHT: f64 = 24.0;
 pub(crate) const PILL_MARGIN_BOTTOM: f64 = 96.0;
 
-/// Bottom-right pill position for a monitor's logical geometry.
-/// Pure so unit tests and the WebDriver E2E suite (`apps/desktop-tauri/e2e`)
-/// assert the same numbers the builder uses.
-pub(crate) fn pill_position(
+/// Bottom-right pill position for a monitor's logical geometry, for an
+/// explicit pill width. Pure so unit tests and the WebDriver E2E suite
+/// (`apps/desktop-tauri/e2e`) assert the same numbers the builder uses.
+pub(crate) fn pill_position_for_width(
+    width: f64,
     logical_x: f64,
     logical_y: f64,
     logical_w: f64,
     logical_h: f64,
 ) -> (f64, f64) {
     (
-        logical_x + logical_w - PILL_SIZE - PILL_MARGIN_RIGHT,
-        logical_y + logical_h - PILL_SIZE - PILL_MARGIN_BOTTOM,
+        logical_x + logical_w - width - PILL_MARGIN_RIGHT,
+        logical_y + logical_h - PILL_HEIGHT - PILL_MARGIN_BOTTOM,
+    )
+}
+
+/// Bottom-right pill position for the idle width. Kept as the default
+/// entry point so existing callers (window creation) stay anchored.
+pub(crate) fn pill_position(
+    logical_x: f64,
+    logical_y: f64,
+    logical_w: f64,
+    logical_h: f64,
+) -> (f64, f64) {
+    pill_position_for_width(
+        PILL_WIDTH_IDLE,
+        logical_x,
+        logical_y,
+        logical_w,
+        logical_h,
     )
 }
 
@@ -667,9 +689,9 @@ pub async fn ensure_floating_pill(app: AppHandle) -> AppResult<()> {
             WebviewUrl::App("index.html".into()),
         )
         .title("Algorith Voice — Talk")
-        .inner_size(72.0, 72.0)
-        .min_inner_size(60.0, 60.0)
-        .max_inner_size(160.0, 160.0)
+        .inner_size(PILL_WIDTH_IDLE, PILL_HEIGHT)
+        .min_inner_size(PILL_WIDTH_IDLE, PILL_HEIGHT)
+        .max_inner_size(PILL_WIDTH_RECORDING, PILL_HEIGHT)
         .resizable(false)
         .decorations(false)
         .transparent(true)
@@ -726,6 +748,40 @@ pub fn floating_pill_visible(app: AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+/// Resize the pill window when the frontend switches between idle and
+/// recording layouts, keeping the bottom-right corner anchored so the
+/// pill grows leftward (never off-screen to the right).
+///
+/// Called from the frontend on `state` change: `expanded=true` selects
+/// `PILL_WIDTH_RECORDING`, `false` selects `PILL_WIDTH_IDLE`. Height and
+/// margins are constant. No-op when the window does not exist yet.
+#[tauri::command]
+pub async fn set_floating_pill_expanded(app: AppHandle, expanded: bool) -> AppResult<()> {
+    let Some(win) = app.get_webview_window(FLOATING_LABEL) else {
+        return Ok(());
+    };
+    let width = if expanded {
+        PILL_WIDTH_RECORDING
+    } else {
+        PILL_WIDTH_IDLE
+    };
+    let _ = win.set_size(tauri::LogicalSize::new(width, PILL_HEIGHT));
+    // Re-anchor bottom-right against the primary monitor so the resize
+    // grows leftward and `always_on_top`/visibility are untouched.
+    if let Ok(Some(monitor)) = app.primary_monitor() {
+        let scale = monitor.scale_factor();
+        let m_pos = monitor.position();
+        let m_size = monitor.size();
+        let logical_x = m_pos.x as f64 / scale;
+        let logical_y = m_pos.y as f64 / scale;
+        let logical_w = m_size.width as f64 / scale;
+        let logical_h = m_size.height as f64 / scale;
+        let (x, y) = pill_position_for_width(width, logical_x, logical_y, logical_w, logical_h);
+        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,13 +789,27 @@ mod tests {
 
     #[test]
     fn pill_sits_bottom_right_clear_of_taskbar() {
-        // 1920x1080 primary monitor at origin (scale 1).
+        // 1920x1080 primary monitor at origin (scale 1). Idle pill is
+        // 160x40 with 24px right / 96px bottom margins.
         let (x, y) = pill_position(0.0, 0.0, 1920.0, 1080.0);
-        assert_eq!((x, y), (1920.0 - 72.0 - 24.0, 1080.0 - 72.0 - 96.0));
-        assert_eq!((x, y), (1824.0, 912.0));
+        assert_eq!((x, y), (1920.0 - 160.0 - 24.0, 1080.0 - 40.0 - 96.0));
+        assert_eq!((x, y), (1736.0, 944.0));
         // Offset secondary monitor: position follows the monitor origin.
         let (x2, y2) = pill_position(1920.0, 0.0, 1920.0, 1080.0);
-        assert_eq!((x2, y2), (3744.0, 912.0));
+        assert_eq!((x2, y2), (3656.0, 944.0));
+    }
+
+    #[test]
+    fn pill_recording_grows_leftward_same_bottom_right_anchor() {
+        // Recording pill is 260x40: same bottom edge, leftward growth.
+        let (x, y) = pill_position_for_width(PILL_WIDTH_RECORDING, 0.0, 0.0, 1920.0, 1080.0);
+        assert_eq!((x, y), (1920.0 - 260.0 - 24.0, 1080.0 - 40.0 - 96.0));
+        assert_eq!((x, y), (1636.0, 944.0));
+        // Idle wrapper agrees with explicit idle width.
+        let (xi, yi) = pill_position(0.0, 0.0, 1920.0, 1080.0);
+        let (xe, ye) =
+            pill_position_for_width(PILL_WIDTH_IDLE, 0.0, 0.0, 1920.0, 1080.0);
+        assert_eq!((xi, yi), (xe, ye));
     }
 
     #[test]

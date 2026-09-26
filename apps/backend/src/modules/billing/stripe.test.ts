@@ -44,10 +44,10 @@ describe("toSubStatus", () => {
 });
 
 describe("resolvePlanTier", () => {
-  it("keeps pro through grace statuses, drops on cancel", () => {
+  it("strict: only ACTIVE/TRIALING are pro, PAST_DUE is free", () => {
     expect(resolvePlanTier("ACTIVE")).toBe("pro");
     expect(resolvePlanTier("TRIALING")).toBe("pro");
-    expect(resolvePlanTier("PAST_DUE")).toBe("pro");
+    expect(resolvePlanTier("PAST_DUE")).toBe("free");
     expect(resolvePlanTier("CANCELED")).toBe("free");
     expect(resolvePlanTier("INCOMPLETE")).toBe("free");
   });
@@ -70,6 +70,38 @@ describe("mapStripeSubscription", () => {
     );
     expect(snap.customerId).toBe("cus_9");
     expect(snap.priceId).toBeNull();
+    expect(snap.billingInterval).toBeNull();
+  });
+
+  it("maps recurring month/year to billingInterval", () => {
+    const monthly = mapStripeSubscription(
+      fakeSubscription({
+        items: {
+          data: [
+            {
+              price: { id: "price_m", recurring: { interval: "month" } },
+              current_period_start: 1_700_000_000,
+              current_period_end: 1_700_259_200,
+            },
+          ],
+        },
+      }),
+    );
+    expect(monthly.billingInterval).toBe("MONTHLY");
+    const yearly = mapStripeSubscription(
+      fakeSubscription({
+        items: {
+          data: [
+            {
+              price: { id: "price_y", recurring: { interval: "year" } },
+              current_period_start: 1_700_000_000,
+              current_period_end: 1_731_259_200,
+            },
+          ],
+        },
+      }),
+    );
+    expect(yearly.billingInterval).toBe("YEARLY");
   });
 });
 

@@ -102,6 +102,7 @@ describe("login/signup/logout", () => {
     expect(mockInvoke).toHaveBeenCalledWith("store_session", {
       accessToken: "tok",
       email: "a@b.c",
+      refreshToken: null,
     });
   });
 

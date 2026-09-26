@@ -1,5 +1,8 @@
+import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
+import { Logo } from "@algorith-voice/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Square, X } from "lucide-react";
 import { saveHistory } from "../lib/history.js";
 import { loadPrefs } from "../lib/prefs.js";
 import {
@@ -14,7 +17,6 @@ import {
 } from "../lib/ptt.js";
 import { isTauri } from "../lib/session/env.js";
 import { setTrayState } from "../lib/session/tray.js";
-import { AudioLines } from "./animate-ui/icons/audio-lines.js";
 import { Loader } from "./animate-ui/icons/loader.js";
 import type { Prefs } from "./SettingsView.js";
 
@@ -29,17 +31,32 @@ const MAX_BLOB_BYTES = 15 * 1024 * 1024;
 /** How long pill notices (error / clipboard-fallback) stay visible. */
 const NOTICE_MS = 5000;
 
+/** Must match Rust: PILL_WIDTH_IDLE / PILL_WIDTH_RECORDING / PILL_HEIGHT. */
+const PILL_WIDTH_IDLE = 160;
+const PILL_WIDTH_RECORDING = 260;
+const PILL_HEIGHT = 40;
+const WAVE_BARS = 32;
+
 /**
  * Floating push-to-talk pill (rendered only in the `floating-pill` window).
+ *
+ * Two visual states:
+ * - idle (160x40): [logo + "Algorith Voice"]. Whole pill is the drag
+ *   handle AND the hold-to-talk target.
+ * - recording (260x40): [logo | live waveform | X cancel | stop & send].
+ *   Only the logo stays draggable; waveform + buttons opt out.
+ *
+ * Drag-region bug fix: the outer window container is NEVER draggable
+ * (`data-tauri-drag-region="false"`). Only the exact visible idle pill
+ * (and the small logo box while recording) carry `="true"`. No `deep`
+ * parent, no corner overshoot.
  *
  * - Press-and-hold → recording, release → processing → auto-paste.
  * - Presses < 300 ms are discarded as accidental (Superwhisper-style).
  * - Pointer capture keeps the press alive when the cursor slips off the
- *   56 px button; release anywhere still sends.
+ *   pill; release anywhere still sends.
  * - Global hotkey (`ptt-pressed` / `ptt-released` from Rust, already
  *   deduped against OS key-repeat) drives the same state machine.
- * - The padded frame is the drag region (`deep`); the round button opts
- *   out so press never starts a window move.
  */
 export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const [state, setState] = useState<PillState>("idle");
@@ -62,6 +79,13 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const noticeTimerRef = useRef(0);
   const tickTimerRef = useRef(0);
 
+  // Live waveform taps the SAME MediaStream used for recording.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const waveRafRef = useRef(0);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const setPill = useCallback((next: PillState) => {
     stateRef.current = next;
     if (mountedRef.current) setState(next);
@@ -77,9 +101,9 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   }, []);
 
   // Every notice is mirrored to the Dictate view via PTT_ERROR_EVENT.
-  // The pill itself is a 56 px button and can only show a badge/tooltip,
-  // so without the mirror, outcomes like "tap too short" or "no speech
-  // detected" vanish without a trace on the screen the user is watching.
+  // The pill is compact and can only show a truncated label/tooltip,
+  // so without the mirror, outcomes like "tap too short" vanish without
+  // a trace on the screen the user is watching.
   const showNotice = useCallback((message: string) => {
     if (!mountedRef.current) return;
     setNotice(message);
@@ -90,7 +114,142 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     if (isTauri()) void emit(PTT_ERROR_EVENT, message);
   }, []);
 
+  const teardownWaveform = useCallback(() => {
+    if (waveRafRef.current) {
+      try {
+        cancelAnimationFrame(waveRafRef.current);
+      } catch {
+        // Ignore.
+      }
+      waveRafRef.current = 0;
+    }
+    try {
+      sourceRef.current?.disconnect();
+    } catch {
+      // Already disconnected.
+    }
+    try {
+      analyserRef.current?.disconnect();
+    } catch {
+      // Already disconnected.
+    }
+    sourceRef.current = null;
+    analyserRef.current = null;
+    const ctx = audioCtxRef.current;
+    audioCtxRef.current = null;
+    if (ctx) {
+      try {
+        void ctx.close().catch(() => {});
+      } catch {
+        // Already closed.
+      }
+    }
+  }, []);
+
+  const attachWaveform = useCallback(
+    (stream: MediaStream) => {
+      teardownWaveform();
+      try {
+        const AudioContextClass =
+          window.AudioContext ??
+          (
+            window as unknown as {
+              webkitAudioContext?: typeof AudioContext;
+            }
+          ).webkitAudioContext;
+        if (!AudioContextClass) return;
+        const ctx = new AudioContextClass();
+        const src = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.55;
+        src.connect(analyser);
+        audioCtxRef.current = ctx;
+        sourceRef.current = src;
+        analyserRef.current = analyser;
+        if (ctx.state === "suspended") {
+          void ctx.resume().catch(() => {});
+        }
+        const data = new Uint8Array(analyser.fftSize);
+        const tick = () => {
+          if (!mountedRef.current || stateRef.current !== "recording") return;
+          try {
+            analyser.getByteTimeDomainData(data);
+          } catch {
+            waveRafRef.current = requestAnimationFrame(tick);
+            return;
+          }
+          const canvas = canvasRef.current;
+          if (canvas) {
+            const dpr = window.devicePixelRatio || 1;
+            const cssW = canvas.clientWidth || 120;
+            const cssH = canvas.clientHeight || 24;
+            const wantW = Math.max(1, Math.round(cssW * dpr));
+            const wantH = Math.max(1, Math.round(cssH * dpr));
+            if (canvas.width !== wantW || canvas.height !== wantH) {
+              canvas.width = wantW;
+              canvas.height = wantH;
+            }
+            const g = canvas.getContext("2d");
+            if (g) {
+              g.clearRect(0, 0, canvas.width, canvas.height);
+              g.save();
+              g.scale(dpr, dpr);
+              let color = "#ffffff";
+              try {
+                const computed = getComputedStyle(canvas).color;
+                if (computed) color = computed;
+              } catch {
+                // Fall back to white.
+              }
+              g.fillStyle = color;
+              const gap = 2;
+              const barW = Math.max(2, (cssW - gap * (WAVE_BARS - 1)) / WAVE_BARS);
+              const step = Math.max(1, Math.floor(data.length / WAVE_BARS));
+              for (let i = 0; i < WAVE_BARS; i += 1) {
+                let peak = 0;
+                const start = i * step;
+                for (let j = 0; j < step; j += 1) {
+                  const v = Math.abs(((data[start + j] ?? 128) as number) - 128) / 128;
+                  if (v > peak) peak = v;
+                }
+                const amp = Math.min(1, peak * 1.7);
+                const h = Math.max(3, amp * cssH);
+                const x = i * (barW + gap);
+                const y = (cssH - h) / 2;
+                const r = Math.min(1.5, barW / 2);
+                g.beginPath();
+                const anyG = g as CanvasRenderingContext2D & {
+                  roundRect?: (
+                    x: number,
+                    y: number,
+                    w: number,
+                    h: number,
+                    r: number,
+                  ) => void;
+                };
+                if (typeof anyG.roundRect === "function") {
+                  anyG.roundRect(x, y, barW, h, r);
+                } else {
+                  g.rect(x, y, barW, h);
+                }
+                g.fill();
+              }
+              g.restore();
+            }
+          }
+          waveRafRef.current = requestAnimationFrame(tick);
+        };
+        waveRafRef.current = requestAnimationFrame(tick);
+      } catch {
+        // Waveform is decorative — recording must survive its failure.
+      }
+    },
+    [teardownWaveform],
+  );
+
   const stopTracks = useCallback(() => {
+    teardownWaveform();
     const stream = streamRef.current;
     streamRef.current = null;
     if (stream) {
@@ -102,7 +261,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         }
       }
     }
-  }, []);
+  }, [teardownWaveform]);
 
   const clearTimers = useCallback(() => {
     window.clearTimeout(maxTimerRef.current);
@@ -405,6 +564,8 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     };
     recorder.start();
     startingRef.current = false;
+    // Tap the SAME stream for the live waveform — no second mic request.
+    attachWaveform(stream);
     setPill("recording");
     setElapsedMs(0);
     tickTimerRef.current = window.setInterval(() => {
@@ -415,7 +576,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       showNotice("Max length reached — sending.");
       stopPress();
     }, MAX_RECORD_MS);
-  }, [finishWithBlob, setPill, showNotice, stopPress, stopTracks]);
+  }, [attachWaveform, finishWithBlob, setPill, showNotice, stopPress, stopTracks]);
 
   const cancelPress = useCallback(() => {
     if (stateRef.current !== "recording") return;
@@ -452,6 +613,17 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     };
   }, [startPress, stopPress]);
 
+  // Resize the native window to match the active layout (idle 160px vs
+  // recording 260px). Rust re-anchors bottom-right so it grows leftward.
+  // No-op in browser preview.
+  useEffect(() => {
+    if (!isTauri()) return;
+    const expanded = state === "recording";
+    void invoke("set_floating_pill_expanded", { expanded }).catch(() => {
+      // Window may not exist yet in tests / preview — ignore.
+    });
+  }, [state]);
+
   // Ensure pill window is transparent on Windows/WebView2
   useEffect(() => {
     const prevHtml = document.documentElement.style.background;
@@ -459,10 +631,14 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     document.documentElement.style.background = "transparent";
     document.body.style.background = "transparent";
     document.body.style.overflow = "hidden";
+    document.body.style.margin = "0";
+    document.body.style.padding = "0";
     return () => {
       document.documentElement.style.background = prevHtml;
       document.body.style.background = prevBody;
       document.body.style.overflow = "";
+      document.body.style.margin = "";
+      document.body.style.padding = "";
     };
   }, []);
 
@@ -489,18 +665,22 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     };
   }, [cancelPress, clearTimers, stopTracks]);
 
+  const pillWidth = state === "recording" ? PILL_WIDTH_RECORDING : PILL_WIDTH_IDLE;
+  const idleLabel = notice ?? "Algorith Voice";
+  const idleTitle = notice ?? "Hold to talk — drag to move";
+  const recTitle = `Recording ${formatElapsed(elapsedMs)} — release to transcribe`;
   const label =
     state === "recording"
-      ? `Recording ${formatElapsed(elapsedMs)} — release to transcribe`
+      ? recTitle
       : state === "processing"
         ? "Transcribing…"
-        : (notice ?? "Hold to talk — drag edges to move");
+        : idleTitle;
 
   return (
     <div
-      data-tauri-drag-region="deep"
-      className="grid h-screen w-screen cursor-grab place-items-center bg-transparent active:cursor-grabbing"
-      style={{ background: "transparent" }}
+      data-tauri-drag-region="false"
+      className="grid h-screen w-screen place-items-center overflow-hidden bg-transparent"
+      style={{ background: "transparent", margin: 0, padding: 0 }}
     >
       <span aria-live="polite" className="sr-only">
         {state === "recording"
@@ -509,69 +689,149 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
             ? "Transcribing."
             : (notice ?? "Idle.")}
       </span>
-      <span className="relative grid place-items-center">
-        <button
-          type="button"
-          aria-label={label}
-          aria-pressed={state === "recording"}
-          title={label}
-          data-tauri-drag-region="false"
-          onPointerDown={(e) => {
-            if (!e.isPrimary) return;
-            if (e.pointerType === "mouse" && e.button !== 0) return;
-            e.preventDefault();
-            try {
-              e.currentTarget.setPointerCapture(e.pointerId);
-            } catch {
-              // Capture unsupported — pointerup outside may be missed
-              // (MAX_RECORD_MS still bounds the take).
-            }
-            if (notice) setNotice(null);
-            void startPress();
-          }}
-          onPointerUp={stopPress}
-          onPointerCancel={stopPress}
-          onKeyDown={(e) => {
-            // Keyboard hold-to-talk: Space/Enter starts, keyup sends.
-            if (e.repeat) return;
-            if (e.key === " " || e.key === "Enter") {
-              e.preventDefault();
-              void startPress();
-            }
-          }}
-          onKeyUp={(e) => {
-            if (e.key === " " || e.key === "Enter") {
-              e.preventDefault();
-              stopPress();
-            }
-          }}
-          onContextMenu={(e) => e.preventDefault()}
-          className={[
-            "grid size-14 cursor-pointer place-items-center rounded-full border shadow-lg transition-all duration-150 select-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black focus-visible:outline-none",
-            state === "recording"
-              ? "scale-110 border-red-300 bg-red-500 text-white motion-safe:animate-pulse"
-              : state === "processing"
-                ? "border-gray-300 bg-gray-400 text-white motion-safe:animate-pulse dark:border-gray-600"
-                : notice
-                  ? "border-amber-300 bg-black text-white dark:bg-white dark:text-black"
-                  : "border-gray-200 bg-black text-white hover:scale-105 active:scale-95 dark:border-white/15 dark:bg-white dark:text-black",
-          ].join(" ")}
-        >
-          {state === "processing" ? (
-            <Loader size={22} animation="spin" animate />
-          ) : (
-            <AudioLines size={22} animate={state === "recording"} />
-          )}
-        </button>
+      <div
+        data-testid="floating-pill"
+        data-state={state}
+        style={{ width: pillWidth, height: PILL_HEIGHT }}
+        className={[
+          "flex items-center overflow-hidden rounded-full border shadow-lg transition-[width,background-color,border-color] duration-200 ease-out select-none",
+          state === "recording"
+            ? "border-red-300 bg-red-500 text-white"
+            : state === "processing"
+              ? "border-gray-300 bg-gray-400 text-white dark:border-gray-600"
+              : notice
+                ? "border-amber-300 bg-black text-white dark:bg-white dark:text-black"
+                : "border-gray-200 bg-black text-white dark:border-white/15 dark:bg-white dark:text-black",
+        ].join(" ")}
+      >
         {state === "recording" ? (
-          <span
-            aria-hidden="true"
-            className="absolute -bottom-1 rounded-full bg-black/80 px-1.5 py-px font-mono text-[10px] leading-4 text-white tabular-nums dark:bg-white/90 dark:text-black"
+          <div
+            data-tauri-drag-region="false"
+            className="flex h-full w-full items-center gap-1.5 px-2"
           >
-            {formatElapsed(elapsedMs)}
-          </span>
-        ) : null}
-      </span>
+            <div
+              data-tauri-drag-region="true"
+              data-testid="pill-logo-drag"
+              title="Drag to move"
+              aria-hidden="true"
+              className="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing"
+            >
+              <Logo className="h-4 w-auto" />
+            </div>
+            <canvas
+              ref={canvasRef}
+              data-tauri-drag-region="false"
+              data-testid="pill-waveform"
+              aria-hidden="true"
+              className="h-6 min-w-0 flex-1 text-white"
+              style={{ width: 110, height: 24 }}
+            />
+            <span
+              aria-hidden="true"
+              data-tauri-drag-region="false"
+              className="shrink-0 font-mono text-[10px] leading-4 tabular-nums opacity-90"
+            >
+              {formatElapsed(elapsedMs)}
+            </span>
+            <button
+              type="button"
+              aria-label="Cancel recording"
+              title="Cancel (Esc)"
+              data-tauri-drag-region="false"
+              data-testid="pill-cancel"
+              onClick={(e) => {
+                e.stopPropagation();
+                cancelPress();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+              className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-full text-white/90 transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none active:bg-white/30"
+            >
+              <X size={14} />
+            </button>
+            <button
+              type="button"
+              aria-label="Stop and send"
+              title="Stop and send"
+              data-tauri-drag-region="false"
+              data-testid="pill-stop"
+              onClick={(e) => {
+                e.stopPropagation();
+                stopPress();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+              className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-full bg-white text-red-600 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-red-500 focus-visible:outline-none active:scale-95"
+            >
+              <Square size={12} fill="currentColor" />
+            </button>
+          </div>
+        ) : state === "processing" ? (
+          <div
+            data-tauri-drag-region="false"
+            className="flex h-full w-full items-center gap-2 px-3"
+            aria-label="Transcribing…"
+          >
+            <div
+              data-tauri-drag-region="true"
+              data-testid="pill-logo-drag"
+              title="Drag to move"
+              aria-hidden="true"
+              className="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing"
+            >
+              <Logo className="h-4 w-auto" />
+            </div>
+            <Loader size={16} animation="spin" animate />
+            <span className="truncate text-xs font-medium">Transcribing…</span>
+          </div>
+        ) : (
+          <button
+            type="button"
+            aria-label={idleTitle}
+            aria-pressed={false}
+            title={idleTitle}
+            data-tauri-drag-region="true"
+            data-testid="pill-idle"
+            onPointerDown={(e) => {
+              if (!e.isPrimary) return;
+              if (e.pointerType === "mouse" && e.button !== 0) return;
+              e.preventDefault();
+              try {
+                e.currentTarget.setPointerCapture(e.pointerId);
+              } catch {
+                // Capture unsupported — pointerup outside may be missed
+                // (MAX_RECORD_MS still bounds the take).
+              }
+              if (notice) setNotice(null);
+              void startPress();
+            }}
+            onPointerUp={stopPress}
+            onPointerCancel={stopPress}
+            onKeyDown={(e) => {
+              // Keyboard hold-to-talk: Space/Enter starts, keyup sends.
+              if (e.repeat) return;
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                void startPress();
+              }
+            }}
+            onKeyUp={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                stopPress();
+              }
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            className="flex h-full w-full cursor-grab items-center gap-2 px-3 text-left active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-black focus-visible:outline-none"
+          >
+            <Logo className="h-4 w-auto shrink-0" />
+            <span className="truncate text-xs font-semibold tracking-wide">
+              {idleLabel}
+            </span>
+          </button>
+        )}
+      </div>
+      <span className="sr-only">{label}</span>
     </div>
   );
 }

@@ -23,6 +23,7 @@ import {
   familyLockKey,
   hashRefreshToken,
   isRegisteredClient,
+  isValidStateValue,
   newFamilyId,
   newJti,
   newOpaqueToken,
@@ -36,6 +37,7 @@ import {
   type StoredCode,
   scopeString,
   sha256Hex,
+  stateKey,
   validateRedirectUri,
   verifyCodeChallenge,
 } from "./oauth2.store.js";
@@ -183,6 +185,21 @@ export async function oauth2Routes(
         "EX",
         REQUEST_TTL_SEC,
       );
+      // Secondary index so POST /oauth2/cancel can expire by unguessable
+      // `state` without knowing requestId. Same TTL; deleted on
+      // approve/deny/cancel. Best-effort: a missing index only means cancel
+      // falls back to TTL expiry, never a hang (desktop also times out).
+      try {
+        await redis.set(
+          stateKey(state),
+          requestId,
+          "EX",
+          REQUEST_TTL_SEC,
+          "NX",
+        );
+      } catch {
+        // Index write failure must not break authorize; TTL still bounds it.
+      }
       await writeOAuthAudit(app.prisma, {
         action: OAuth2Audit.AUTHORIZE_START,
         ip,
@@ -240,7 +257,17 @@ export async function oauth2Routes(
         await redis.del(reqKey(requestId));
         return reply.code(400).send({ error: "invalid_request" });
       }
+      // Single-consume: delete request + state index together so a
+      // cancelled/closed tab can never be approved late, and a completed
+      // flow can never be replayed.
       await redis.del(reqKey(requestId));
+      try {
+        if (isValidStateValue(pending.state)) {
+          await redis.del(stateKey(pending.state));
+        }
+      } catch {
+        // Index cleanup is best-effort; TTL bounds any leftover.
+      }
 
       if (!approved) {
         const abandoned = via === "close";
@@ -301,6 +328,45 @@ export async function oauth2Routes(
           code,
         )}&state=${encodeURIComponent(pending.state)}`,
       };
+    },
+  );
+
+  // ---- POST /oauth2/cancel ----
+  // Desktop Cancel button / timeout calls this with the unguessable `state`
+  // it generated for authorize. Deletes the pending request + state index
+  // immediately so a closed Chrome tab never lingers until TTL, and the
+  // desktop deep-link listener unblocks without waiting 5m.
+  // Public (no auth): `state` is 128-bit random, unguessable; always 200
+  // (no oracle for request existence). Rate-limited like approve.
+  api.post(
+    "/cancel",
+    { config: { rateLimit: { max: 30, timeWindow: "10 minutes" } } },
+    async (req, reply) => {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const state = body.state;
+      const ip = req.ip;
+      const ua = req.headers["user-agent"];
+      if (!isValidStateValue(state)) {
+        return reply.code(400).send({
+          error: "invalid_request",
+          error_description: "A valid state is required.",
+        });
+      }
+      // Redis errors bubble to the global handler -> 503 redis_unavailable
+      // (never a false ok). Missing/expired requests still return ok.
+      const requestId = await redis.get(stateKey(state));
+      if (requestId) {
+        await redis.del(reqKey(requestId));
+        await redis.del(stateKey(state));
+        await writeOAuthAudit(app.prisma, {
+          action: OAuth2Audit.AUTHORIZE_CANCELLED,
+          ip,
+          userAgent: ua,
+          metadata: auditMeta({ request_id: requestId, via: "cancel" }),
+        });
+      }
+      // Always ok: existed-and-deleted and already-gone look identical.
+      return { ok: true as const };
     },
   );
 
