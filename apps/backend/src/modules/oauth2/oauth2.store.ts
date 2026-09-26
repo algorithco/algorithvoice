@@ -13,8 +13,13 @@ import { CUSTOM_SCHEME_REDIRECT, DESKTOP_CLIENT_ID } from "./oauth2.schemas.js";
 
 // ---- Lifetimes (seconds) ----
 
-/** Pending browser-side authorization request. */
-export const REQUEST_TTL_SEC = 600;
+/**
+ * Pending browser-side authorization request.
+ * 5m matches the desktop deep-link wait — a closed/cancelled tab must never
+ * linger 10-15m. Cancel/close deletes the keys immediately (see
+ * POST /oauth2/cancel + consent close-beacon); TTL is only the backstop.
+ */
+export const REQUEST_TTL_SEC = 300;
 /** Authorization code: short-lived and single-use (RFC 6749 §4.1.2). */
 export const CODE_TTL_SEC = 120;
 /** Access JWT lifetime; matches the @fastify/jwt signer default. */
@@ -33,6 +38,19 @@ export const codeKey = (code: string) => `oauth2:code:${code}`;
 export const denyKey = (jti: string) => `oauth2:deny:${jti}`;
 export const familyLockKey = (familyId: string) =>
   `oauth2:lock:family:${familyId}`;
+/**
+ * Secondary index: desktop `state` (unguessable 128-bit) -> requestId.
+ * Lets the desktop Cancel button expire a pending request immediately via
+ * POST /oauth2/cancel without ever learning the server-side requestId.
+ * Same TTL as the request itself; deleted together with it on
+ * approve/deny/cancel/expire.
+ */
+export const stateKey = (state: string) => `oauth2:state:${state}`;
+
+/** State must be unguessable + URL-safe; enforced on authorize + cancel. */
+export function isValidStateValue(state: unknown): state is string {
+  return typeof state === "string" && state.length >= 1 && state.length <= 512;
+}
 
 // ---- Client + redirect validation (RFC 8252 §8.4, RFC 9700 §4.1.3) ----
 

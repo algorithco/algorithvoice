@@ -2,8 +2,8 @@
 
 import { signupSchema } from "@algorith-voice/shared-types";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import {
   AuthShell,
   Field,
@@ -13,8 +13,23 @@ import {
 } from "../../components/AuthShell";
 import { Reveal } from "../../components/Reveal";
 
-export default function RegisterPage() {
-  const router = useRouter();
+function safeReturnTo(raw: string | null): string | null {
+  if (!raw || !raw.startsWith("/")) return null;
+  try {
+    const u = new URL(raw, "http://x");
+    if (u.host !== "x") return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function RegisterInner() {
+  const searchParams = useSearchParams();
+  // Preserve desktop-auth handoff (?returnTo=/oauth2/consent?request=…) so a
+  // user without an account lands back on consent after signup instead of
+  // having to click Log in in the desktop app again.
+  const returnTo = safeReturnTo(searchParams.get("returnTo"));
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -59,8 +74,10 @@ export default function RegisterPage() {
         );
         return;
       }
-      router.push("/dashboard");
-      router.refresh();
+      // Hard navigation like login: the consent page must load fresh with the
+      // new session cookies (see login page comment).
+      window.location.href = returnTo ?? "/dashboard";
+      return;
     } catch {
       setErr("Network error.");
     } finally {
@@ -76,7 +93,14 @@ export default function RegisterPage() {
         footer={
           <>
             Already have an account?{" "}
-            <Link href={"/login" as never} className="underline hover:text-ink">
+            <Link
+              href={
+                (returnTo
+                  ? `/login?returnTo=${encodeURIComponent(returnTo)}`
+                  : "/login") as never
+              }
+              className="underline hover:text-ink"
+            >
               Sign in
             </Link>
             {" · "}
@@ -143,5 +167,13 @@ export default function RegisterPage() {
         </div>
       </AuthShell>
     </Reveal>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterInner />
+    </Suspense>
   );
 }

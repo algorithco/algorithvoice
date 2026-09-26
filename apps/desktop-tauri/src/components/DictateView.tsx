@@ -112,8 +112,8 @@ export function DictateView({
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
   // Mirror the floating pill: real transcripts land in Preview and the
-  // last-transcript safety net; pill errors surface here (the 72 px pill
-  // itself can only show a badge).
+  // last-transcript safety net; pill errors surface here (the compact
+  // pill itself can only show a truncated label).
   useEffect(() => {
     setLastTranscript(loadLastTranscript());
     if (!isTauri()) return;
@@ -163,7 +163,7 @@ export function DictateView({
   }, [isLocal]);
 
   return (
-    <div className="mx-auto w-full max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
+    <div className="mx-auto w-full min-w-0 max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
       <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-white">
         Dictate
       </h1>
@@ -264,7 +264,7 @@ export function DictateView({
 
       <div className="mt-6 border border-gray-200 p-4 dark:border-white/10">
         <p className="av-small mb-2 text-gray-500">
-          Floating pill (frameless always-on-top, drag edges to move)
+          Floating pill (frameless always-on-top, drag the pill or logo to move)
         </p>
         <div className="flex flex-wrap gap-2">
           <Button

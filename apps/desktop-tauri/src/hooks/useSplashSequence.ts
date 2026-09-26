@@ -109,10 +109,43 @@ export function useSplashSequence(opts: {
     const t = setTimeout(() => {
       if (!cancelled) setSplashDone(true);
     }, 3800);
+    // Cross-window prefs sync: the standalone settings window persists via
+    // savePrefs and emits settings-refresh — reload here so the main window
+    // (sidebar theme, dictate hotkey/mode) reflects changes without restart.
+    let unlistenMain: (() => void) | undefined;
+    let listenCancelledMain = false;
+    void listen<Prefs>("settings-refresh", (event) => {
+      const payload = event.payload as unknown as Partial<Prefs> | undefined;
+      if (
+        payload &&
+        typeof payload === "object" &&
+        payload !== null &&
+        "mode" in payload
+      ) {
+        if (!listenCancelledMain && !cancelled) setPrefs(buildPrefs(payload));
+        return;
+      }
+      void loadPrefs({ allowMigration: false })
+        .then((p) => {
+          if (!listenCancelledMain && !cancelled) setPrefs(p);
+        })
+        .catch((e) =>
+          console.warn("algorith-voice: settings-refresh reload failed", e),
+        );
+    })
+      .then((fn) => {
+        if (listenCancelledMain || cancelled) fn();
+        else unlistenMain = fn;
+      })
+      .catch((e) =>
+        console.warn("algorith-voice: settings-refresh listen failed", e),
+      );
     return () => {
       cancelled = true;
+      listenCancelledMain = true;
       clearTimeout(t);
       clearTimeout(fallback);
+      if (unlistenMain) unlistenMain();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- boot once; secondary flags are initial-only
   }, []);

@@ -54,7 +54,7 @@ export function HistoryView() {
 
   if (loading) {
     return (
-      <div className="mx-auto w-full max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
+      <div className="mx-auto w-full min-w-0 max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
         <h1 className="av-display">History</h1>
         <p className="av-small mt-4 text-gray-500">Loading…</p>
       </div>
@@ -63,7 +63,7 @@ export function HistoryView() {
 
   if (entries.length === 0) {
     return (
-      <div className="mx-auto w-full max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
+      <div className="mx-auto w-full min-w-0 max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
         <h1 className="av-display">History</h1>
         <EmptyState
           title="Nothing dictated yet"
@@ -74,7 +74,7 @@ export function HistoryView() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
+    <div className="mx-auto w-full min-w-0 max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
       <h1 className="av-display">History</h1>
       <p className="av-body mt-2 text-gray-500">
         Stored only on this device. {entries.length} dictations.

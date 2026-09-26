@@ -71,7 +71,7 @@ export function AppSidebar({
         transition: `width ${DURATION}ms ${EASE}`,
       }}
     >
-      <div className="flex h-full min-h-[520px] w-full flex-col">
+      <div className="flex h-full min-h-0 w-full flex-col">
         {/* Header: wordmark + collapse */}
         <div className="relative flex h-12 shrink-0 items-center p-2">
           <div
@@ -94,7 +94,10 @@ export function AppSidebar({
         </div>
 
         {/* Primary nav */}
-        <nav className="flex flex-col gap-px px-2 pt-2" aria-label="Primary">
+        <nav
+          className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-2 pt-2"
+          aria-label="Primary"
+        >
           {navItems.map((it) => (
             <NavRow
               key={it.id}

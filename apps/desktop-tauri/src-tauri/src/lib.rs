@@ -619,10 +619,9 @@ fn log_frontend_error(
 // ---- Tray / deep-link / single-instance ----
 
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, "show", "Dashboard", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
 
     TrayIconBuilder::with_id("main")
         .icon(Image::from_bytes(include_bytes!("../icons/tray-idle.png"))?)
@@ -634,17 +633,6 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 if let Err(e) = show_main_window(app) {
                     eprintln!("algorith-voice: show_main_window failed: {e}");
                 }
-            }
-            "settings" => {
-                // open_settings is async (window creation bounces to the
-                // main thread); the menu handler itself is sync, so spawn.
-                let handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = open_settings(handle.clone()).await {
-                        eprintln!("algorith-voice: open_settings failed: {e}");
-                        let _ = handle.emit("settings-error", e.to_string());
-                    }
-                });
             }
             "quit" => {
                 if let Some(state) = app.try_state::<AppState>() {
@@ -869,6 +857,7 @@ pub fn run() {
             push_to_talk::ensure_floating_pill,
             push_to_talk::set_floating_pill_visible,
             push_to_talk::floating_pill_visible,
+            push_to_talk::set_floating_pill_expanded,
             history::history_save,
             history::history_list,
             history::history_stats,

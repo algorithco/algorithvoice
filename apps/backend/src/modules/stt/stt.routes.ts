@@ -8,6 +8,7 @@ import {
 import type { FastifyInstance } from "fastify";
 import { getAppEnv } from "../../config/env.js";
 import { enqueueMetering } from "../../queues/connection.js";
+import { getActiveSubscription } from "../billing/guard.js";
 import {
   isAbortError,
   mimeForFormat,
@@ -194,10 +195,10 @@ export async function sttRoutes(app: FastifyInstance) {
       }
 
       // Quota gate BEFORE buffering audio or spending provider money.
-      const user = await app.prisma.user.findUniqueOrThrow({
-        where: { id: sub },
-      });
-      if (user.planTier !== "pro") {
+      // Strict: live Subscription row, not lagged User.planTier.
+      // PAST_DUE counts as free immediately.
+      const activeSub = await getActiveSubscription(app.prisma, sub);
+      if (!activeSub) {
         const now = new Date();
         const periodStart = new Date(
           Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
@@ -217,6 +218,7 @@ export async function sttRoutes(app: FastifyInstance) {
           await app.prisma.auditLog.create({
             data: { actorUserId: sub, action: "stt.quota_exceeded" },
           });
+          void reply.header("Retry-After", "2592000");
           return reply.code(402).send({ error: "quota_exceeded" });
         }
       }

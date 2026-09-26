@@ -11,7 +11,6 @@ import {
 } from "react";
 import { AppSidebar } from "./components/AppSidebar.js";
 import { AuthView } from "./components/AuthView.js";
-import { ArrowLeft } from "./components/animate-ui/icons/arrow-left.js";
 import { PanelLeft } from "./components/animate-ui/icons/panel-left.js";
 import { DashboardView } from "./components/DashboardView.js";
 import { DictateView } from "./components/DictateView.js";
@@ -252,87 +251,10 @@ export default function App() {
   }
 
   if (showAuth) {
-    if (view === "settings") {
-      return (
-        <ErrorBoundary>
-          <main className={shell}>
-            {updateBanner}
-            <div className="flex h-screen overflow-hidden">
-              <div className="hidden md:flex">
-                <AppSidebar
-                  active={view}
-                  onSelect={(id) => setView(id as View)}
-                  collapsed={collapsed}
-                  onCollapsedChange={setCollapsed}
-                  email={null}
-                  onLogout={handleLogout}
-                />
-              </div>
-              {mobileOpen ? (
-                <button
-                  type="button"
-                  aria-label="Close menu"
-                  className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
-                  onClick={() => setMobileOpen(false)}
-                />
-              ) : null}
-              <div
-                className={`fixed inset-y-0 left-0 z-50 flex max-w-[85vw] transition-transform duration-200 md:hidden ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
-              >
-                <AppSidebar
-                  active={view}
-                  onSelect={(id) => {
-                    setView(id as View);
-                    setMobileOpen(false);
-                  }}
-                  collapsed={false}
-                  onCollapsedChange={() => {}}
-                  email={null}
-                  onLogout={handleLogout}
-                />
-              </div>
-              <div className="min-w-0 flex-1 overflow-auto">
-                <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-gray-200 bg-white px-3 dark:border-white/10 dark:bg-black md:hidden">
-                  <button
-                    type="button"
-                    aria-label={mobileOpen ? "Close menu" : "Open menu"}
-                    onClick={() => setMobileOpen((v) => !v)}
-                    className="grid size-8 place-items-center rounded-md text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/10"
-                  >
-                    <PanelLeft size={18} />
-                  </button>
-                  <span className="text-sm font-semibold tracking-tight text-black dark:text-white">
-                    Settings
-                  </span>
-                </div>
-                <SettingsView prefs={prefs} onPrefs={updatePrefs} />
-              </div>
-            </div>
-            <div className="fixed bottom-3 right-3 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-black shadow">
-              <button
-                type="button"
-                onClick={() => setView("dashboard")}
-                className="inline-flex items-center gap-1.5"
-              >
-                <ArrowLeft size={14} animateOnHover />
-                Back to sign in
-              </button>
-            </div>
-          </main>
-        </ErrorBoundary>
-      );
-    }
     return (
       <ErrorBoundary>
         <main className="min-h-screen bg-transparent text-white">
           <AuthView onDone={setSession} />
-          <button
-            type="button"
-            onClick={() => setView("settings")}
-            className="fixed bottom-3 right-3 rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/60 hover:bg-white/15 hover:text-white"
-          >
-            Settings
-          </button>
         </main>
       </ErrorBoundary>
     );

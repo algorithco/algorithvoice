@@ -161,7 +161,7 @@ export function SettingsView({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
+    <div className="mx-auto w-full min-w-0 max-w-[900px] p-4 sm:p-6 lg:p-8 2xl:max-w-[1060px]">
       <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-white">
         Settings
       </h1>

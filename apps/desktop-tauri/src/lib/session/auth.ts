@@ -62,6 +62,9 @@ export async function login(
   await tauri("store_session", {
     accessToken: data.accessToken,
     email: data.user.email,
+    // Persist refresh for future rotation/revocation; older keyring entries
+    // without it keep working (access-only, 15m).
+    refreshToken: data.refreshToken ?? null,
   });
   return { loggedIn: true, email: data.user.email };
 }
@@ -92,6 +95,7 @@ export async function signup(
   await tauri("store_session", {
     accessToken: data.accessToken,
     email: data.user.email,
+    refreshToken: data.refreshToken ?? null,
   });
   return { loggedIn: true, email: data.user.email };
 }
@@ -133,6 +137,10 @@ function oauthStartUrl(provider: OAuthProvider, state?: string): string {
 
 const REDIRECT_URI = "algorithvoice://auth-callback";
 const DESKTOP_CLIENT_ID = "desktop-app";
+// Matches backend REQUEST_TTL_SEC (300s): the pending browser request never
+// outlives the desktop listener, and Cancel/close deletes it immediately via
+// POST /oauth2/cancel so neither side waits the full window.
+const DESKTOP_AUTH_TIMEOUT_MS = 300_000;
 
 function randomBase64Url(bytes: number): string {
   const buf = new Uint8Array(bytes);
@@ -241,6 +249,29 @@ function mapOAuthError(raw: string): string {
 }
 
 /**
+ * Best-effort expiry of the pending browser authorization for `state`.
+ * Called on Cancel button, unmount, and timeout so closing the Chrome tab or
+ * pressing Cancel never leaves the backend request lingering until TTL.
+ * Always resolves (never throws): backend cancel is idempotent 200.
+ */
+export async function cancelDesktopAuthorize(state: string): Promise<void> {
+  if (!state) return;
+  try {
+    await fetchWithTimeout(
+      `${API}/oauth2/cancel`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ state }),
+      },
+      5000,
+    ).catch(() => null);
+  } catch {
+    // Best-effort: TTL (5m) + desktop timeout still bound the window.
+  }
+}
+
+/**
  * First-party desktop sign-in. Generates a PKCE pair, opens the system
  * browser to the web consent page, and completes when the backend redirects
  * to `algorithvoice://auth-callback?code=&state=`.
@@ -312,22 +343,27 @@ export async function signInDesktop(options?: {
       return;
     }
   });
-  // Mirror signInWithOAuth: never wait forever (e.g. callback emitted to a
-  // different window than the one listening, or the browser tab was closed).
+  // Never wait forever (e.g. callback emitted to a different window than
+  // the one listening, or the browser tab was closed). Timeout + Cancel both
+  // expire the backend pending request immediately via POST /oauth2/cancel
+  // so Chrome-close never lingers until TTL.
   const timeout = window.setTimeout(() => {
+    void cancelDesktopAuthorize(state);
     rejectSession(
       new Error(
         "Sign-in timed out — the browser tab was closed or no approval was received. Please try again.",
       ),
     );
-  }, 300_000);
+  }, DESKTOP_AUTH_TIMEOUT_MS);
   const signal = options?.signal;
   const onAbort = () => {
+    void cancelDesktopAuthorize(state);
     rejectSession(new Error("Sign-in cancelled — please try again."));
   };
   if (signal?.aborted) {
     clearTimeout(timeout);
     unlisten();
+    void cancelDesktopAuthorize(state);
     throw new Error("Sign-in cancelled — please try again.");
   }
   signal?.addEventListener("abort", onAbort, { once: true });
@@ -337,6 +373,7 @@ export async function signInDesktop(options?: {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", onAbort);
     unlisten();
+    void cancelDesktopAuthorize(state);
     throw new Error("Could not open the system browser.");
   }
   try {
@@ -443,8 +480,12 @@ export async function signInWithOAuth(
     }
   });
   const timeout = window.setTimeout(() => {
-    rejectSession(new Error("OAuth timed out — please try again."));
-  }, 300_000);
+    rejectSession(
+      new Error(
+        "OAuth timed out — the browser tab was closed or no approval was received. Please try again.",
+      ),
+    );
+  }, DESKTOP_AUTH_TIMEOUT_MS);
   try {
     await safeOpenUrl(startUrl);
   } catch {

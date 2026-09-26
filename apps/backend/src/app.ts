@@ -39,6 +39,12 @@ export function buildApp() {
         "req.headers.cookie",
         "req.body.password",
         "req.body.byokKey",
+        "req.body.refresh_token",
+        "req.body.refreshToken",
+        "req.body.code",
+        "req.body.code_verifier",
+        "req.body.token",
+        "req.body.access_token",
       ],
     },
     // The onResponse hook below already logs completions (and skips

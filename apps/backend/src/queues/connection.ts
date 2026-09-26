@@ -111,6 +111,10 @@ export const QUEUES = {
     connection: makeRedis(),
     defaultJobOptions: queueDefaults,
   }),
+  billingReconcile: new Queue("billing.reconcile", {
+    connection: makeRedis(),
+    defaultJobOptions: queueDefaults,
+  }),
   usageRollup: new Queue("usage.report-to-stripe", {
     connection: makeRedis(),
     defaultJobOptions: queueDefaults,

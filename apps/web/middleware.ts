@@ -53,9 +53,16 @@ export async function middleware(req: NextRequest) {
   }
   if (!res.ok) {
     // Revoked/expired family — clear both and send to login with returnTo.
+    // Include the query string (e.g. /oauth2/consent?request=…) so a desktop
+    // auth handoff survives a mid-flow refresh instead of landing on an
+    // "Invalid request" page that forces a second click in the desktop app.
     const loginUrl = req.nextUrl.clone();
     loginUrl.pathname = "/login";
-    loginUrl.searchParams.set("returnTo", req.nextUrl.pathname);
+    loginUrl.search = "";
+    loginUrl.searchParams.set(
+      "returnTo",
+      `${req.nextUrl.pathname}${req.nextUrl.search}`,
+    );
     const redirect = NextResponse.redirect(loginUrl);
     for (const name of [COOKIE_NAME, REFRESH_COOKIE_NAME]) {
       redirect.cookies.set(name, "", {

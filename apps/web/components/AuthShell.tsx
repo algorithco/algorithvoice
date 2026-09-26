@@ -138,10 +138,16 @@ export function OAuthButtons({ mode }: { mode: "login" | "register" }) {
       }
       // GitHub success: backend redirected back with ?access_token=&email=.
       // Complete the session through the BFF (sets the httpOnly cookie),
-      // then land on the dashboard. The token never stays in history:
+      // then land on returnTo (e.g. /oauth2/consent?request=… for desktop
+      // auth) or the dashboard. The token never stays in history:
       // replace the URL before navigating.
       const token = q.get("access_token");
       if (token && !error) {
+        const rawReturnTo = q.get("returnTo");
+        const safeReturnTo =
+          rawReturnTo?.startsWith("/") && !rawReturnTo.startsWith("//")
+            ? rawReturnTo
+            : "/dashboard";
         setNotice("Finishing GitHub sign-in…");
         void fetch("/api/auth/oauth/session", {
           method: "POST",
@@ -150,12 +156,19 @@ export function OAuthButtons({ mode }: { mode: "login" | "register" }) {
         })
           .then((res) => {
             if (!res.ok) throw new Error("session");
-            const clean = new URL(window.location.href);
-            clean.searchParams.delete("access_token");
-            clean.searchParams.delete("email");
-            clean.searchParams.delete("provider");
-            window.history.replaceState(null, "", clean.toString());
-            window.location.href = "/dashboard";
+            // Scrub the token from this history entry before leaving, then
+            // continue to the original destination (desktop consent or
+            // dashboard). The token never stays in history.
+            try {
+              const clean = new URL(window.location.href);
+              clean.searchParams.delete("access_token");
+              clean.searchParams.delete("email");
+              clean.searchParams.delete("provider");
+              window.history.replaceState(null, "", clean.toString());
+            } catch {
+              // Non-fatal: navigation below still leaves this page.
+            }
+            window.location.href = safeReturnTo;
           })
           .catch(() => {
             setNotice("GitHub sign-in failed — please try again or use email.");
