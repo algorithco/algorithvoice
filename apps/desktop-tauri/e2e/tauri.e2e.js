@@ -357,9 +357,12 @@ test(
     // Regression: outer window container must NOT be draggable (that was
     // the ~15px corner overshoot); only the idle pill / logo may drag.
     const hasDragRegion = await driver.executeScript(
-      "return !!document.querySelector('[data-testid=\"pill-idle\"][data-tauri-drag-region=\"true\"]') && document.querySelector('[data-tauri-drag-region=\"false\"]') !== null && !document.querySelector('[data-tauri-drag-region=\"deep\"]');",
+      'return !!document.querySelector(\'[data-testid="pill-idle"][data-tauri-drag-region="true"]\') && document.querySelector(\'[data-tauri-drag-region="false"]\') !== null && !document.querySelector(\'[data-tauri-drag-region="deep"]\');',
     );
-    assert.ok(hasDragRegion, "pill drag regions missing or overshoot regressed");
+    assert.ok(
+      hasDragRegion,
+      "pill drag regions missing or overshoot regressed",
+    );
     const root = await driver.executeScript(
       "return document.querySelector('[data-testid=\"pill-idle\"]');",
     );

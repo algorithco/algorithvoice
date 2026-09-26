@@ -664,13 +664,7 @@ pub(crate) fn pill_position(
     logical_w: f64,
     logical_h: f64,
 ) -> (f64, f64) {
-    pill_position_for_width(
-        PILL_WIDTH_IDLE,
-        logical_x,
-        logical_y,
-        logical_w,
-        logical_h,
-    )
+    pill_position_for_width(PILL_WIDTH_IDLE, logical_x, logical_y, logical_w, logical_h)
 }
 
 #[tauri::command]
@@ -807,8 +801,7 @@ mod tests {
         assert_eq!((x, y), (1636.0, 944.0));
         // Idle wrapper agrees with explicit idle width.
         let (xi, yi) = pill_position(0.0, 0.0, 1920.0, 1080.0);
-        let (xe, ye) =
-            pill_position_for_width(PILL_WIDTH_IDLE, 0.0, 0.0, 1920.0, 1080.0);
+        let (xe, ye) = pill_position_for_width(PILL_WIDTH_IDLE, 0.0, 0.0, 1920.0, 1080.0);
         assert_eq!((xi, yi), (xe, ye));
     }
 

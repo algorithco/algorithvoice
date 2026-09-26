@@ -49,9 +49,7 @@ export const stateKey = (state: string) => `oauth2:state:${state}`;
 
 /** State must be unguessable + URL-safe; enforced on authorize + cancel. */
 export function isValidStateValue(state: unknown): state is string {
-  return (
-    typeof state === "string" && state.length >= 1 && state.length <= 512
-  );
+  return typeof state === "string" && state.length >= 1 && state.length <= 512;
 }
 
 // ---- Client + redirect validation (RFC 8252 §8.4, RFC 9700 §4.1.3) ----

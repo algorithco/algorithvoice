@@ -124,7 +124,10 @@ export async function billingRoutes(app: FastifyInstance) {
           if (raced?.stripeCustomerId) {
             customerId = raced.stripeCustomerId;
           } else {
-            req.log.error({ err, userId: sub }, "stripe customer create failed");
+            req.log.error(
+              { err, userId: sub },
+              "stripe customer create failed",
+            );
             return reply.code(502).send({ error: "billing_error" });
           }
         }
@@ -155,15 +158,17 @@ export async function billingRoutes(app: FastifyInstance) {
           req.log.error({ userId: sub }, "stripe checkout session has no url");
           return reply.code(502).send({ error: "billing_error" });
         }
-        await app.prisma.auditLog.create({
-          data: {
-            actorUserId: sub,
-            action: "billing.checkout_created",
-            model: "Subscription",
-            recordId: priceId,
-            metadata: { interval },
-          },
-        }).catch(() => {});
+        await app.prisma.auditLog
+          .create({
+            data: {
+              actorUserId: sub,
+              action: "billing.checkout_created",
+              model: "Subscription",
+              recordId: priceId,
+              metadata: { interval },
+            },
+          })
+          .catch(() => {});
         return { url: session.url };
       } catch (err) {
         req.log.error({ err, userId: sub }, "stripe checkout create failed");
@@ -208,8 +213,7 @@ export async function billingRoutes(app: FastifyInstance) {
         return reply.code(409).send({ error: "no_customer" });
       }
       try {
-        const configuration =
-          getAppEnv().STRIPE_PORTAL_CONFIG || undefined;
+        const configuration = getAppEnv().STRIPE_PORTAL_CONFIG || undefined;
         const session = await stripe.billingPortal.sessions.create(
           {
             customer: user.stripeCustomerId,
@@ -218,14 +222,16 @@ export async function billingRoutes(app: FastifyInstance) {
           },
           { idempotencyKey: `portal:${sub}:${randomUUID()}` },
         );
-        await app.prisma.auditLog.create({
-          data: {
-            actorUserId: sub,
-            action: "billing.portal_created",
-            model: "Subscription",
-            recordId: user.stripeCustomerId,
-          },
-        }).catch(() => {});
+        await app.prisma.auditLog
+          .create({
+            data: {
+              actorUserId: sub,
+              action: "billing.portal_created",
+              model: "Subscription",
+              recordId: user.stripeCustomerId,
+            },
+          })
+          .catch(() => {});
         return { url: session.url };
       } catch (err) {
         req.log.error({ err, userId: sub }, "stripe portal create failed");

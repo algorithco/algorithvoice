@@ -352,11 +352,11 @@ export default function DocsPage() {
               <h2 className="t-h2">Hotkey & floating pill</h2>
               <p className="t-body mt-3 text-sub">
                 Default Ctrl+Space (change in Onboarding or Settings). The pill
-                is a 160×40 (idle) / 260×40 (recording) frameless
-                always-on-top pill — drag the pill (or the logo while
-                recording), hold to talk; recording shows a live waveform
-                with cancel / stop &amp; send. Global hotkey (Rust dedupes OS
-                repeat) drives the same state machine.
+                is a 160×40 (idle) / 260×40 (recording) frameless always-on-top
+                pill — drag the pill (or the logo while recording), hold to
+                talk; recording shows a live waveform with cancel / stop &amp;
+                send. Global hotkey (Rust dedupes OS repeat) drives the same
+                state machine.
               </p>
               <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-sub">
                 <li>

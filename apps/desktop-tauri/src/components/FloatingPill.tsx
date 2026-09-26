@@ -1,8 +1,8 @@
+import { Logo } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import { Logo } from "@algorith-voice/ui";
-import { useCallback, useEffect, useRef, useState } from "react";
 import { Square, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { saveHistory } from "../lib/history.js";
 import { loadPrefs } from "../lib/prefs.js";
 import {
@@ -204,13 +204,17 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
               }
               g.fillStyle = color;
               const gap = 2;
-              const barW = Math.max(2, (cssW - gap * (WAVE_BARS - 1)) / WAVE_BARS);
+              const barW = Math.max(
+                2,
+                (cssW - gap * (WAVE_BARS - 1)) / WAVE_BARS,
+              );
               const step = Math.max(1, Math.floor(data.length / WAVE_BARS));
               for (let i = 0; i < WAVE_BARS; i += 1) {
                 let peak = 0;
                 const start = i * step;
                 for (let j = 0; j < step; j += 1) {
-                  const v = Math.abs(((data[start + j] ?? 128) as number) - 128) / 128;
+                  const v =
+                    Math.abs(((data[start + j] ?? 128) as number) - 128) / 128;
                   if (v > peak) peak = v;
                 }
                 const amp = Math.min(1, peak * 1.7);
@@ -576,7 +580,14 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       showNotice("Max length reached — sending.");
       stopPress();
     }, MAX_RECORD_MS);
-  }, [attachWaveform, finishWithBlob, setPill, showNotice, stopPress, stopTracks]);
+  }, [
+    attachWaveform,
+    finishWithBlob,
+    setPill,
+    showNotice,
+    stopPress,
+    stopTracks,
+  ]);
 
   const cancelPress = useCallback(() => {
     if (stateRef.current !== "recording") return;
@@ -665,7 +676,8 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     };
   }, [cancelPress, clearTimers, stopTracks]);
 
-  const pillWidth = state === "recording" ? PILL_WIDTH_RECORDING : PILL_WIDTH_IDLE;
+  const pillWidth =
+    state === "recording" ? PILL_WIDTH_RECORDING : PILL_WIDTH_IDLE;
   const idleLabel = notice ?? "Algorith Voice";
   const idleTitle = notice ?? "Hold to talk — drag to move";
   const recTitle = `Recording ${formatElapsed(elapsedMs)} — release to transcribe`;
@@ -722,7 +734,6 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
               ref={canvasRef}
               data-tauri-drag-region="false"
               data-testid="pill-waveform"
-              aria-hidden="true"
               className="h-6 min-w-0 flex-1 text-white"
               style={{ width: 110, height: 24 }}
             />
@@ -767,7 +778,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
             </button>
           </div>
         ) : state === "processing" ? (
-          <div
+          <output
             data-tauri-drag-region="false"
             className="flex h-full w-full items-center gap-2 px-3"
             aria-label="Transcribing…"
@@ -783,7 +794,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
             </div>
             <Loader size={16} animation="spin" animate />
             <span className="truncate text-xs font-medium">Transcribing…</span>
-          </div>
+          </output>
         ) : (
           <button
             type="button"

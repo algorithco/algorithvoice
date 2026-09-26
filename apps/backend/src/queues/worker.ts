@@ -93,7 +93,9 @@ const workers = [
       async () => {
         const stripe = getStripe();
         if (!stripe) {
-          log.warn("billing reconcile skipped: STRIPE_SECRET_KEY not configured");
+          log.warn(
+            "billing reconcile skipped: STRIPE_SECRET_KEY not configured",
+          );
           return { ok: true, skipped: true };
         }
         const prisma = new PrismaClient();

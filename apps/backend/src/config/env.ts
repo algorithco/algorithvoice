@@ -103,7 +103,8 @@ const envSchema = z
     ) {
       ctx.addIssue({
         code: "custom",
-        message: "STRIPE_PRICE_PRO_MONTHLY and STRIPE_PRICE_PRO_YEARLY must differ",
+        message:
+          "STRIPE_PRICE_PRO_MONTHLY and STRIPE_PRICE_PRO_YEARLY must differ",
       });
     }
     const r2Keys = [

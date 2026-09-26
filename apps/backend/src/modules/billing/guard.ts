@@ -1,9 +1,9 @@
-import type { PrismaClient } from "@prisma/client";
 import {
   FREE_CLOUD_SECONDS_PER_MONTH,
   FREE_DEVICE_LIMIT,
   PRO_DEVICE_LIMIT,
 } from "@algorith-voice/shared-types";
+import type { PrismaClient } from "@prisma/client";
 
 // Strict entitlement: only ACTIVE (or legacy TRIALING) with a future period
 // end counts as pro. PAST_DUE / CANCELED / INCOMPLETE are free immediately.
@@ -44,7 +44,5 @@ export async function cloudLimitForUser(
   prisma: PrismaClient,
   userId: string,
 ): Promise<number> {
-  return (await isProUser(prisma, userId))
-    ? -1
-    : FREE_CLOUD_SECONDS_PER_MONTH;
+  return (await isProUser(prisma, userId)) ? -1 : FREE_CLOUD_SECONDS_PER_MONTH;
 }

@@ -122,8 +122,7 @@ export function useSplashSequence(opts: {
         payload !== null &&
         "mode" in payload
       ) {
-        if (!listenCancelledMain && !cancelled)
-          setPrefs(buildPrefs(payload));
+        if (!listenCancelledMain && !cancelled) setPrefs(buildPrefs(payload));
         return;
       }
       void loadPrefs({ allowMigration: false })
