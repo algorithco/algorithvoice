@@ -264,7 +264,7 @@ export function DictateView({
 
       <div className="mt-6 border border-gray-200 p-4 dark:border-white/10">
         <p className="av-small mb-2 text-gray-500">
-          Floating pill (frameless always-on-top, drag the pill or logo to move)
+          Floating pill (frameless always-on-top, drag its logo handle to move)
         </p>
         <div className="flex flex-wrap gap-2">
           <Button

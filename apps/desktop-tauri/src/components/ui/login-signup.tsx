@@ -71,7 +71,7 @@ export default function LoginCardSection({ onDone }: Props) {
       const s = await signInDesktop({ signal: controller.signal });
       if (mountedRef.current) onDone(s);
     } catch (e) {
-      if (mountedRef.current)
+      if (mountedRef.current && !controller.signal.aborted)
         setError(
           e instanceof Error ? e.message : "Sign in failed. Please try again.",
         );
@@ -175,8 +175,8 @@ export default function LoginCardSection({ onDone }: Props) {
                 ) : null}
                 <p className="text-center text-[11px] leading-relaxed text-white/35">
                   {busy
-                    ? "Complete sign-in in your browser, then return here. Closing the tab denies access."
-                    : "Secure OAuth 2.0 • PKCE • No password in the app"}
+                    ? "Verify the algorithvoice.com address in your browser, then approve or deny access."
+                    : "System browser • OAuth 2.0 • PKCE S256 • Password stays out of the app"}
                 </p>
               </motion.div>
 

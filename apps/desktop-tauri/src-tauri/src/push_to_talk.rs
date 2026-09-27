@@ -667,6 +667,18 @@ pub(crate) fn pill_position(
     pill_position_for_width(PILL_WIDTH_IDLE, logical_x, logical_y, logical_w, logical_h)
 }
 
+/// Keep the pill's right edge fixed while changing widths. This preserves a
+/// user-moved position instead of snapping the window back to the primary
+/// monitor whenever recording starts or stops.
+pub(crate) fn pill_position_after_resize(
+    logical_x: f64,
+    logical_y: f64,
+    current_width: f64,
+    next_width: f64,
+) -> (f64, f64) {
+    (logical_x + current_width - next_width, logical_y)
+}
+
 #[tauri::command]
 pub async fn ensure_floating_pill(app: AppHandle) -> AppResult<()> {
     if let Some(win) = app.get_webview_window(FLOATING_LABEL) {
@@ -743,8 +755,8 @@ pub fn floating_pill_visible(app: AppHandle) -> bool {
 }
 
 /// Resize the pill window when the frontend switches between idle and
-/// recording layouts, keeping the bottom-right corner anchored so the
-/// pill grows leftward (never off-screen to the right).
+/// recording layouts, keeping its current right edge anchored so a
+/// user-moved pill stays put and grows leftward.
 ///
 /// Called from the frontend on `state` change: `expanded=true` selects
 /// `PILL_WIDTH_RECORDING`, `false` selects `PILL_WIDTH_IDLE`. Height and
@@ -759,10 +771,25 @@ pub async fn set_floating_pill_expanded(app: AppHandle, expanded: bool) -> AppRe
     } else {
         PILL_WIDTH_IDLE
     };
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let preserved_position =
+        win.outer_position()
+            .ok()
+            .zip(win.inner_size().ok())
+            .map(|(position, size)| {
+                pill_position_after_resize(
+                    position.x as f64 / scale,
+                    position.y as f64 / scale,
+                    size.width as f64 / scale,
+                    width,
+                )
+            });
     let _ = win.set_size(tauri::LogicalSize::new(width, PILL_HEIGHT));
-    // Re-anchor bottom-right against the primary monitor so the resize
-    // grows leftward and `always_on_top`/visibility are untouched.
-    if let Ok(Some(monitor)) = app.primary_monitor() {
+    if let Some((x, y)) = preserved_position {
+        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+    } else if let Ok(Some(monitor)) = app.primary_monitor() {
+        // Defensive fallback for platforms that cannot report the current
+        // window rectangle. Initial placement still uses the primary monitor.
         let scale = monitor.scale_factor();
         let m_pos = monitor.position();
         let m_size = monitor.size();
@@ -803,6 +830,21 @@ mod tests {
         let (xi, yi) = pill_position(0.0, 0.0, 1920.0, 1080.0);
         let (xe, ye) = pill_position_for_width(PILL_WIDTH_IDLE, 0.0, 0.0, 1920.0, 1080.0);
         assert_eq!((xi, yi), (xe, ye));
+    }
+
+    #[test]
+    fn pill_resize_preserves_user_moved_right_edge() {
+        let (expanded_x, expanded_y) =
+            pill_position_after_resize(640.0, 320.0, PILL_WIDTH_IDLE, PILL_WIDTH_RECORDING);
+        assert_eq!((expanded_x, expanded_y), (540.0, 320.0));
+
+        let (idle_x, idle_y) = pill_position_after_resize(
+            expanded_x,
+            expanded_y,
+            PILL_WIDTH_RECORDING,
+            PILL_WIDTH_IDLE,
+        );
+        assert_eq!((idle_x, idle_y), (640.0, 320.0));
     }
 
     #[test]

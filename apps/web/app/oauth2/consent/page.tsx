@@ -1,7 +1,13 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { getSession } from "../../../lib/dal";
 import { ConsentClient } from "./ConsentClient";
+
+export const metadata: Metadata = {
+  referrer: "no-referrer",
+  robots: { index: false, follow: false },
+};
 
 function safeReturnTo(raw: string | null): string | null {
   if (!raw || !raw.startsWith("/")) return null;

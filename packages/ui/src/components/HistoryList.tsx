@@ -22,8 +22,11 @@ export function HistoryList({
   return (
     <ul className="divide-y divide-gray-200 dark:divide-gray-800">
       {entries.map((entry) => (
-        <li key={entry.id} className="group flex h-12 items-center gap-4 px-3">
-          <span className="av-small w-24 shrink-0 text-gray-500">
+        <li
+          key={entry.id}
+          className="group flex h-12 min-w-0 items-center gap-2 px-2 sm:gap-4 sm:px-3"
+        >
+          <span className="av-small w-16 shrink-0 truncate text-gray-500 sm:w-24">
             {entry.createdAt}
           </span>
           <span className="av-mono min-w-0 flex-1 truncate">

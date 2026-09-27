@@ -61,10 +61,11 @@ export default function App() {
   const { showAuth, loggedIn } = useAuthGate(session);
   const showOnboarding = useOnboardingGate({ loggedIn, onboarded });
 
-  // Auto-collapse on narrow viewports and keep content usable on small screens
+  // Auto-collapse while the desktop content pane is narrow. Below md the
+  // sidebar becomes a drawer; between md and lg it remains as a compact rail.
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
-    const mql = window.matchMedia("(max-width: 767px)");
+    const mql = window.matchMedia("(max-width: 959px)");
     const sync = () => {
       if (mql.matches) setCollapsed(true);
     };
@@ -169,7 +170,7 @@ export default function App() {
   };
 
   const shell =
-    "min-h-screen bg-white text-black dark:bg-black dark:text-white";
+    "min-h-screen w-full min-w-0 overflow-x-hidden bg-white text-black dark:bg-black dark:text-white";
 
   if (isPill) {
     return (
@@ -283,7 +284,10 @@ export default function App() {
     <ErrorBoundary>
       <main className={shell}>
         {updateBanner}
-        <div className="flex h-screen overflow-hidden">
+        <div
+          data-testid="app-shell"
+          className="flex h-[100dvh] w-full min-w-0 overflow-hidden"
+        >
           {/* Desktop sidebar */}
           <div className="hidden md:flex">
             <AppSidebar
@@ -319,7 +323,10 @@ export default function App() {
               onLogout={handleLogout}
             />
           </div>
-          <div className="min-w-0 flex-1 overflow-auto">
+          <div
+            data-testid="app-content"
+            className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
+          >
             {/* Mobile top bar */}
             <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-gray-200 bg-white px-3 dark:border-white/10 dark:bg-black md:hidden">
               <button

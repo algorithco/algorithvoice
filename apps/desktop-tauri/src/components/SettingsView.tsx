@@ -179,7 +179,7 @@ export function SettingsView({
             htmlFor="av-hotkey"
           >
             Push-to-talk hotkey
-            <div className="flex min-w-0 gap-2">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
               <Input
                 id="av-hotkey"
                 value={hotkeyInput}
@@ -309,8 +309,8 @@ export function SettingsView({
           Updates
         </h2>
         <div className="mt-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
-            <div>
+          <div className="flex flex-col items-stretch gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-white/10 dark:bg-white/[0.03]">
+            <div className="min-w-0">
               <p className="text-sm font-medium text-black dark:text-white">
                 {appVersion ? `v${appVersion}` : "Algorith Voice"}
               </p>

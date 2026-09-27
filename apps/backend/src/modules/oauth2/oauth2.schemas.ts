@@ -8,7 +8,9 @@ import { z } from "zod";
 export const DESKTOP_CLIENT_ID = "desktop-app";
 
 /** Exact-match custom-scheme redirect for the Tauri deep-link handler. */
-export const CUSTOM_SCHEME_REDIRECT = "algorithvoice://auth-callback";
+export const CUSTOM_SCHEME_REDIRECT = "com.algorithvoice.app://oauth-callback";
+/** Kept temporarily so installed clients before the hardened release work. */
+export const LEGACY_CUSTOM_SCHEME_REDIRECT = "algorithvoice://auth-callback";
 
 /** Scopes the desktop client may request. */
 export const ALLOWED_SCOPES = [
@@ -76,3 +78,10 @@ export const approveResponseSchema = z.object({
 });
 
 export const healthResponseSchema = z.object({ ok: z.literal(true) });
+
+export const metadataResponseSchema = z.object({
+  authorization_endpoint: z.string().url(),
+  token_endpoint: z.string().url(),
+  code_challenge_methods_supported: z.tuple([z.literal("S256")]),
+  redirect_uris_supported: z.array(z.string()).min(1),
+});

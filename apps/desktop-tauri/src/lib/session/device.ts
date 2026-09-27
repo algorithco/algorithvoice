@@ -2,7 +2,7 @@
 //
 // Kept separate from `auth.ts` on purpose: the OAuth-UX task owns that file
 // right now. Wire-up is a single call — after any successful sign-in that
-// yields an `accessToken` (signInDesktop / login / signup / signInWithOAuth):
+// yields an `accessToken` (signInDesktop / login / signup):
 //
 //   import { ensureDeviceLinked } from "./device.js";
 //   await ensureDeviceLinked(data.accessToken);

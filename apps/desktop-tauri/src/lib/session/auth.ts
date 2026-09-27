@@ -34,14 +34,22 @@ export async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs = 10000,
+  externalSignal?: AbortSignal,
 ): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
+  const onExternalAbort = () => controller.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) onExternalAbort();
+  else
+    externalSignal?.addEventListener("abort", onExternalAbort, {
+      once: true,
+    });
   try {
     const res = await fetch(url, { ...init, signal: controller.signal });
     return res;
   } finally {
     clearTimeout(id);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
 }
 
@@ -114,33 +122,18 @@ export async function logout(): Promise<void> {
   await tauri("clear_session");
 }
 
-// ---- OAuth (system browser + algorithvoice:// deep-link callback) ----
-
-export type OAuthProvider = "google" | "github";
-
-export const OAUTH_PROVIDERS: OAuthProvider[] = ["google", "github"];
-
-export function oauthProviderLabel(provider: OAuthProvider): string {
-  return provider === "google" ? "Google" : "GitHub";
-}
-
-function oauthStartUrl(provider: OAuthProvider, state?: string): string {
-  const params = new URLSearchParams({
-    callback: "algorithvoice://auth-callback",
-    device: "Desktop",
-  });
-  if (state) params.set("state", state);
-  return `${API}/auth/oauth/${provider}/start?${params.toString()}`;
-}
-
 // ---- First-party desktop OAuth (authorization_code + PKCE S256) ----
 
-const REDIRECT_URI = "algorithvoice://auth-callback";
+const PREFERRED_REDIRECT_URI = "com.algorithvoice.app://oauth-callback";
+const LEGACY_REDIRECT_URI = "algorithvoice://auth-callback";
 const DESKTOP_CLIENT_ID = "desktop-app";
 // Matches backend REQUEST_TTL_SEC (300s): the pending browser request never
 // outlives the desktop listener, and Cancel/close deletes it immediately via
 // POST /oauth2/cancel so neither side waits the full window.
 const DESKTOP_AUTH_TIMEOUT_MS = 300_000;
+const CALLBACK_CODE_RE = /^[A-Za-z0-9_-]{43,256}$/;
+const CALLBACK_STATE_RE = /^[A-Za-z0-9_-]{22,128}$/;
+const OAUTH_ERROR_RE = /^[A-Za-z0-9_]{1,64}$/;
 
 function randomBase64Url(bytes: number): string {
   const buf = new Uint8Array(bytes);
@@ -159,10 +152,44 @@ async function pkceChallenge(verifier: string): Promise<string> {
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+async function resolveDesktopRedirectUri(
+  signal?: AbortSignal,
+): Promise<string> {
+  try {
+    const response = await fetchWithTimeout(
+      `${API}/oauth2/metadata`,
+      { headers: { accept: "application/json" } },
+      3000,
+      signal,
+    );
+    if (!response.ok) return LEGACY_REDIRECT_URI;
+    const metadata = (await response.json()) as {
+      code_challenge_methods_supported?: unknown;
+      redirect_uris_supported?: unknown;
+    };
+    const methods = metadata.code_challenge_methods_supported;
+    const redirects = metadata.redirect_uris_supported;
+    if (
+      Array.isArray(methods) &&
+      methods.includes("S256") &&
+      Array.isArray(redirects) &&
+      redirects.includes(PREFERRED_REDIRECT_URI)
+    ) {
+      return PREFERRED_REDIRECT_URI;
+    }
+  } catch {
+    if (signal?.aborted) {
+      throw new DOMException("Sign-in cancelled", "AbortError");
+    }
+  }
+  return LEGACY_REDIRECT_URI;
+}
+
 export function parseOAuthCodeCallback(raw: string): {
   code?: string;
-  state?: string;
+  state: string;
   error?: string;
+  redirectUri: string;
 } | null {
   let url: URL;
   try {
@@ -170,28 +197,48 @@ export function parseOAuthCodeCallback(raw: string): {
   } catch {
     return null;
   }
-  if (url.protocol !== "algorithvoice:") return null;
-  if ((url.host || "").toLowerCase() !== "auth-callback") return null;
+  const isPreferred =
+    url.protocol === "com.algorithvoice.app:" &&
+    (url.host || "").toLowerCase() === "oauth-callback";
+  const isLegacy =
+    url.protocol === "algorithvoice:" &&
+    (url.host || "").toLowerCase() === "auth-callback";
+  if (!isPreferred && !isLegacy) return null;
   if (url.username || url.password) return null;
+  if (url.port || (url.pathname !== "" && url.pathname !== "/")) return null;
+  // Authorization-code responses use the query component. Reject fragments
+  // so secrets cannot leak through ambiguous parsing or browser history.
+  if (url.hash) return null;
   const query = new URLSearchParams(url.search);
-  if (url.hash.length > 1) {
-    const hash = new URLSearchParams(url.hash.slice(1));
-    hash.forEach((value, key) => {
-      if (!query.has(key)) query.set(key, value);
-    });
+  for (const name of ["code", "state", "error"]) {
+    if (query.getAll(name).length > 1) return null;
   }
+  const state = query.get("state") ?? "";
+  if (!CALLBACK_STATE_RE.test(state)) return null;
   const error = query.get("error");
-  if (error) return { error };
-  const code = query.get("code") ?? undefined;
-  const state = query.get("state") ?? undefined;
-  if (!code) return null;
-  return { code, state };
+  const code = query.get("code");
+  if (error && code) return null;
+  if (error) {
+    if (!OAUTH_ERROR_RE.test(error)) return null;
+    return {
+      error,
+      state,
+      redirectUri: isPreferred ? PREFERRED_REDIRECT_URI : LEGACY_REDIRECT_URI,
+    };
+  }
+  if (!code || !CALLBACK_CODE_RE.test(code)) return null;
+  return {
+    code,
+    state,
+    redirectUri: isPreferred ? PREFERRED_REDIRECT_URI : LEGACY_REDIRECT_URI,
+  };
 }
 
 async function exchangeOAuthCode(
   code: string,
   codeVerifier: string,
   redirectUri: string,
+  signal: AbortSignal,
 ): Promise<{ accessToken: string; refreshToken?: string }> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -208,14 +255,28 @@ async function exchangeOAuthCode(
       body: body.toString(),
     },
     15000,
+    signal,
   );
   const data = (await res.json().catch(() => ({}))) as {
     access_token?: string;
     refresh_token?: string;
+    token_type?: string;
     error?: string;
     error_description?: string;
   };
-  if (!res.ok || !data.access_token) {
+  if (
+    !res.ok ||
+    data.token_type !== "Bearer" ||
+    typeof data.access_token !== "string" ||
+    data.access_token.length < 20 ||
+    data.access_token.length > 16_384 ||
+    /\s/.test(data.access_token) ||
+    (data.refresh_token !== undefined &&
+      (typeof data.refresh_token !== "string" ||
+        data.refresh_token.length < 20 ||
+        data.refresh_token.length > 8192 ||
+        /\s/.test(data.refresh_token)))
+  ) {
     throw new Error(
       data.error_description ?? data.error ?? "OAuth exchange failed.",
     );
@@ -225,6 +286,7 @@ async function exchangeOAuthCode(
 
 async function fetchEmailForAccessToken(
   accessToken: string,
+  signal: AbortSignal,
 ): Promise<string | null> {
   try {
     const res = await fetchWithTimeout(
@@ -233,10 +295,18 @@ async function fetchEmailForAccessToken(
         headers: { Authorization: `Bearer ${accessToken}` },
       },
       10000,
+      signal,
     );
     if (!res.ok) return null;
-    const data = (await res.json()) as { email?: string };
-    return data.email ?? null;
+    const data = (await res.json()) as { email?: unknown };
+    if (
+      typeof data.email !== "string" ||
+      data.email.length > 320 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)
+    ) {
+      return null;
+    }
+    return data.email;
   } catch {
     return null;
   }
@@ -244,8 +314,12 @@ async function fetchEmailForAccessToken(
 
 function mapOAuthError(raw: string): string {
   if (raw === "access_denied")
-    return "Authorization denied in browser — you closed the tab or pressed Deny. Press Cancel and try again.";
-  return raw;
+    return "Authorization was denied in the browser. You can safely try again.";
+  if (raw === "invalid_request")
+    return "The sign-in request was invalid or expired. Please try again.";
+  if (raw === "temporarily_unavailable")
+    return "Sign-in is temporarily unavailable. Please try again shortly.";
+  return "Sign-in could not be completed. Please try again.";
 }
 
 /**
@@ -274,7 +348,7 @@ export async function cancelDesktopAuthorize(state: string): Promise<void> {
 /**
  * First-party desktop sign-in. Generates a PKCE pair, opens the system
  * browser to the web consent page, and completes when the backend redirects
- * to `algorithvoice://auth-callback?code=&state=`.
+ * to `com.algorithvoice.app://oauth-callback?code=&state=`.
  *
  * Pass an AbortSignal to allow Cancel: abort rejects the pending promise
  * and releases the deep-link listener + timeout immediately instead of
@@ -284,16 +358,18 @@ export async function signInDesktop(options?: {
   signal?: AbortSignal;
 }): Promise<SessionInfo> {
   if (!isTauri()) {
-    window.open(`${API}/oauth2/authorize`, "_blank", "noopener");
     throw new Error("Desktop sign-in needs the desktop app shell.");
   }
   const verifier = randomBase64Url(32);
   const challenge = await pkceChallenge(verifier);
-  const state = randomBase64Url(16);
+  const redirectUri = await resolveDesktopRedirectUri(options?.signal);
+  // 256 bits makes state independently unguessable even if the PKCE verifier
+  // generation were ever changed. Both values are transaction-specific.
+  const state = randomBase64Url(32);
   const params = new URLSearchParams({
     response_type: "code",
     client_id: DESKTOP_CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     code_challenge: challenge,
     code_challenge_method: "S256",
     state,
@@ -307,37 +383,59 @@ export async function signInDesktop(options?: {
     resolveSession = resolve;
     rejectSession = reject;
   });
+  const signal = options?.signal;
+  const exchangeController = new AbortController();
+  let finished = false;
+  let exchangeStarted = false;
   const unlisten = await listen<string[]>("auth-callback", (event) => {
+    if (finished || exchangeStarted) return;
     const urls = event.payload ?? [];
     for (const raw of urls) {
       const parsed = parseOAuthCodeCallback(raw);
       if (!parsed) continue;
+      // Ignore callbacks for other/stale transactions. Never let an
+      // unsolicited deep link cancel the user's active login.
+      if (parsed.state !== state) continue;
+      if (parsed.redirectUri !== redirectUri) continue;
       if (parsed.error) {
+        finished = true;
         rejectSession(new Error(mapOAuthError(parsed.error)));
         return;
       }
-      // Try every URL in the payload: a stale deep-link delivered first must
-      // not kill a fresh one behind it. Only reject on mismatch when this
-      // event carries a single URL; otherwise ignore the spoofed entry.
-      if (parsed.state !== state) {
-        if (urls.length === 1)
-          rejectSession(new Error("State mismatch — please try again."));
-        continue;
-      }
       if (!parsed.code) continue;
-      void exchangeOAuthCode(parsed.code, verifier, REDIRECT_URI)
+      exchangeStarted = true;
+      void exchangeOAuthCode(
+        parsed.code,
+        verifier,
+        redirectUri,
+        exchangeController.signal,
+      )
         .then(async ({ accessToken, refreshToken }) => {
-          const email = (await fetchEmailForAccessToken(accessToken)) ?? "";
+          const email =
+            (await fetchEmailForAccessToken(
+              accessToken,
+              exchangeController.signal,
+            )) ?? "";
           if (!email)
             throw new Error("Signed in, but could not fetch profile.");
+          if (signal?.aborted || exchangeController.signal.aborted) {
+            throw new DOMException("Sign-in cancelled", "AbortError");
+          }
           await tauri("store_session", {
             accessToken,
             email,
             refreshToken: refreshToken ?? null,
           });
+          if (signal?.aborted || exchangeController.signal.aborted) {
+            await tauri("clear_session").catch(() => {});
+            throw new DOMException("Sign-in cancelled", "AbortError");
+          }
+          finished = true;
           resolveSession({ loggedIn: true, email });
         })
         .catch((e: unknown) => {
+          if (finished) return;
+          finished = true;
           rejectSession(e instanceof Error ? e : new Error(String(e)));
         });
       return;
@@ -348,6 +446,9 @@ export async function signInDesktop(options?: {
   // expire the backend pending request immediately via POST /oauth2/cancel
   // so Chrome-close never lingers until TTL.
   const timeout = window.setTimeout(() => {
+    if (finished) return;
+    finished = true;
+    exchangeController.abort();
     void cancelDesktopAuthorize(state);
     rejectSession(
       new Error(
@@ -355,16 +456,19 @@ export async function signInDesktop(options?: {
       ),
     );
   }, DESKTOP_AUTH_TIMEOUT_MS);
-  const signal = options?.signal;
   const onAbort = () => {
+    if (finished) return;
+    finished = true;
+    exchangeController.abort(signal?.reason);
     void cancelDesktopAuthorize(state);
-    rejectSession(new Error("Sign-in cancelled — please try again."));
+    rejectSession(new DOMException("Sign-in cancelled", "AbortError"));
   };
   if (signal?.aborted) {
     clearTimeout(timeout);
     unlisten();
+    exchangeController.abort();
     void cancelDesktopAuthorize(state);
-    throw new Error("Sign-in cancelled — please try again.");
+    throw new DOMException("Sign-in cancelled", "AbortError");
   }
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
@@ -373,6 +477,7 @@ export async function signInDesktop(options?: {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", onAbort);
     unlisten();
+    exchangeController.abort();
     void cancelDesktopAuthorize(state);
     throw new Error("Could not open the system browser.");
   }
@@ -382,121 +487,6 @@ export async function signInDesktop(options?: {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", onAbort);
     unlisten();
-  }
-}
-
-export function parseOAuthCallbackUrl(
-  raw: string,
-  expectedState?: string,
-): {
-  accessToken: string;
-  email: string;
-} | null {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "algorithvoice:") return null;
-  if ((url.host || "").toLowerCase() !== "auth-callback") return null;
-  if (url.username || url.password) return null;
-  const query = new URLSearchParams(url.search);
-  if (url.hash.length > 1) {
-    const hash = new URLSearchParams(url.hash.slice(1));
-    hash.forEach((value, key) => {
-      if (!query.has(key)) query.set(key, value);
-    });
-  }
-  if (expectedState !== undefined) {
-    const got = query.get("state");
-    if (got !== expectedState) return null;
-  }
-  const error = query.get("error");
-  if (error) {
-    if (error === "oauth_not_configured") {
-      throw new Error(
-        "Google/GitHub sign-in is not configured on this server. Use email sign-in or contact support.",
-      );
-    }
-    if (error === "not_implemented") {
-      throw new Error(
-        "Google/GitHub sign-in is coming soon — please use email sign-in for now.",
-      );
-    }
-    throw new Error(error);
-  }
-  const accessToken =
-    query.get("accessToken") ?? query.get("access_token") ?? query.get("token");
-  const email = query.get("email");
-  if (!accessToken || !email) return null;
-  if (email.length > 320 || !email.includes("@")) return null;
-  if (accessToken.length > 16384) return null;
-  return { accessToken, email };
-}
-
-/**
- * Sign in with an OAuth provider. Opens the provider flow in the system
- * browser, then completes when the backend redirects to
- * `algorithvoice://auth-callback`.
- */
-export async function signInWithOAuth(
-  provider: OAuthProvider,
-): Promise<SessionInfo> {
-  const state = randomBase64Url(16);
-  const startUrl = oauthStartUrl(provider, state);
-  if (!isTauri()) {
-    window.open(startUrl, "_blank", "noopener");
-    throw new Error(
-      "OAuth needs the desktop app shell to complete — finish in the opened tab, then sign in here.",
-    );
-  }
-  let resolveSession!: (s: SessionInfo) => void;
-  let rejectSession!: (e: Error) => void;
-  const completed = new Promise<SessionInfo>((resolve, reject) => {
-    resolveSession = resolve;
-    rejectSession = reject;
-  });
-  const unlisten = await listen<string[]>("auth-callback", (event) => {
-    for (const raw of event.payload ?? []) {
-      try {
-        const parsed = parseOAuthCallbackUrl(raw, state);
-        if (!parsed) continue;
-        void tauri("store_session", {
-          accessToken: parsed.accessToken,
-          email: parsed.email,
-        }).then(
-          () => resolveSession({ loggedIn: true, email: parsed.email }),
-          () =>
-            rejectSession(
-              new Error("Signed in, but the session could not be saved."),
-            ),
-        );
-        return;
-      } catch (e) {
-        rejectSession(e instanceof Error ? e : new Error(String(e)));
-        return;
-      }
-    }
-  });
-  const timeout = window.setTimeout(() => {
-    rejectSession(
-      new Error(
-        "OAuth timed out — the browser tab was closed or no approval was received. Please try again.",
-      ),
-    );
-  }, DESKTOP_AUTH_TIMEOUT_MS);
-  try {
-    await safeOpenUrl(startUrl);
-  } catch {
-    clearTimeout(timeout);
-    unlisten();
-    throw new Error("Could not open the system browser.");
-  }
-  try {
-    return await completed;
-  } finally {
-    clearTimeout(timeout);
-    unlisten();
+    if (!finished) exchangeController.abort();
   }
 }

@@ -1,7 +1,9 @@
 import { Logo } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Square, X } from "lucide-react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { saveHistory } from "../lib/history.js";
 import { loadPrefs } from "../lib/prefs.js";
@@ -37,19 +39,57 @@ const PILL_WIDTH_RECORDING = 260;
 const PILL_HEIGHT = 40;
 const WAVE_BARS = 32;
 
+/** Convert time-domain microphone samples into visibly responsive bar heights. */
+export function waveformBarHeights(
+  data: Uint8Array,
+  height: number,
+  barCount = WAVE_BARS,
+): number[] {
+  const count = Math.max(1, Math.floor(barCount));
+  const usableHeight = Math.max(4, height);
+  const step = Math.max(1, Math.floor(data.length / count));
+
+  return Array.from({ length: count }, (_, index) => {
+    let peak = 0;
+    const start = index * step;
+    for (let offset = 0; offset < step; offset += 1) {
+      const amplitude =
+        Math.abs(((data[start + offset] ?? 128) as number) - 128) / 128;
+      if (amplitude > peak) peak = amplitude;
+    }
+
+    // Remove a tiny mic noise floor, then apply a curved gain so normal speech
+    // remains easy to see without clipping louder input immediately.
+    const audible = Math.max(0, peak - 0.012);
+    const response = Math.min(1, Math.sqrt(audible * 4.5));
+    return 4 + response * (usableHeight - 4);
+  });
+}
+
+/** Ease bar movement over time, with a quick attack and gentler release. */
+export function smoothWaveformBarHeights(
+  previous: number[],
+  target: number[],
+): number[] {
+  return target.map((next, index) => {
+    const current = previous[index] ?? 4;
+    const easing = next >= current ? 0.38 : 0.18;
+    return current + (next - current) * easing;
+  });
+}
+
 /**
  * Floating push-to-talk pill (rendered only in the `floating-pill` window).
  *
  * Two visual states:
- * - idle (160x40): [logo + "Algorith Voice"]. Whole pill is the drag
- *   handle AND the hold-to-talk target.
+ * - idle (160x40): [drag handle | hold-to-talk target]. Keeping these
+ *   separate prevents a move gesture from accidentally starting a take.
  * - recording (260x40): [logo | live waveform | X cancel | stop & send].
- *   Only the logo stays draggable; waveform + buttons opt out.
+ *   Only the logo handle stays draggable; waveform + buttons opt out.
  *
- * Drag-region bug fix: the outer window container is NEVER draggable
- * (`data-tauri-drag-region="false"`). Only the exact visible idle pill
- * (and the small logo box while recording) carry `="true"`. No `deep`
- * parent, no corner overshoot.
+ * Dragging calls Tauri's `startDragging()` directly from the logo handle.
+ * The outer window container is never draggable, so transparent corners
+ * cannot capture a move gesture and interactive controls remain reliable.
  *
  * - Press-and-hold → recording, release → processing → auto-paste.
  * - Presses < 300 ms are discarded as accidental (Superwhisper-style).
@@ -79,11 +119,28 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const noticeTimerRef = useRef(0);
   const tickTimerRef = useRef(0);
 
+  const startWindowDrag = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (!event.isPrimary) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!isTauri()) return;
+      void getCurrentWindow()
+        .startDragging()
+        .catch((error) =>
+          console.warn("algorith-voice: pill drag failed", error),
+        );
+    },
+    [],
+  );
+
   // Live waveform taps the SAME MediaStream used for recording.
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const waveRafRef = useRef(0);
+  const waveHeightsRef = useRef<number[]>([]);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const setPill = useCallback((next: PillState) => {
@@ -135,6 +192,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     }
     sourceRef.current = null;
     analyserRef.current = null;
+    waveHeightsRef.current = [];
     const ctx = audioCtxRef.current;
     audioCtxRef.current = null;
     if (ctx) {
@@ -172,7 +230,14 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         }
         const data = new Uint8Array(analyser.fftSize);
         const tick = () => {
-          if (!mountedRef.current || stateRef.current !== "recording") return;
+          if (!mountedRef.current || analyserRef.current !== analyser) return;
+          // React may not have mounted the recording canvas by the first frame.
+          // Keep the analyser alive until the state/render catches up instead of
+          // silently terminating the waveform loop forever.
+          if (stateRef.current !== "recording") {
+            waveRafRef.current = requestAnimationFrame(tick);
+            return;
+          }
           try {
             analyser.getByteTimeDomainData(data);
           } catch {
@@ -208,17 +273,14 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
                 2,
                 (cssW - gap * (WAVE_BARS - 1)) / WAVE_BARS,
               );
-              const step = Math.max(1, Math.floor(data.length / WAVE_BARS));
+              const targets = waveformBarHeights(data, cssH);
+              const heights = smoothWaveformBarHeights(
+                waveHeightsRef.current,
+                targets,
+              );
+              waveHeightsRef.current = heights;
               for (let i = 0; i < WAVE_BARS; i += 1) {
-                let peak = 0;
-                const start = i * step;
-                for (let j = 0; j < step; j += 1) {
-                  const v =
-                    Math.abs(((data[start + j] ?? 128) as number) - 128) / 128;
-                  if (v > peak) peak = v;
-                }
-                const amp = Math.min(1, peak * 1.7);
-                const h = Math.max(3, amp * cssH);
+                const h = heights[i] ?? 4;
                 const x = i * (barW + gap);
                 const y = (cssH - h) / 2;
                 const r = Math.min(1.5, barW / 2);
@@ -568,9 +630,9 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     };
     recorder.start();
     startingRef.current = false;
+    setPill("recording");
     // Tap the SAME stream for the live waveform — no second mic request.
     attachWaveform(stream);
-    setPill("recording");
     setElapsedMs(0);
     tickTimerRef.current = window.setInterval(() => {
       if (mountedRef.current) setElapsedMs(Date.now() - pressStartRef.current);
@@ -625,7 +687,8 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   }, [startPress, stopPress]);
 
   // Resize the native window to match the active layout (idle 160px vs
-  // recording 260px). Rust re-anchors bottom-right so it grows leftward.
+  // recording 260px). Rust preserves the current right edge, so a pill the
+  // user moved stays where they put it while it grows leftward.
   // No-op in browser preview.
   useEffect(() => {
     if (!isTauri()) return;
@@ -722,10 +785,10 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
             className="flex h-full w-full items-center gap-1.5 px-2"
           >
             <div
-              data-tauri-drag-region="true"
               data-testid="pill-logo-drag"
               title="Drag to move"
               aria-hidden="true"
+              onPointerDown={startWindowDrag}
               className="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing"
             >
               <Logo className="h-4 w-auto" />
@@ -734,8 +797,8 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
               ref={canvasRef}
               data-tauri-drag-region="false"
               data-testid="pill-waveform"
-              className="h-6 min-w-0 flex-1 text-white"
-              style={{ width: 110, height: 24 }}
+              className="h-7 min-w-0 flex-1 text-white"
+              style={{ width: 110, height: 28 }}
             />
             <span
               aria-hidden="true"
@@ -784,10 +847,10 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
             aria-label="Transcribing…"
           >
             <div
-              data-tauri-drag-region="true"
               data-testid="pill-logo-drag"
               title="Drag to move"
               aria-hidden="true"
+              onPointerDown={startWindowDrag}
               className="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing"
             >
               <Logo className="h-4 w-auto" />
@@ -796,50 +859,64 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
             <span className="truncate text-xs font-medium">Transcribing…</span>
           </output>
         ) : (
-          <button
-            type="button"
-            aria-label={idleTitle}
-            aria-pressed={false}
-            title={idleTitle}
-            data-tauri-drag-region="true"
+          <div
             data-testid="pill-idle"
-            onPointerDown={(e) => {
-              if (!e.isPrimary) return;
-              if (e.pointerType === "mouse" && e.button !== 0) return;
-              e.preventDefault();
-              try {
-                e.currentTarget.setPointerCapture(e.pointerId);
-              } catch {
-                // Capture unsupported — pointerup outside may be missed
-                // (MAX_RECORD_MS still bounds the take).
-              }
-              if (notice) setNotice(null);
-              void startPress();
-            }}
-            onPointerUp={stopPress}
-            onPointerCancel={stopPress}
-            onKeyDown={(e) => {
-              // Keyboard hold-to-talk: Space/Enter starts, keyup sends.
-              if (e.repeat) return;
-              if (e.key === " " || e.key === "Enter") {
-                e.preventDefault();
-                void startPress();
-              }
-            }}
-            onKeyUp={(e) => {
-              if (e.key === " " || e.key === "Enter") {
-                e.preventDefault();
-                stopPress();
-              }
-            }}
-            onContextMenu={(e) => e.preventDefault()}
-            className="flex h-full w-full cursor-grab items-center gap-2 px-3 text-left active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-black focus-visible:outline-none"
+            className="flex h-full w-full items-center px-1.5"
           >
-            <Logo className="h-4 w-auto shrink-0" />
-            <span className="truncate text-xs font-semibold tracking-wide">
-              {idleLabel}
-            </span>
-          </button>
+            <button
+              type="button"
+              aria-label="Move floating pill"
+              title="Drag to move"
+              data-testid="pill-drag-handle"
+              onPointerDown={startWindowDrag}
+              onContextMenu={(event) => event.preventDefault()}
+              className="grid h-8 w-8 shrink-0 cursor-grab place-items-center rounded-full transition-colors hover:bg-white/15 active:cursor-grabbing dark:hover:bg-black/10"
+            >
+              <Logo className="h-4 w-auto" />
+            </button>
+            <button
+              type="button"
+              aria-label={idleTitle}
+              aria-pressed={false}
+              title={idleTitle}
+              data-testid="pill-talk"
+              onPointerDown={(event) => {
+                if (!event.isPrimary) return;
+                if (event.pointerType === "mouse" && event.button !== 0) return;
+                event.preventDefault();
+                try {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                } catch {
+                  // Capture unsupported — pointerup outside may be missed
+                  // (MAX_RECORD_MS still bounds the take).
+                }
+                if (notice) setNotice(null);
+                void startPress();
+              }}
+              onPointerUp={stopPress}
+              onPointerCancel={stopPress}
+              onKeyDown={(event) => {
+                // Keyboard hold-to-talk: Space/Enter starts, keyup sends.
+                if (event.repeat) return;
+                if (event.key === " " || event.key === "Enter") {
+                  event.preventDefault();
+                  void startPress();
+                }
+              }}
+              onKeyUp={(event) => {
+                if (event.key === " " || event.key === "Enter") {
+                  event.preventDefault();
+                  stopPress();
+                }
+              }}
+              onContextMenu={(event) => event.preventDefault()}
+              className="flex h-full min-w-0 flex-1 cursor-pointer items-center px-1.5 text-left focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+            >
+              <span className="truncate text-xs font-semibold tracking-wide">
+                {idleLabel}
+              </span>
+            </button>
+          </div>
         )}
       </div>
       <span className="sr-only">{label}</span>
