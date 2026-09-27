@@ -309,6 +309,8 @@ export default function App() {
             />
           ) : null}
           <div
+            inert={!mobileOpen}
+            aria-hidden={!mobileOpen}
             className={`fixed inset-y-0 left-0 z-50 flex max-w-[85vw] transition-transform duration-200 md:hidden ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
           >
             <AppSidebar

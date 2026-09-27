@@ -98,7 +98,7 @@ export function DashboardView({
       : 0;
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-[1100px] p-4 sm:p-6 lg:p-8 xl:p-10 2xl:max-w-[1280px]">
+    <div className="desktop-page desktop-dashboard">
       {/* Header — status lives here so the hero holds the only CTA */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0 flex-1">
