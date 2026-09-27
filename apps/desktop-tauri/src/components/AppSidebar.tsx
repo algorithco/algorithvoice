@@ -12,8 +12,8 @@ import { UserRound } from "./animate-ui/icons/user-round.js";
 // cubic-bezier(0.4, 0, 0.2, 1). Sidebar width 220px expanded.
 const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 const DURATION = 200;
-const EXPANDED = "220px";
-const COLLAPSED = "3.3rem";
+const EXPANDED = "240px";
+const COLLAPSED = "64px";
 
 type View = "dashboard" | "dictate" | "history" | "settings";
 
@@ -21,7 +21,6 @@ type NavItem = {
   id: View;
   label: string;
   icon: React.ReactNode;
-  shortcut?: string;
 };
 
 export function AppSidebar({
@@ -49,7 +48,6 @@ export function AppSidebar({
       label: "Dictate",
       id: "dictate",
       icon: <AudioLines size={18} animateOnHover />,
-      shortcut: "Ctrl+Space",
     },
     {
       label: "History",
@@ -65,7 +63,7 @@ export function AppSidebar({
 
   return (
     <div
-      className="sticky top-0 h-full shrink-0 overflow-hidden border-r border-gray-200 bg-white dark:border-white/10 dark:bg-black"
+      className="desktop-sidebar sticky top-0 h-full shrink-0 overflow-hidden border-r border-gray-200 bg-white dark:border-white/10 dark:bg-black"
       style={{
         width: collapsed ? COLLAPSED : EXPANDED,
         transition: `width ${DURATION}ms ${EASE}`,
@@ -95,7 +93,7 @@ export function AppSidebar({
 
         {/* Primary nav */}
         <nav
-          className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-2 pt-2"
+          className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pt-4"
           aria-label="Primary"
         >
           {navItems.map((it) => (
@@ -193,7 +191,7 @@ function NavRow({
       aria-label={item.label}
       aria-current={active ? "page" : undefined}
       title={collapsed ? item.label : undefined}
-      className={`group relative flex h-10 w-full items-center overflow-hidden rounded-full text-sm transition-all duration-150 active:scale-[0.99] ${
+      className={`group relative flex h-11 shrink-0 w-full items-center overflow-hidden rounded-xl text-sm transition-colors duration-150 ${
         collapsed ? "justify-center px-0" : "px-4"
       } ${
         active
@@ -203,23 +201,16 @@ function NavRow({
     >
       <span
         className={`flex min-w-0 items-center ${
-          collapsed ? "justify-center" : "w-full -translate-x-2 gap-3"
+          collapsed ? "justify-center" : "w-full gap-3"
         }`}
       >
         <span className="grid size-5 shrink-0 place-items-center">
           {item.icon}
         </span>
         {collapsed ? null : (
-          <>
-            <span className="min-w-0 flex-1 truncate text-left">
-              {item.label}
-            </span>
-            {item.shortcut ? (
-              <span className="shrink-0 text-[12px] text-gray-500 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                {item.shortcut}
-              </span>
-            ) : null}
-          </>
+          <span className="min-w-0 flex-1 truncate text-left">
+            {item.label}
+          </span>
         )}
       </span>
     </button>
