@@ -10,8 +10,11 @@ import { OAuth2Audit, writeOAuthAudit } from "./oauth2.audit.js";
 import {
   approveBodySchema,
   approveResponseSchema,
+  CUSTOM_SCHEME_REDIRECT,
   DESKTOP_CLIENT_ID,
   healthResponseSchema,
+  LEGACY_CUSTOM_SCHEME_REDIRECT,
+  metadataResponseSchema,
   tokenResponseSchema,
 } from "./oauth2.schemas.js";
 import {
@@ -23,6 +26,7 @@ import {
   familyLockKey,
   hashRefreshToken,
   isRegisteredClient,
+  isValidS256Challenge,
   isValidStateValue,
   newFamilyId,
   newJti,
@@ -98,6 +102,30 @@ export async function oauth2Routes(
     async () => ({ ok: true as const }),
   );
 
+  // Deployment-specific capability document. New desktop builds use this to
+  // roll out the reverse-domain callback without breaking older servers.
+  api.get(
+    "/metadata",
+    { schema: { response: { 200: metadataResponseSchema } } },
+    async (_req, reply) => {
+      reply.header("Cache-Control", "public, max-age=300");
+      const env = getAppEnv();
+      const apiUrl = (env.API_URL ?? `http://localhost:${env.PORT}`).replace(
+        /\/$/,
+        "",
+      );
+      return {
+        authorization_endpoint: `${apiUrl}/oauth2/authorize`,
+        token_endpoint: `${apiUrl}/oauth2/token`,
+        code_challenge_methods_supported: ["S256"] as const,
+        redirect_uris_supported: [
+          CUSTOM_SCHEME_REDIRECT,
+          LEGACY_CUSTOM_SCHEME_REDIRECT,
+        ],
+      };
+    },
+  );
+
   // ---- GET /oauth2/authorize ----
   // Query is validated manually (not via a zod querystring schema) so
   // that failures with a usable redirect_uri become 302 error redirects
@@ -108,6 +136,9 @@ export async function oauth2Routes(
     "/authorize",
     { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
     async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("Pragma", "no-cache");
+      reply.header("Referrer-Policy", "no-referrer");
       const q = (req.query ?? {}) as Record<string, unknown>;
       const ip = req.ip;
       const ua = req.headers["user-agent"];
@@ -153,8 +184,7 @@ export async function oauth2Routes(
         );
       }
       if (
-        typeof q.code_challenge !== "string" ||
-        q.code_challenge === "" ||
+        !isValidS256Challenge(q.code_challenge) ||
         q.code_challenge_method !== "S256"
       ) {
         return errRedirect(
@@ -162,7 +192,7 @@ export async function oauth2Routes(
           "code_challenge with method S256 is required.",
         );
       }
-      if (state === "" || state.length > 512) {
+      if (!isValidStateValue(state)) {
         return errRedirect("invalid_request", "A valid state is required.");
       }
       const scope = parseScope(q.scope);
@@ -185,20 +215,22 @@ export async function oauth2Routes(
         "EX",
         REQUEST_TTL_SEC,
       );
-      // Secondary index so POST /oauth2/cancel can expire by unguessable
-      // `state` without knowing requestId. Same TTL; deleted on
-      // approve/deny/cancel. Best-effort: a missing index only means cancel
-      // falls back to TTL expiry, never a hang (desktop also times out).
-      try {
-        await redis.set(
-          stateKey(state),
-          requestId,
-          "EX",
-          REQUEST_TTL_SEC,
-          "NX",
+      // State is a one-time transaction identifier. Fail closed on the
+      // practically impossible collision instead of creating an ambiguous
+      // cancel/approval mapping.
+      const indexed = await redis.set(
+        stateKey(state),
+        requestId,
+        "EX",
+        REQUEST_TTL_SEC,
+        "NX",
+      );
+      if (indexed !== "OK") {
+        await redis.del(reqKey(requestId));
+        return errRedirect(
+          "invalid_request",
+          "Authorization state has already been used.",
         );
-      } catch {
-        // Index write failure must not break authorize; TTL still bounds it.
       }
       await writeOAuthAudit(app.prisma, {
         action: OAuth2Audit.AUTHORIZE_START,
@@ -241,7 +273,9 @@ export async function oauth2Routes(
       const ip = req.ip;
       const ua = req.headers["user-agent"];
 
-      const raw = await redis.get(reqKey(requestId));
+      // Atomically consume before validation so two approval requests can
+      // never both mint an authorization code.
+      const raw = await redis.getdel(reqKey(requestId));
       if (!raw) {
         // Idempotent deny for tab-close beacons and double-submits: the
         // request is already consumed or expired, so there is nothing left
@@ -257,10 +291,7 @@ export async function oauth2Routes(
         await redis.del(reqKey(requestId));
         return reply.code(400).send({ error: "invalid_request" });
       }
-      // Single-consume: delete request + state index together so a
-      // cancelled/closed tab can never be approved late, and a completed
-      // flow can never be replayed.
-      await redis.del(reqKey(requestId));
+      // Remove the secondary state index after atomic request consumption.
       try {
         if (isValidStateValue(pending.state)) {
           await redis.del(stateKey(pending.state));
@@ -336,12 +367,14 @@ export async function oauth2Routes(
   // it generated for authorize. Deletes the pending request + state index
   // immediately so a closed Chrome tab never lingers until TTL, and the
   // desktop deep-link listener unblocks without waiting 5m.
-  // Public (no auth): `state` is 128-bit random, unguessable; always 200
+  // Public (no auth): `state` is 256-bit random, unguessable; always 200
   // (no oracle for request existence). Rate-limited like approve.
   api.post(
     "/cancel",
     { config: { rateLimit: { max: 30, timeWindow: "10 minutes" } } },
     async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("Pragma", "no-cache");
       const body = (req.body ?? {}) as Record<string, unknown>;
       const state = body.state;
       const ip = req.ip;
@@ -378,6 +411,8 @@ export async function oauth2Routes(
       config: { rateLimit: { max: 20, timeWindow: "10 minutes" } },
     },
     async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
+      reply.header("Pragma", "no-cache");
       const body = (req.body ?? {}) as Record<string, unknown>;
       const ip = req.ip;
       const ua = req.headers["user-agent"];

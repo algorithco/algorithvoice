@@ -100,7 +100,7 @@ export function DashboardView({
   return (
     <div className="mx-auto w-full min-w-0 max-w-[1100px] p-4 sm:p-6 lg:p-8 xl:p-10 2xl:max-w-[1280px]">
       {/* Header — status lives here so the hero holds the only CTA */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold tracking-tight text-black sm:text-3xl md:text-4xl dark:text-white 2xl:text-[44px]">
             {greeting()}
@@ -166,8 +166,8 @@ export function DashboardView({
       </div>
 
       {/* Stats */}
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:border-black/20 dark:border-white/10 dark:bg-black dark:hover:border-white/20">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:border-black/20 sm:col-span-2 xl:col-span-1 dark:border-white/10 dark:bg-black dark:hover:border-white/20">
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-black/30 to-transparent opacity-0 transition-opacity group-hover:opacity-100 dark:via-white/30" />
           <p className="text-xs uppercase tracking-wide text-gray-500">
             Dictations today
@@ -213,7 +213,7 @@ export function DashboardView({
       </div>
 
       {/* Recent + Quick actions */}
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1.7fr_1fr]">
+      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-black dark:text-white">

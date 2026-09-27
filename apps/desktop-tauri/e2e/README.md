@@ -49,10 +49,10 @@ Screenshots land in `e2e/screenshots/` (gitignored) for human review.
   bottom-right (`screen.w-184`, `screen.h-136` idle 160x40), matching
   `pill_position()` in `push_to_talk.rs` (also unit-tested in Rust).
   Recording expands to 260x40 via `set_floating_pill_expanded` (grows
-  leftward, same bottom-right anchor). Drag is exercised via the minimal
-  idle-pill / logo drag regions + `allow-start-dragging` capability
+  leftward while preserving the user-moved right edge). Drag is exercised
+  via the dedicated logo handle + `allow-start-dragging` capability
   (soft-checked: the pill is `focusable:false`, so some WebDriver builds
-  ignore pointer actions on unfocused windows; attributes + capability are
+  ignore pointer actions on unfocused windows; handle + capability are
   the hard guarantees; outer container is explicitly non-draggable to fix
   the ~15px corner overshoot).
 

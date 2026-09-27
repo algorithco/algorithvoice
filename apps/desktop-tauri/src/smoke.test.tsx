@@ -24,6 +24,8 @@ if (typeof window !== "undefined" && !("IntersectionObserver" in window)) {
     FakeIntersectionObserver;
 }
 
+const shellMocks = vi.hoisted(() => ({ signedIn: false }));
+
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: "main" }),
 }));
@@ -32,7 +34,12 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string) => {
-    if (cmd === "session_status") throw new Error("no session");
+    if (cmd === "session_status") {
+      if (shellMocks.signedIn) {
+        return { loggedIn: true, email: "test@example.com" };
+      }
+      throw new Error("no session");
+    }
     if (cmd === "store_session") return undefined;
     throw new Error(`tauri unavailable in test: ${cmd}`);
   },
@@ -42,9 +49,9 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: async () => {},
 }));
 vi.mock("@tauri-apps/plugin-store", () => ({
-  load: async () => {
-    throw new Error("tauri unavailable in test");
-  },
+  load: async () => ({
+    get: async (key: string) => (key === "onboarded" ? true : null),
+  }),
 }));
 vi.mock("@tauri-apps/plugin-autostart", () => ({
   isEnabled: async () => false,
@@ -54,6 +61,7 @@ vi.mock("@tauri-apps/plugin-autostart", () => ({
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: async () => {},
 }));
+vi.mock("./lib/session/env.js", () => ({ isTauri: () => true }));
 
 import App from "./App.js";
 
@@ -61,6 +69,7 @@ afterEach(() => {
   vi.useRealTimers();
   document.body.innerHTML = "";
   window.localStorage.clear();
+  shellMocks.signedIn = false;
 });
 
 describe("critical-path smoke", () => {
@@ -97,5 +106,30 @@ describe("critical-path smoke", () => {
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it("keeps the signed-in app shell vertically scrollable without horizontal overflow", async () => {
+    shellMocks.signedIn = true;
+    window.localStorage.setItem("algorith-voice-onboarded", "1");
+
+    vi.useFakeTimers();
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    const root = createRoot(div);
+    await act(async () => {
+      root.render(<App />);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(4500);
+      await Promise.resolve();
+    });
+
+    const shell = div.querySelector('[data-testid="app-shell"]');
+    const content = div.querySelector('[data-testid="app-content"]');
+    expect(shell?.className).toContain("overflow-hidden");
+    expect(content?.className).toContain("overflow-x-hidden");
+    expect(content?.className).toContain("overflow-y-auto");
+
+    await act(async () => root.unmount());
   });
 });

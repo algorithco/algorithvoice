@@ -52,7 +52,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["algorithvoice"]
+        "schemes": ["com.algorithvoice.app", "algorithvoice"]
       }
     },
     "updater": {

@@ -347,24 +347,23 @@ test(
     );
     await shot("02-floating-pill");
 
-    // Drag the pill by its idle handle (the whole idle pill is draggable;
-    // waveform/cancel/stop opt out). The pill is `focusable:false` so
+    // Drag the pill by its dedicated idle logo handle. Hold-to-talk is a
+    // separate target, so moving the window cannot start a recording. The
+    // pill is `focusable:false` so
     // WebDriver pointer actions are best-effort: some drivers ignore
     // unfocused windows. We attempt a drag and soft-check the result — the
-    // hard guarantee is the drag-region attributes + the
-    // `allow-start-dragging` capability (without which `start_dragging` is
-    // denied entirely). If the OS did move the window, assert the delta.
-    // Regression: outer window container must NOT be draggable (that was
-    // the ~15px corner overshoot); only the idle pill / logo may drag.
-    const hasDragRegion = await driver.executeScript(
-      'return !!document.querySelector(\'[data-testid="pill-idle"][data-tauri-drag-region="true"]\') && document.querySelector(\'[data-tauri-drag-region="false"]\') !== null && !document.querySelector(\'[data-tauri-drag-region="deep"]\');',
+    // hard guarantee is the dedicated handle + `allow-start-dragging`
+    // capability. Regression: no parent is a native drag region (which used
+    // to capture transparent corners and conflict with hold-to-talk).
+    const hasDragHandle = await driver.executeScript(
+      "return !!document.querySelector('[data-testid=\"pill-drag-handle\"]') && !!document.querySelector('[data-testid=\"pill-talk\"]') && !document.querySelector('[data-tauri-drag-region=\"true\"]');",
     );
     assert.ok(
-      hasDragRegion,
-      "pill drag regions missing or overshoot regressed",
+      hasDragHandle,
+      "pill drag handle missing or native drag-region conflict regressed",
     );
     const root = await driver.executeScript(
-      "return document.querySelector('[data-testid=\"pill-idle\"]');",
+      "return document.querySelector('[data-testid=\"pill-drag-handle\"]');",
     );
     const DX = 24,
       DY = 16;

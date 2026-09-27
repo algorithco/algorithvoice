@@ -85,7 +85,7 @@ export function HistoryView() {
       {copied ? (
         <p className="av-small mt-2 text-gray-500">Copied to clipboard.</p>
       ) : null}
-      <div className="mt-6 flex gap-2">
+      <div className="mt-6 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => {

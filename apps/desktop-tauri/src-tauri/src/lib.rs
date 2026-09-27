@@ -28,7 +28,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 const SERVICE: &str = "com.algorithvoice.app";
 const ACCOUNT: &str = "algorith-voice-session";
 const DEFAULT_HOTKEY: &str = "Ctrl+Space";
-const DEEP_LINK_SCHEME: &str = "algorithvoice";
+const DEEP_LINK_SCHEMES: [&str; 2] = ["com.algorithvoice.app", "algorithvoice"];
 
 #[tauri::command]
 fn get_version() -> String {
@@ -681,15 +681,26 @@ fn is_deep_link(raw: &str) -> bool {
     let Ok(url) = url::Url::parse(trimmed) else {
         return false;
     };
-    if url.scheme().to_ascii_lowercase() != DEEP_LINK_SCHEME {
+    if !DEEP_LINK_SCHEMES
+        .iter()
+        .any(|scheme| url.scheme().eq_ignore_ascii_case(scheme))
+    {
         return false;
     }
-    if url.port().is_some() {
+    if url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || (url.path() != "" && url.path() != "/")
+    {
         return false;
     }
     matches!(
-        url.host_str(),
-        Some(host) if host.eq_ignore_ascii_case("auth-callback")
+        (url.scheme(), url.host_str()),
+        ("com.algorithvoice.app", Some(host)) if host.eq_ignore_ascii_case("oauth-callback")
+    ) || matches!(
+        (url.scheme(), url.host_str()),
+        ("algorithvoice", Some(host)) if host.eq_ignore_ascii_case("auth-callback")
     )
 }
 
@@ -888,4 +899,29 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Algorith Voice");
+}
+
+#[cfg(test)]
+mod oauth_deep_link_tests {
+    use super::is_deep_link;
+
+    #[test]
+    fn accepts_only_exact_oauth_callback_routes() {
+        assert!(is_deep_link(
+            "com.algorithvoice.app://oauth-callback?code=abc&state=xyz"
+        ));
+        assert!(is_deep_link(
+            "algorithvoice://auth-callback?code=abc&state=xyz"
+        ));
+        assert!(!is_deep_link(
+            "com.algorithvoice.app://oauth-callback/evil?code=abc"
+        ));
+        assert!(!is_deep_link(
+            "com.algorithvoice.app://user:pass@oauth-callback?code=abc"
+        ));
+        assert!(!is_deep_link(
+            "com.algorithvoice.app://oauth-callback#code=abc"
+        ));
+        assert!(!is_deep_link("https://api.trqsh.uz/oauth-callback"));
+    }
 }

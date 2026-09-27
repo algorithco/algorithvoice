@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   hashRefreshToken,
+  isValidS256Challenge,
+  isValidStateValue,
   parseScope,
   sha256Hex,
   validateRedirectUri,
@@ -39,12 +41,31 @@ describe("verifyCodeChallenge", () => {
   });
 });
 
+describe("OAuth transaction input validation", () => {
+  it("requires an exact S256 challenge encoding", () => {
+    expect(isValidS256Challenge(RFC_CHALLENGE)).toBe(true);
+    expect(isValidS256Challenge("short")).toBe(false);
+    expect(isValidS256Challenge(`${RFC_CHALLENGE}=`)).toBe(false);
+    expect(isValidS256Challenge(`${RFC_CHALLENGE}&admin=1`)).toBe(false);
+  });
+
+  it("requires a strong base64url state value", () => {
+    expect(isValidStateValue("s".repeat(22))).toBe(true);
+    expect(isValidStateValue("s".repeat(43))).toBe(true);
+    expect(isValidStateValue("weak")).toBe(false);
+    expect(isValidStateValue(`${"s".repeat(22)}=`)).toBe(false);
+  });
+});
+
 describe("validateRedirectUri", () => {
   it("accepts the custom scheme", () => {
-    expect(validateRedirectUri("algorithvoice://auth-callback")).toEqual({
+    expect(
+      validateRedirectUri("com.algorithvoice.app://oauth-callback"),
+    ).toEqual({
       ok: true,
-      normalized: "algorithvoice://auth-callback",
+      normalized: "com.algorithvoice.app://oauth-callback",
     });
+    expect(validateRedirectUri("algorithvoice://auth-callback").ok).toBe(true);
   });
   it("accepts loopback with any port", () => {
     expect(validateRedirectUri("http://127.0.0.1:54321/callback")).toEqual({

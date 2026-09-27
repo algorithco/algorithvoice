@@ -3,18 +3,13 @@
 // ./url-safety.js) to avoid pulling OAuth/PKCE into
 // lightweight bundles like the floating pill.
 
-export type { OAuthProvider } from "./auth.js";
 export {
   fetchWithTimeout,
   login,
   logout,
-  OAUTH_PROVIDERS,
-  oauthProviderLabel,
-  parseOAuthCallbackUrl,
   parseOAuthCodeCallback,
   sessionStatus,
   signInDesktop,
-  signInWithOAuth,
   signup,
 } from "./auth.js";
 export { isTauri } from "./env.js";
