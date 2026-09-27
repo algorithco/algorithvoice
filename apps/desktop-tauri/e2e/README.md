@@ -48,7 +48,7 @@ Screenshots land in `e2e/screenshots/` (gitignored) for human review.
 - Floating pill: `ensure_floating_pill` creates the pill webview
   bottom-right (`screen.w-184`, `screen.h-136` idle 160x40), matching
   `pill_position()` in `push_to_talk.rs` (also unit-tested in Rust).
-  Recording expands to 260x40 via `set_floating_pill_expanded` (grows
+  Recording expands to 224x40 via `set_floating_pill_expanded` (grows
   leftward while preserving the user-moved right edge). Drag is exercised
   via the dedicated logo handle + `allow-start-dragging` capability
   (soft-checked: the pill is `focusable:false`, so some WebDriver builds
