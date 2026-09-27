@@ -17,6 +17,10 @@ import {
   saveLastTranscript,
   transcribeAndPaste,
 } from "../lib/ptt.js";
+import {
+  createRecordingCuePlayer,
+  type RecordingCuePlayer,
+} from "../lib/recordingSounds.js";
 import { isTauri } from "../lib/session/env.js";
 import { setTrayState } from "../lib/session/tray.js";
 import { Loader } from "./animate-ui/icons/loader.js";
@@ -35,9 +39,36 @@ const NOTICE_MS = 5000;
 
 /** Must match Rust: PILL_WIDTH_IDLE / PILL_WIDTH_RECORDING / PILL_HEIGHT. */
 const PILL_WIDTH_IDLE = 160;
-const PILL_WIDTH_RECORDING = 260;
+const PILL_WIDTH_RECORDING = 224;
 const PILL_HEIGHT = 40;
-const WAVE_BARS = 32;
+const WAVE_BARS = 20;
+/** Normalized RMS above typical laptop-microphone room noise. */
+export const SPEECH_RMS_THRESHOLD = 0.025;
+/** Reject clicks and isolated bumps; keep even short spoken words. */
+export const MIN_SPEECH_ACTIVITY_MS = 180;
+const MAX_SPEECH_FRAME_MS = 50;
+
+/** Normalized root-mean-square energy for unsigned Web Audio time samples. */
+export function audioFrameRms(data: Uint8Array): number {
+  if (data.length === 0) return 0;
+  let sumSquares = 0;
+  for (const sample of data) {
+    const normalized = ((sample as number) - 128) / 128;
+    sumSquares += normalized * normalized;
+  }
+  return Math.sqrt(sumSquares / data.length);
+}
+
+/** Accumulate sustained speech while gently forgetting isolated noise. */
+export function updateSpeechActivityMs(
+  currentMs: number,
+  rms: number,
+  elapsedMs: number,
+): number {
+  const delta = Math.max(0, Math.min(MAX_SPEECH_FRAME_MS, elapsedMs));
+  if (rms >= SPEECH_RMS_THRESHOLD) return currentMs + delta;
+  return Math.max(0, currentMs - delta * 0.35);
+}
 
 /** Convert time-domain microphone samples into visibly responsive bar heights. */
 export function waveformBarHeights(
@@ -84,7 +115,7 @@ export function smoothWaveformBarHeights(
  * Two visual states:
  * - idle (160x40): [drag handle | hold-to-talk target]. Keeping these
  *   separate prevents a move gesture from accidentally starting a take.
- * - recording (260x40): [logo | live waveform | X cancel | stop & send].
+ * - recording (224x40): [logo | live waveform | X cancel | stop & send].
  *   Only the logo handle stays draggable; waveform + buttons opt out.
  *
  * Dragging calls Tauri's `startDragging()` directly from the logo handle.
@@ -118,6 +149,18 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const maxTimerRef = useRef(0);
   const noticeTimerRef = useRef(0);
   const tickTimerRef = useRef(0);
+  const recordingCuesRef = useRef<RecordingCuePlayer | null>(null);
+
+  // Preload bundled cues once so global-hotkey playback starts immediately.
+  useEffect(() => {
+    const cues = createRecordingCuePlayer();
+    recordingCuesRef.current = cues;
+    cues.preload();
+    return () => {
+      cues.dispose();
+      if (recordingCuesRef.current === cues) recordingCuesRef.current = null;
+    };
+  }, []);
 
   const startWindowDrag = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
@@ -142,6 +185,9 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const waveRafRef = useRef(0);
   const waveHeightsRef = useRef<number[]>([]);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const speechActivityMsRef = useRef(0);
+  const speechFrameAtRef = useRef(0);
+  const speechDetectionAvailableRef = useRef(false);
 
   const setPill = useCallback((next: PillState) => {
     stateRef.current = next;
@@ -225,6 +271,8 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         audioCtxRef.current = ctx;
         sourceRef.current = src;
         analyserRef.current = analyser;
+        speechDetectionAvailableRef.current = true;
+        speechFrameAtRef.current = performance.now();
         if (ctx.state === "suspended") {
           void ctx.resume().catch(() => {});
         }
@@ -244,6 +292,13 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
             waveRafRef.current = requestAnimationFrame(tick);
             return;
           }
+          const frameAt = performance.now();
+          speechActivityMsRef.current = updateSpeechActivityMs(
+            speechActivityMsRef.current,
+            audioFrameRms(data),
+            frameAt - speechFrameAtRef.current,
+          );
+          speechFrameAtRef.current = frameAt;
           const canvas = canvasRef.current;
           if (canvas) {
             const dpr = window.devicePixelRatio || 1;
@@ -346,6 +401,15 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         discardRef.current = false;
         setPill("idle");
         showNotice("Hold a bit longer — tap was too short.");
+        return;
+      }
+      if (
+        speechDetectionAvailableRef.current &&
+        speechActivityMsRef.current < MIN_SPEECH_ACTIVITY_MS
+      ) {
+        discardRef.current = false;
+        setPill("idle");
+        showNotice("No speech detected — nothing was sent.");
         return;
       }
       if (blob.size < MIN_BLOB_BYTES) {
@@ -498,6 +562,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         recorderRef.current = null;
         stopTracks();
         clearTimers();
+        recordingCuesRef.current?.playStop();
         setPill("idle");
       }
       // `onstop` continues the pipeline (discard vs. transcribe).
@@ -505,6 +570,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     }
     stopTracks();
     clearTimers();
+    recordingCuesRef.current?.playStop();
     setPill("idle");
   }, [clearTimers, setPill, stopTracks]);
 
@@ -514,6 +580,21 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     // here, before any async work starts.
     if (stateRef.current !== "idle" || startingRef.current) return;
     startingRef.current = true;
+    const token = ++pressTokenRef.current;
+    discardRef.current = false;
+    chunksRef.current = [];
+    speechActivityMsRef.current = 0;
+    speechFrameAtRef.current = 0;
+    speechDetectionAvailableRef.current = false;
+
+    // Finish the gentle start cue before opening the microphone. Besides
+    // making the state transition unambiguous, this prevents speaker bleed
+    // from becoming the first samples of the user's transcription.
+    await recordingCuesRef.current?.playStart();
+    if (token !== pressTokenRef.current || !mountedRef.current) {
+      startingRef.current = false;
+      return;
+    }
     try {
       const fresh = await loadPrefs({ allowMigration: false });
       if (
@@ -528,10 +609,10 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     } catch {
       // Store unreadable — fall back to last known prefs.
     }
-    const token = ++pressTokenRef.current;
-    discardRef.current = false;
-    pressStartRef.current = Date.now();
-    chunksRef.current = [];
+    if (token !== pressTokenRef.current || !mountedRef.current) {
+      startingRef.current = false;
+      return;
+    }
     let stream: MediaStream;
     try {
       const useLocalMic = prefsRef.current.mode === "local";
@@ -619,6 +700,9 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       chunksRef.current = [];
       recorderRef.current = null;
       stopTracks();
+      // The microphone is fully closed before speaker audio begins, so the
+      // stop cue can never be included in the captured transcription.
+      recordingCuesRef.current?.playStop();
       void finishWithBlob(blob, pressedMs, mime);
     };
     recorder.onerror = () => {
@@ -628,6 +712,9 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       showNotice("Microphone error — hold again to retry.");
       setPill("idle");
     };
+    // Measure duration from actual capture start, excluding cue playback,
+    // preference loading, and any microphone permission UI.
+    pressStartRef.current = Date.now();
     recorder.start();
     startingRef.current = false;
     setPill("recording");
@@ -687,7 +774,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   }, [startPress, stopPress]);
 
   // Resize the native window to match the active layout (idle 160px vs
-  // recording 260px). Rust preserves the current right edge, so a pill the
+  // recording 224px). Rust preserves the current right edge, so a pill the
   // user moved stays where they put it while it grows leftward.
   // No-op in browser preview.
   useEffect(() => {
@@ -798,7 +885,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
               data-tauri-drag-region="false"
               data-testid="pill-waveform"
               className="h-7 min-w-0 flex-1 text-white"
-              style={{ width: 110, height: 28 }}
+              style={{ width: 72, height: 28 }}
             />
             <span
               aria-hidden="true"

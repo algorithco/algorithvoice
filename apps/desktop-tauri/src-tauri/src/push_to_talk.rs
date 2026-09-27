@@ -4,7 +4,7 @@
 //! untouched — this file only *adds* new commands which `lib.rs` wires
 //! into `invoke_handler`. Frontend drives the flow:
 //!
-//! 1. `ensure_floating_pill` creates the 160x40 (idle) / 260x40
+//! 1. `ensure_floating_pill` creates the 160x40 (idle) / 224x40
 //!    (recording) frameless always-on-top window (`focus: false` so the
 //!    previously active app keeps focus).
 //! 2. Frontend records with `MediaRecorder` (Variant A — no native audio
@@ -627,7 +627,7 @@ pub fn get_foreground_info() -> AppResult<ForegroundInfo> {
 /// Create (or reveal) the frameless always-on-top pill.
 ///
 /// Properties per spec: decorations=false, transparent, always_on_top,
-/// skip_taskbar, non-resizable short-wide pill (160x40 idle, 260x40
+/// skip_taskbar, non-resizable short-wide pill (160x40 idle, 224x40
 /// recording), `focused(false)` + `focusable(false)` so it never steals
 /// focus, `visible_on_all_workspaces` where supported.
 ///
@@ -636,7 +636,7 @@ pub fn get_foreground_info() -> AppResult<ForegroundInfo> {
 /// macOS-only and have been removed (macOS lives in the Swift app).
 pub(crate) const PILL_WIDTH_IDLE: f64 = 160.0;
 pub(crate) const PILL_HEIGHT: f64 = 40.0;
-pub(crate) const PILL_WIDTH_RECORDING: f64 = 260.0;
+pub(crate) const PILL_WIDTH_RECORDING: f64 = 224.0;
 pub(crate) const PILL_MARGIN_RIGHT: f64 = 24.0;
 pub(crate) const PILL_MARGIN_BOTTOM: f64 = 96.0;
 
@@ -822,10 +822,10 @@ mod tests {
 
     #[test]
     fn pill_recording_grows_leftward_same_bottom_right_anchor() {
-        // Recording pill is 260x40: same bottom edge, leftward growth.
+        // Recording pill is 224x40: same bottom edge, leftward growth.
         let (x, y) = pill_position_for_width(PILL_WIDTH_RECORDING, 0.0, 0.0, 1920.0, 1080.0);
-        assert_eq!((x, y), (1920.0 - 260.0 - 24.0, 1080.0 - 40.0 - 96.0));
-        assert_eq!((x, y), (1636.0, 944.0));
+        assert_eq!((x, y), (1920.0 - 224.0 - 24.0, 1080.0 - 40.0 - 96.0));
+        assert_eq!((x, y), (1672.0, 944.0));
         // Idle wrapper agrees with explicit idle width.
         let (xi, yi) = pill_position(0.0, 0.0, 1920.0, 1080.0);
         let (xe, ye) = pill_position_for_width(PILL_WIDTH_IDLE, 0.0, 0.0, 1920.0, 1080.0);
@@ -836,7 +836,7 @@ mod tests {
     fn pill_resize_preserves_user_moved_right_edge() {
         let (expanded_x, expanded_y) =
             pill_position_after_resize(640.0, 320.0, PILL_WIDTH_IDLE, PILL_WIDTH_RECORDING);
-        assert_eq!((expanded_x, expanded_y), (540.0, 320.0));
+        assert_eq!((expanded_x, expanded_y), (576.0, 320.0));
 
         let (idle_x, idle_y) = pill_position_after_resize(
             expanded_x,
