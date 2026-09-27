@@ -46,6 +46,9 @@ describe("FloatingPill waveform", () => {
   it("distinguishes digital silence, room noise, and clear speech energy", () => {
     const silence = new Uint8Array(256).fill(128);
     const roomNoise = Uint8Array.from({ length: 256 }, (_, index) =>
+      index % 2 === 0 ? 129 : 127,
+    );
+    const quietSpeech = Uint8Array.from({ length: 256 }, (_, index) =>
       index % 2 === 0 ? 130 : 126,
     );
     const speech = Uint8Array.from({ length: 256 }, (_, index) =>
@@ -54,12 +57,13 @@ describe("FloatingPill waveform", () => {
 
     expect(audioFrameRms(silence)).toBe(0);
     expect(audioFrameRms(roomNoise)).toBeLessThan(SPEECH_RMS_THRESHOLD);
+    expect(audioFrameRms(quietSpeech)).toBeGreaterThan(SPEECH_RMS_THRESHOLD);
     expect(audioFrameRms(speech)).toBeGreaterThan(SPEECH_RMS_THRESHOLD);
   });
 
   it("requires sustained speech instead of accepting one noise spike", () => {
     let sustained = 0;
-    for (let frame = 0; frame < 4; frame += 1) {
+    for (let frame = 0; frame < 2; frame += 1) {
       sustained = updateSpeechActivityMs(
         sustained,
         SPEECH_RMS_THRESHOLD + 0.01,
@@ -69,10 +73,22 @@ describe("FloatingPill waveform", () => {
     expect(sustained).toBeGreaterThanOrEqual(MIN_SPEECH_ACTIVITY_MS);
 
     let isolated = updateSpeechActivityMs(0, SPEECH_RMS_THRESHOLD + 0.01, 50);
-    for (let frame = 0; frame < 4; frame += 1) {
+    for (let frame = 0; frame < 10; frame += 1) {
       isolated = updateSpeechActivityMs(isolated, 0, 50);
     }
     expect(isolated).toBe(0);
+  });
+
+  it("bridges short gaps between syllables in a quiet phrase", () => {
+    let activity = updateSpeechActivityMs(0, SPEECH_RMS_THRESHOLD + 0.001, 50);
+    activity = updateSpeechActivityMs(activity, 0, 50);
+    activity = updateSpeechActivityMs(
+      activity,
+      SPEECH_RMS_THRESHOLD + 0.001,
+      50,
+    );
+
+    expect(activity).toBeGreaterThanOrEqual(MIN_SPEECH_ACTIVITY_MS);
   });
 
   it("caps delayed animation frames so backgrounding cannot fake speech", () => {

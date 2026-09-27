@@ -96,6 +96,19 @@ describe("recording cue player", () => {
     expect(sounds[1]?.play).toHaveBeenCalledOnce();
   });
 
+  it("cancels and resolves a pending start cue without playing stop", async () => {
+    const { player, sounds } = setup();
+    player.preload();
+
+    const pending = player.playStart();
+    await Promise.resolve();
+    player.cancel();
+
+    await expect(pending).resolves.toBeUndefined();
+    expect(sounds[0]?.pause).toHaveBeenCalledOnce();
+    expect(sounds[1]?.play).not.toHaveBeenCalled();
+  });
+
   it("fails open when media playback is blocked", async () => {
     const { player, sounds } = setup();
     player.preload();
