@@ -37,6 +37,8 @@ export interface RecordingCuePlayer {
   playStart(): Promise<void>;
   /** Fire-and-forget because microphone capture has already ended. */
   playStop(): void;
+  /** Stops an in-progress cue without playing a replacement sound. */
+  cancel(): void;
   dispose(): void;
 }
 
@@ -44,6 +46,7 @@ export function createRecordingCuePlayer(
   createAudio: AudioFactory = (src) => new Audio(src),
 ): RecordingCuePlayer {
   let sounds: Record<CueName, CueAudio> | null = null;
+  let finishPendingStart: (() => void) | null = null;
 
   const ensureSounds = () => {
     if (sounds) return sounds;
@@ -70,9 +73,14 @@ export function createRecordingCuePlayer(
     }
   };
 
+  const cancelPlayback = () => {
+    stopAll();
+    finishPendingStart?.();
+  };
+
   const startPlayback = (cue: CueName) => {
     const loaded = ensureSounds();
-    stopAll();
+    cancelPlayback();
     const sound = loaded[cue];
     // Re-apply these values in case the browser changed them after suspension.
     sound.volume = RECORDING_CUE_VOLUME;
@@ -95,12 +103,14 @@ export function createRecordingCuePlayer(
         const finish = () => {
           if (settled) return;
           settled = true;
+          if (finishPendingStart === finish) finishPendingStart = null;
           globalThis.clearTimeout(timeoutId);
           sound.removeEventListener("ended", finish);
           sound.removeEventListener("error", finish);
           resolve();
         };
         const timeoutId = globalThis.setTimeout(finish, START_CUE_TIMEOUT_MS);
+        finishPendingStart = finish;
         sound.addEventListener("ended", finish, { once: true });
         sound.addEventListener("error", finish, { once: true });
         void sound.play().catch(finish);
@@ -112,8 +122,11 @@ export function createRecordingCuePlayer(
         // Audible feedback is optional; recording must remain reliable.
       });
     },
+    cancel() {
+      cancelPlayback();
+    },
     dispose() {
-      stopAll();
+      cancelPlayback();
       sounds = null;
     },
   };

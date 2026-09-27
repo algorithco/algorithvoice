@@ -42,10 +42,16 @@ const PILL_WIDTH_IDLE = 160;
 const PILL_WIDTH_RECORDING = 224;
 const PILL_HEIGHT = 40;
 const WAVE_BARS = 20;
-/** Normalized RMS above typical laptop-microphone room noise. */
-export const SPEECH_RMS_THRESHOLD = 0.025;
-/** Reject clicks and isolated bumps; keep even short spoken words. */
-export const MIN_SPEECH_ACTIVITY_MS = 180;
+/**
+ * Normalized RMS above near-silence for 8-bit Web Audio samples.
+ *
+ * Laptop microphones with OS processing disabled can produce surprisingly
+ * quiet speech, so this deliberately sits just above a one-quantum signal
+ * (1 / 128). Duration filtering below rejects isolated clicks.
+ */
+export const SPEECH_RMS_THRESHOLD = 0.008;
+/** Reject a click, while retaining a single quiet word or a short phrase. */
+export const MIN_SPEECH_ACTIVITY_MS = 90;
 const MAX_SPEECH_FRAME_MS = 50;
 
 /** Normalized root-mean-square energy for unsigned Web Audio time samples. */
@@ -67,7 +73,9 @@ export function updateSpeechActivityMs(
 ): number {
   const delta = Math.max(0, Math.min(MAX_SPEECH_FRAME_MS, elapsedMs));
   if (rms >= SPEECH_RMS_THRESHOLD) return currentMs + delta;
-  return Math.max(0, currentMs - delta * 0.35);
+  // Bridge the natural quiet gaps between syllables instead of erasing most
+  // of a short phrase before the next voiced sound arrives.
+  return Math.max(0, currentMs - delta * 0.1);
 }
 
 /** Convert time-domain microphone samples into visibly responsive bar heights. */
@@ -553,7 +561,13 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     // Invalidate a still-pending `getUserMedia` so it aborts cleanly.
     pressTokenRef.current++;
     startingRef.current = false;
-    if (stateRef.current !== "recording") return;
+    if (stateRef.current !== "recording") {
+      // A tap or an early release is not a recording lifecycle event. Stop a
+      // pending start cue silently and never answer it with the stop cue.
+      recordingCuesRef.current?.cancel();
+      stopTracks();
+      return;
+    }
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") {
       try {
@@ -586,15 +600,11 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     speechActivityMsRef.current = 0;
     speechFrameAtRef.current = 0;
     speechDetectionAvailableRef.current = false;
+    const holdStartedAt = performance.now();
 
-    // Finish the gentle start cue before opening the microphone. Besides
-    // making the state transition unambiguous, this prevents speaker bleed
-    // from becoming the first samples of the user's transcription.
-    await recordingCuesRef.current?.playStart();
-    if (token !== pressTokenRef.current || !mountedRef.current) {
-      startingRef.current = false;
-      return;
-    }
+    // Prepare preferences and the microphone silently. A quick click should
+    // neither record nor make a cue; only a deliberate hold enters the audible
+    // recording lifecycle.
     try {
       const fresh = await loadPrefs({ allowMigration: false });
       if (
@@ -615,22 +625,19 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     }
     let stream: MediaStream;
     try {
-      const useLocalMic = prefsRef.current.mode === "local";
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: { ideal: false },
-            noiseSuppression: { ideal: false },
-            autoGainControl: { ideal: false },
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true },
             channelCount: { ideal: 1 },
             sampleRate: { ideal: 16000 },
             sampleSize: { ideal: 16 },
           } as MediaTrackConstraints,
         });
-        // For cloud, we could keep processing enabled, but local fidelity
-        // matters most — keep processing off for local, on for cloud is not
-        // needed now (both off preserves original speech for either engine).
-        void useLocalMic;
+        // Speech-oriented processing raises quiet voices and reduces steady
+        // room noise for both local and cloud transcription.
       } catch (e) {
         const name = e instanceof DOMException ? e.name : "";
         if (name === "OverconstrainedError" || name === "NotSupportedError") {
@@ -640,9 +647,9 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           );
           stream = await navigator.mediaDevices.getUserMedia({
             audio: {
-              echoCancellation: { ideal: false },
-              noiseSuppression: { ideal: false },
-              autoGainControl: { ideal: false },
+              echoCancellation: { ideal: true },
+              noiseSuppression: { ideal: true },
+              autoGainControl: { ideal: true },
             },
           });
         } else {
@@ -665,7 +672,17 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       setPill("idle");
       return;
     }
-    // Aborted while permission prompt was open (release / Esc / unmount).
+    streamRef.current = stream;
+    const remainingHoldMs = Math.max(
+      0,
+      MIN_PRESS_MS - (performance.now() - holdStartedAt),
+    );
+    if (remainingHoldMs > 0) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, remainingHoldMs);
+      });
+    }
+    // Aborted before the deliberate-hold threshold was reached.
     if (token !== pressTokenRef.current || !mountedRef.current) {
       for (const track of stream.getTracks()) {
         try {
@@ -677,7 +694,20 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       startingRef.current = false;
       return;
     }
-    streamRef.current = stream;
+    // The start cue now means exactly one thing: a valid hold is transitioning
+    // into recording. Wait for it so speaker audio is never transcribed.
+    await recordingCuesRef.current?.playStart();
+    if (token !== pressTokenRef.current || !mountedRef.current) {
+      for (const track of stream.getTracks()) {
+        try {
+          track.stop();
+        } catch {
+          // Ignore.
+        }
+      }
+      startingRef.current = false;
+      return;
+    }
     const mimeType = pickSupportedMimeType();
     let recorder: MediaRecorder;
     try {
