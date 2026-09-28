@@ -50,10 +50,11 @@ describe("settings window (white-screen regression)", () => {
     expect(html).toContain("Local usage");
   });
 
-  it("boots the app bundle in a settings-labelled webview", () => {
-    // Settings must render instantly without splash (no black flash).
+  it("boots the settings bundle behind the auth and subscription gate", () => {
+    // A secondary settings webview must not bypass the desktop entitlement
+    // check before its session has loaded.
     const html = renderToString(<App />);
-    expect(html).toContain("Settings");
-    expect(html).not.toContain("Loading");
+    expect(html).toContain("Loading");
+    expect(html).not.toContain("Dictation");
   });
 });

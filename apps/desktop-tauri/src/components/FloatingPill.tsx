@@ -23,6 +23,7 @@ import {
 } from "../lib/recordingSounds.js";
 import { isTauri } from "../lib/session/env.js";
 import { setTrayState } from "../lib/session/tray.js";
+import type { DesktopEntitlement } from "../lib/subscription.js";
 import { Loader } from "./animate-ui/icons/loader.js";
 import type { Prefs } from "./SettingsView.js";
 
@@ -137,7 +138,13 @@ export function smoothWaveformBarHeights(
  * - Global hotkey (`ptt-pressed` / `ptt-released` from Rust, already
  *   deduped against OS key-repeat) drives the same state machine.
  */
-export function FloatingPill({ prefs }: { prefs: Prefs }) {
+export function FloatingPill({
+  prefs,
+  entitlement,
+}: {
+  prefs: Prefs;
+  entitlement: DesktopEntitlement | null;
+}) {
   const [state, setState] = useState<PillState>("idle");
   const [notice, setNotice] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -147,9 +154,13 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const pressTokenRef = useRef(0);
   const discardRef = useRef(false);
   const prefsRef = useRef(prefs);
+  const entitlementRef = useRef(entitlement);
   useEffect(() => {
     prefsRef.current = prefs;
   }, [prefs]);
+  useEffect(() => {
+    entitlementRef.current = entitlement;
+  }, [entitlement]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -593,6 +604,10 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     // touch-emulation, hotkey repeat or double binding must be rejected
     // here, before any async work starts.
     if (stateRef.current !== "idle" || startingRef.current) return;
+    if (!entitlementRef.current?.valid) {
+      showNotice("Pro required — subscribe in the desktop app.");
+      return;
+    }
     startingRef.current = true;
     const token = ++pressTokenRef.current;
     discardRef.current = false;
@@ -858,8 +873,11 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
 
   const pillWidth =
     state === "recording" ? PILL_WIDTH_RECORDING : PILL_WIDTH_IDLE;
-  const idleLabel = notice ?? "Algorith Voice";
-  const idleTitle = notice ?? "Hold to talk — drag to move";
+  const proRequired = entitlement?.valid !== true;
+  const idleLabel = notice ?? (proRequired ? "Pro required" : "Algorith Voice");
+  const idleTitle =
+    notice ??
+    (proRequired ? "Pro subscription required" : "Hold to talk — drag to move");
   const recTitle = `Recording ${formatElapsed(elapsedMs)} — release to transcribe`;
   const label =
     state === "recording"

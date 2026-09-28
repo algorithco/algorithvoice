@@ -379,8 +379,10 @@ pub async fn transcribe_audio(
     model_id: Option<String>,
     #[allow(non_snake_case)] modelId: Option<String>,
     app: AppHandle,
+    app_state: State<'_, crate::state::AppState>,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
+    crate::require_pro_entitlement(&app, &app_state).await?;
     // Accept both snake_case and camelCase (frontend sends both for back-compat)
     let audio_base64 = audio_base64
         .or(audioBase64)
@@ -532,6 +534,7 @@ pub async fn transcribe_and_paste(
     model_id: Option<String>,
     #[allow(non_snake_case)] modelId: Option<String>,
     app: AppHandle,
+    app_state: State<'_, crate::state::AppState>,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
     let audio_base64 = audio_base64
@@ -553,6 +556,7 @@ pub async fn transcribe_and_paste(
         model_id,
         None,
         app,
+        app_state,
         worker,
     )
     .await?;

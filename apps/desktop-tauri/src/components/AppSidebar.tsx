@@ -29,6 +29,7 @@ export function AppSidebar({
   collapsed,
   onCollapsedChange,
   email,
+  planTier,
   onLogout,
 }: {
   active: View;
@@ -36,6 +37,7 @@ export function AppSidebar({
   collapsed: boolean;
   onCollapsedChange: (v: boolean) => void;
   email?: string | null;
+  planTier?: "free" | "pro" | null;
   onLogout?: () => void;
 }) {
   const navItems: NavItem[] = [
@@ -137,7 +139,11 @@ export function AppSidebar({
                       {email ?? "Guest"}
                     </span>
                     <span className="av-small w-full truncate text-left text-[11px] text-gray-500">
-                      {email ? "Signed in" : "Local only"}
+                      {email
+                        ? planTier === "pro"
+                          ? "Pro subscription"
+                          : "Subscription required"
+                        : "Signed out"}
                     </span>
                   </div>
                   <span className="grid size-7 shrink-0 place-items-center rounded-control text-gray-500 transition-colors duration-150 group-hover:bg-white group-hover:text-black dark:group-hover:bg-white/10 dark:group-hover:text-white">

@@ -13,9 +13,11 @@ mod state;
 mod window;
 
 use error::{AppError, AppResult};
+use serde::Deserialize;
 use state::{AppState, Db, LicenseStatus, SessionStatus, TrayState};
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -35,25 +37,230 @@ fn get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Licensing/entitlement probe (currently unimplemented).
-///
-/// FAIL-CLOSED CONTRACT: this command returns `Err(not-implemented)` until a
-/// real entitlement source exists. Any future frontend gate MUST treat `Err`
-/// as "not licensed — block the feature", never as "unknown — allow".
-/// (Verified 2026-09: zero call sites exist yet, so nothing can fail open
-/// today; this comment binds future callers.)
+const ENTITLEMENT_CACHE_TTL: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubscriptionResponse {
+    status: String,
+    plan_tier: String,
+    current_period_end: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RefreshResponse {
+    access_token: String,
+    refresh_token: String,
+}
+
+fn default_api_base() -> &'static str {
+    if cfg!(debug_assertions) {
+        "http://localhost:3001"
+    } else {
+        "https://api.trqsh.uz"
+    }
+}
+
+fn validate_api_base(raw: Option<String>) -> AppResult<String> {
+    let raw = raw.unwrap_or_else(|| default_api_base().to_string());
+    let parsed =
+        url::Url::parse(raw.trim()).map_err(|_| AppError::new("entitlement", "invalid API URL"))?;
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    let trusted = parsed.scheme() == "https" && host == "api.trqsh.uz";
+    let dev_loopback = cfg!(debug_assertions)
+        && matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
+        && matches!(parsed.scheme(), "http" | "https");
+    if !trusted && !dev_loopback {
+        return Err(AppError::new("entitlement", "untrusted API URL"));
+    }
+    Ok(raw.trim_end_matches('/').to_string())
+}
+
+fn read_session_payload(app: &tauri::AppHandle) -> Option<serde_json::Value> {
+    match keyring_entry() {
+        Ok(entry) => match entry.get_password() {
+            Ok(raw) => serde_json::from_str(&raw).ok(),
+            Err(keyring::Error::NoEntry) => read_fallback_payload(app),
+            Err(e) if is_keyring_unavailable(&e) => read_fallback_payload(app),
+            Err(_) => None,
+        },
+        Err(_) => read_fallback_payload(app),
+    }
+}
+
+async fn request_subscription(app: &tauri::AppHandle, api_base: &str) -> AppResult<LicenseStatus> {
+    let payload = read_session_payload(app)
+        .ok_or_else(|| AppError::new("subscription-required", "Sign in to verify Pro"))?;
+    let mut access_token = payload
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .ok_or_else(|| AppError::new("subscription-required", "Stored session is incomplete"))?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| AppError::new("entitlement", format!("HTTP client: {e}")))?;
+
+    let endpoint = format!("{api_base}/billing/subscription");
+    let mut response = client
+        .get(&endpoint)
+        .bearer_auth(&access_token)
+        .send()
+        .await;
+    if response
+        .as_ref()
+        .is_ok_and(|r| r.status() == reqwest::StatusCode::UNAUTHORIZED)
+    {
+        let refresh = payload
+            .get("refresh_token")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                AppError::new("subscription-required", "Session expired — sign in again")
+            })?;
+        let refreshed = client
+            .post(format!("{api_base}/auth/refresh"))
+            .json(&serde_json::json!({ "refresh_token": refresh }))
+            .send()
+            .await
+            .map_err(|e| AppError::new("entitlement", format!("Refresh failed: {e}")))?;
+        if !refreshed.status().is_success() {
+            return Err(AppError::new(
+                "subscription-required",
+                "Session expired — sign in again",
+            ));
+        }
+        let tokens: RefreshResponse = refreshed
+            .json()
+            .await
+            .map_err(|e| AppError::new("entitlement", format!("Bad refresh response: {e}")))?;
+        access_token = tokens.access_token;
+        let email = payload
+            .get("email")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        store_session(
+            app.clone(),
+            email,
+            Some(access_token.clone()),
+            None,
+            Some(tokens.refresh_token),
+            None,
+        )?;
+        response = client
+            .get(&endpoint)
+            .bearer_auth(&access_token)
+            .send()
+            .await;
+    }
+
+    let response = response
+        .map_err(|e| AppError::new("entitlement", format!("Subscription check failed: {e}")))?;
+    if !response.status().is_success() {
+        return Err(AppError::new(
+            "entitlement",
+            format!("Subscription check returned {}", response.status()),
+        ));
+    }
+    let subscription: SubscriptionResponse = response
+        .json()
+        .await
+        .map_err(|e| AppError::new("entitlement", format!("Bad subscription response: {e}")))?;
+    let valid = subscription.plan_tier == "pro"
+        && matches!(subscription.status.as_str(), "active" | "trialing");
+    Ok(LicenseStatus {
+        valid,
+        status: subscription.status,
+        plan_tier: subscription.plan_tier,
+        current_period_end: subscription.current_period_end,
+        reason: (!valid).then(|| "An active Pro subscription is required".to_string()),
+    })
+}
+
+async fn refresh_entitlement(
+    app: &tauri::AppHandle,
+    app_state: &AppState,
+    api_base: String,
+    force: bool,
+) -> LicenseStatus {
+    let _refresh_guard = app_state.entitlement_refresh.lock().await;
+    if !force {
+        if let Ok(cache) = app_state.entitlement.lock() {
+            let fresh = cache.api_base == api_base
+                && cache
+                    .checked_at
+                    .is_some_and(|checked| checked.elapsed() <= ENTITLEMENT_CACHE_TTL);
+            if fresh {
+                return cache.status.clone();
+            }
+        }
+    }
+    let status = request_subscription(app, &api_base)
+        .await
+        .unwrap_or_else(|e| LicenseStatus {
+            valid: false,
+            status: "unavailable".to_string(),
+            plan_tier: "free".to_string(),
+            current_period_end: None,
+            reason: Some(e.message),
+        });
+    if let Ok(mut cache) = app_state.entitlement.lock() {
+        cache.status = status.clone();
+        cache.checked_at = Some(std::time::Instant::now());
+        cache.api_base = api_base;
+    }
+    status
+}
+
+#[allow(non_snake_case)]
 #[tauri::command]
-fn license_status() -> AppResult<LicenseStatus> {
-    // NEEDS PRODUCT INPUT: no licensing/entitlement backend is defined for
-    // this release (no subscription endpoint, no local license file format).
-    // Returning a silent fake `{valid:false}` would look like a real check;
-    // fail loudly instead so callers and QA cannot mistake it for enforcement.
-    // When the product defines the source (e.g. api.trqsh.uz
-    // subscription check or local license JWT + offline grace), implement it
-    // here and remove this error. See CHANGELOG (P4.14).
-    Err(AppError::not_implemented(
-        "licensing is not configured for this release — no entitlement source defined",
-    ))
+async fn license_status(
+    app: tauri::AppHandle,
+    app_state: tauri::State<'_, AppState>,
+    apiUrl: Option<String>,
+    api_url: Option<String>,
+    force: Option<bool>,
+) -> AppResult<LicenseStatus> {
+    let api_base = validate_api_base(apiUrl.or(api_url))?;
+    Ok(refresh_entitlement(&app, &app_state, api_base, force.unwrap_or(false)).await)
+}
+
+/// Native enforcement boundary for every transcription engine. The renderer
+/// cannot bypass this by invoking a command directly. Network failure and
+/// unknown state both fail closed; a verified result is cached for at most 60s.
+pub(crate) async fn require_pro_entitlement(
+    app: &tauri::AppHandle,
+    app_state: &AppState,
+) -> AppResult<()> {
+    let cached = app_state
+        .entitlement
+        .lock()
+        .map_err(|_| AppError::new("entitlement", "Entitlement lock unavailable"))?
+        .clone();
+    let fresh = cached
+        .checked_at
+        .is_some_and(|checked| checked.elapsed() <= ENTITLEMENT_CACHE_TTL);
+    let status = if fresh {
+        cached.status
+    } else {
+        let api_base = if cached.api_base.is_empty() {
+            default_api_base().to_string()
+        } else {
+            cached.api_base
+        };
+        refresh_entitlement(app, app_state, api_base, false).await
+    };
+    if status.valid {
+        Ok(())
+    } else {
+        Err(AppError::new(
+            "subscription-required",
+            status
+                .reason
+                .unwrap_or_else(|| "An active Pro subscription is required".to_string()),
+        ))
+    }
 }
 
 // ---- Tray ---------------------------------------------------------------
@@ -374,6 +581,11 @@ fn store_session(
         }
     }
     logging::log_event(&app, "auth", "store-session", "session stored");
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut entitlement) = state.entitlement.lock() {
+            *entitlement = state::EntitlementCache::default();
+        }
+    }
     let _ = app.emit(
         "session-changed",
         serde_json::json!({ "loggedIn": true, "email": email }),
@@ -409,6 +621,11 @@ fn clear_session(app: tauri::AppHandle) -> AppResult<()> {
         }
     }
     logging::log_event(&app, "auth", "clear-session", "session cleared");
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut entitlement) = state.entitlement.lock() {
+            *entitlement = state::EntitlementCache::default();
+        }
+    }
     let _ = app.emit("session-changed", serde_json::json!({ "loggedIn": false }));
     Ok(())
 }
@@ -903,7 +1120,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod oauth_deep_link_tests {
-    use super::is_deep_link;
+    use super::{is_deep_link, validate_api_base};
 
     #[test]
     fn accepts_only_exact_oauth_callback_routes() {
@@ -923,5 +1140,15 @@ mod oauth_deep_link_tests {
             "com.algorithvoice.app://oauth-callback#code=abc"
         ));
         assert!(!is_deep_link("https://api.trqsh.uz/oauth-callback"));
+    }
+
+    #[test]
+    fn entitlement_api_rejects_untrusted_origins() {
+        assert_eq!(
+            validate_api_base(Some("https://api.trqsh.uz/".to_string())).unwrap(),
+            "https://api.trqsh.uz"
+        );
+        assert!(validate_api_base(Some("https://evil.example".to_string())).is_err());
+        assert!(validate_api_base(Some("file:///tmp/fake-api".to_string())).is_err());
     }
 }

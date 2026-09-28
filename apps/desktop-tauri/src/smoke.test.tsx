@@ -41,6 +41,15 @@ vi.mock("@tauri-apps/api/core", () => ({
       throw new Error("no session");
     }
     if (cmd === "store_session") return undefined;
+    if (cmd === "license_status") {
+      return {
+        valid: true,
+        status: "active",
+        planTier: "pro",
+        currentPeriodEnd: "2026-10-28T00:00:00.000Z",
+        reason: null,
+      };
+    }
     throw new Error(`tauri unavailable in test: ${cmd}`);
   },
 }));

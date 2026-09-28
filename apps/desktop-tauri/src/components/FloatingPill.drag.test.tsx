@@ -52,6 +52,13 @@ describe("FloatingPill drag handle", () => {
             language: "auto",
             activeModelId: null,
           }}
+          entitlement={{
+            valid: true,
+            status: "active",
+            planTier: "pro",
+            currentPeriodEnd: "2026-10-28T00:00:00.000Z",
+            reason: null,
+          }}
         />,
       );
     });

@@ -34,8 +34,20 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
   getCurrentWebviewWindow: () => ({ label: "settings" }),
 }));
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: async () => {
-    throw new Error("tauri unavailable in test");
+  invoke: async (cmd: string) => {
+    if (cmd === "session_status") {
+      return { loggedIn: true, email: "pro@example.com" };
+    }
+    if (cmd === "license_status") {
+      return {
+        valid: true,
+        status: "active",
+        planTier: "pro",
+        currentPeriodEnd: "2026-10-28T00:00:00.000Z",
+        reason: null,
+      };
+    }
+    throw new Error(`unexpected command: ${cmd}`);
   },
 }));
 vi.mock("@tauri-apps/api/event", () => ({
@@ -55,6 +67,7 @@ vi.mock("@tauri-apps/plugin-autostart", () => ({
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: async () => {},
 }));
+vi.mock("./lib/session/env.js", () => ({ isTauri: () => true }));
 
 import App from "./App.js";
 
@@ -65,7 +78,7 @@ afterEach(() => {
 });
 
 describe("settings window boot", () => {
-  it("reaches the real settings UI after the splash gate", async () => {
+  it("does not expose settings when a desktop session cannot be verified", async () => {
     vi.useFakeTimers();
     const div = document.createElement("div");
     document.body.appendChild(div);
@@ -83,7 +96,8 @@ describe("settings window boot", () => {
     });
 
     const text = div.textContent ?? "";
-    expect(text).toContain("Settings");
+    expect(text).toContain("Welcome back");
+    expect(text).not.toContain("Dictation");
     expect(text).not.toContain("Loading");
 
     await act(async () => {
