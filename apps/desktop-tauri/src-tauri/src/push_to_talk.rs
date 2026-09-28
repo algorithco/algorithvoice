@@ -408,8 +408,10 @@ pub async fn transcribe_audio(
                         "no local model selected; download and select one in Settings",
                     )
                 })?;
-            let manifest = crate::local_asr::manifest::default_manifest()?;
-            crate::local_asr::manifest::validate_manifest(&manifest)?;
+            // Use the same fail-closed signature validation as every model
+            // management command. Loading a tampered ONNX manifest is a code
+            // execution boundary and must not have a weaker lazy-load path.
+            let manifest = crate::local_asr::commands::load_manifest()?;
             let model = crate::local_asr::commands::find_model(&manifest, mid)?;
             let data = app.path().app_data_dir().map_err(|e| {
                 AppError::model_not_loaded(format!("cannot resolve app data dir: {e}"))

@@ -170,6 +170,14 @@ impl SpeedTracker {
 /// Shared with the verify path so install-time and on-demand checks agree.
 pub(crate) async fn verify_file(path: &Path, expected_sha256: &str) -> AppResult<()> {
     use tokio::io::AsyncReadExt as _;
+    let metadata = tokio::fs::symlink_metadata(path).await.map_err(|e| {
+        AppError::model_download_failed(format!("cannot inspect file for verify: {e}"))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(AppError::model_checksum_mismatch(
+            "refusing to verify a symlink or non-regular model file",
+        ));
+    }
     let mut file = tokio::fs::File::open(path).await.map_err(|e| {
         AppError::model_download_failed(format!("cannot open file for verify: {e}"))
     })?;
@@ -516,6 +524,16 @@ where
         let _ = tokio::fs::remove_file(part).await;
         let _ = tokio::fs::remove_file(meta_path).await;
     }
+    if req
+        .expected_size
+        .is_some_and(|expected| expected != 0 && resume_from > expected)
+    {
+        // A corrupt/hostile sidecar must not make us request beyond the
+        // signed payload boundary or preserve oversized disk contents.
+        let _ = tokio::fs::remove_file(part).await;
+        let _ = tokio::fs::remove_file(meta_path).await;
+        resume_from = 0;
+    }
 
     let plan = fetch_once(client, url, resume_from, req.timeout).await?;
     if plan.start_offset == 0 && resume_from > 0 {
@@ -525,10 +543,12 @@ where
     }
     let total = plan.server_total.or(req.expected_size);
     if let (Some(expected), Some(server)) = (req.expected_size, plan.server_total) {
-        if expected != 0 && server != 0 && expected != server && resume_from == 0 {
+        if expected != 0 && server != 0 && expected != server {
             // Remote file changed size between manifest and download and we
-            // are already starting fresh: the manifest is stale for this URL.
-            return Err(AppError::model_download_failed(format!(
+            // must not keep or extend bytes from a different payload.
+            let _ = tokio::fs::remove_file(part).await;
+            let _ = tokio::fs::remove_file(meta_path).await;
+            return Err(AppError::model_checksum_mismatch(format!(
                 "remote file size changed (manifest: {expected} bytes, server: {server} bytes)"
             )));
         }
@@ -591,6 +611,16 @@ where
         let Some(bytes) = chunk else { break };
         if bytes.is_empty() {
             continue;
+        }
+        if req.expected_size.is_some_and(|expected| {
+            expected != 0 && downloaded.saturating_add(bytes.len() as u64) > expected
+        }) {
+            drop(file);
+            let _ = tokio::fs::remove_file(part).await;
+            let _ = tokio::fs::remove_file(meta_path).await;
+            return Err(AppError::model_checksum_mismatch(
+                "download exceeded the signed manifest size",
+            ));
         }
         file.write_all(&bytes)
             .await
@@ -1227,6 +1257,25 @@ mod tests {
             events.iter().all(|e| e.total_bytes.is_none()),
             "no total may be advertised"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn close_delimited_body_cannot_exceed_signed_size() {
+        let dir = test_dir("oversize-no-length");
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let (fx, body) = start_server(payload(64 * 1024)).await;
+        let mut req = request(fx.addr, "/no-length", &dir, body.len());
+        req.expected_size = Some(1024);
+        req.expected_sha256 = sha_hex(&body);
+        req.max_retries = 0;
+        let manager = DownloadManager::new();
+        let (outcome, _) = run_via_manager(&manager, "m", req).await;
+        let err = outcome.expect_err("oversized stream must fail");
+        assert_eq!(err.code, "model-checksum-mismatch");
+        assert!(!dir.join("model.bin").exists());
+        assert!(!dir.join("model.bin.part").exists());
+        assert!(!dir.join("model.bin.part.json").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

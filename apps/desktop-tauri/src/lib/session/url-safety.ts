@@ -14,14 +14,10 @@ export function isAllowedOpenUrl(url: string): boolean {
       return false;
     }
     if (u.protocol !== "https:") return false;
-    const allowed = [
-      "api.trqsh.uz",
-      "app.trqsh.uz",
-      "github.com",
-      "huggingface.co",
-    ];
-    if (allowed.some((h) => host === h || host.endsWith(`.${h}`))) return true;
-    return false;
+    // This helper is used for OAuth/browser handoff, not arbitrary content.
+    // Exact first-party hosts keep a compromised renderer from abusing the
+    // native opener with broad third-party or wildcard subdomain access.
+    return host === "api.trqsh.uz" || host === "app.trqsh.uz";
   } catch {
     return false;
   }
