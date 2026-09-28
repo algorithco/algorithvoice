@@ -3,6 +3,7 @@ import { PixelSwap } from "../../components/PixelSwap";
 import { Reveal } from "../../components/Reveal";
 import { SiteFooter } from "../../components/SiteFooter";
 import { SiteNav } from "../../components/SiteNav";
+import { CheckoutButton } from "./CheckoutButton";
 
 const PLANS = [
   {
@@ -16,10 +17,11 @@ const PLANS = [
       "Community support",
     ],
     featured: false,
+    paid: false,
   },
   {
     name: "Pro",
-    price: "$12/month",
+    price: "$12/mo · $115/yr",
     tagline: "Unlimited cloud. Ten devices. Priority processing.",
     lines: [
       "Unlimited cloud transcription",
@@ -28,6 +30,7 @@ const PLANS = [
       "Usage history sync",
     ],
     featured: true,
+    paid: true,
   },
 ];
 
@@ -78,16 +81,29 @@ function PlanCard({ plan }: { plan: (typeof PLANS)[number] }) {
               </li>
             ))}
           </ul>
-          <Link
-            href="/download"
-            className={
-              plan.featured
-                ? "btn mt-8 bg-canvas text-ink hover:opacity-85"
-                : "btn btn-primary mt-8"
-            }
-          >
-            Download free
-          </Link>
+          {plan.paid ? (
+            <div className="mt-8 grid gap-2">
+              <CheckoutButton
+                interval="monthly"
+                className="btn bg-canvas text-ink hover:opacity-85"
+              >
+                Choose monthly · $12
+              </CheckoutButton>
+              <CheckoutButton
+                interval="yearly"
+                className="btn border border-canvas/30 bg-transparent text-canvas hover:bg-canvas/10"
+              >
+                Choose yearly · $115
+              </CheckoutButton>
+              <p className="font-mono text-xs opacity-60">
+                Save $29 yearly · cancel in Stripe anytime
+              </p>
+            </div>
+          ) : (
+            <Link href="/download" className="btn btn-primary mt-8">
+              Download free
+            </Link>
+          )}
         </div>
       }
     />
@@ -105,7 +121,10 @@ export default function PricingPage() {
             Start free. Upgrade when dictation becomes the way you work.
           </h1>
         </Reveal>
-        <div className="mt-8 grid gap-4 sm:mt-12 sm:gap-6 md:grid-cols-2">
+        <div
+          id="upgrade"
+          className="mt-8 grid scroll-mt-24 gap-4 sm:mt-12 sm:gap-6 md:grid-cols-2"
+        >
           {PLANS.map((p, i) => (
             <Reveal key={p.name} delay={i * 80} className="h-full min-w-0">
               <PlanCard plan={p} />

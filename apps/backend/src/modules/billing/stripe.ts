@@ -128,10 +128,9 @@ export function getConfiguredPrices(): {
   };
 }
 
-/** Null = no allowlist configured (accept any price, dev mode). */
-export function getPriceAllowlist(): Map<string, BillingInterval> | null {
+/** Configured price allowlist. Empty means billing is not configured. */
+export function getPriceAllowlist(): Map<string, BillingInterval> {
   const { monthly, yearly } = getConfiguredPrices();
-  if (!monthly && !yearly) return null;
   const map = new Map<string, BillingInterval>();
   if (monthly) map.set(monthly, "MONTHLY");
   if (yearly) map.set(yearly, "YEARLY");
@@ -140,7 +139,6 @@ export function getPriceAllowlist(): Map<string, BillingInterval> | null {
 
 export function isAllowedPrice(priceId: string): boolean {
   const allow = getPriceAllowlist();
-  if (!allow) return true;
   return allow.has(priceId);
 }
 
@@ -149,7 +147,15 @@ export function billingIntervalForPrice(
 ): BillingInterval | null {
   if (!priceId) return null;
   const allow = getPriceAllowlist();
-  return allow?.get(priceId) ?? null;
+  return allow.get(priceId) ?? null;
+}
+
+/** Resolve a public plan choice to a server-owned Stripe price id. */
+export function configuredPriceForInterval(
+  interval: "monthly" | "yearly",
+): string | null {
+  const prices = getConfiguredPrices();
+  return prices[interval] ?? null;
 }
 
 // --- Return-URL allowlist (open-redirect hardening) ---
@@ -164,18 +170,9 @@ export function isAllowedReturnUrl(raw: string): boolean {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
   try {
     const env = getAppEnv();
-    const allowed = new Set<string>();
-    for (const base of [env.APP_URL, env.API_URL]) {
-      if (!base) continue;
-      try {
-        allowed.add(new URL(base).origin);
-      } catch {
-        // ignore malformed configured base
-      }
-    }
-    // Always allow the configured app origin; in dev allow localhost.
-    if (allowed.size === 0) return false;
-    return allowed.has(parsed.origin);
+    // Stripe should only send browsers back to the web app. Allowing API_URL
+    // expands the redirect surface without serving a user-facing flow.
+    return parsed.origin === new URL(env.APP_URL).origin;
   } catch {
     return false;
   }

@@ -13,8 +13,8 @@ import { getAppEnv } from "../../config/env.js";
 import { QUEUES } from "../../queues/connection.js";
 import {
   billingIntervalForPrice,
+  configuredPriceForInterval,
   getStripe,
-  isAllowedPrice,
   isAllowedReturnUrl,
   resolvePlanTier,
 } from "./stripe.js";
@@ -74,6 +74,7 @@ export async function billingRoutes(app: FastifyInstance) {
         response: {
           200: checkoutResponseSchema,
           400: errorSchema,
+          409: errorSchema,
           404: errorSchema,
           502: errorSchema,
           503: errorSchema,
@@ -86,14 +87,16 @@ export async function billingRoutes(app: FastifyInstance) {
       if (!stripe)
         return reply.code(503).send({ error: "billing_unavailable" });
       const { sub } = req.user as { sub: string };
-      const { priceId, successUrl, cancelUrl } = req.body as {
-        priceId: string;
+      const { interval: intervalSlug, successUrl, cancelUrl } = req.body as {
+        interval: "monthly" | "yearly";
         successUrl: string;
         cancelUrl: string;
       };
 
-      if (!isAllowedPrice(priceId)) {
-        return reply.code(400).send({ error: "unknown_price" });
+      const priceId = configuredPriceForInterval(intervalSlug);
+      if (!priceId) {
+        req.log.error({ interval: intervalSlug }, "Stripe price is not configured");
+        return reply.code(503).send({ error: "billing_unavailable" });
       }
       if (!isAllowedReturnUrl(successUrl) || !isAllowedReturnUrl(cancelUrl)) {
         return reply.code(400).send({ error: "bad_return_url" });
@@ -103,6 +106,19 @@ export async function billingRoutes(app: FastifyInstance) {
         where: { id: sub },
       });
       if (!user) return reply.code(404).send({ error: "user_not_found" });
+
+      // Never create parallel subscriptions. Existing active/past-due users
+      // must change or repair their plan through the Stripe portal.
+      const existingSubscription = await app.prisma.subscription.findFirst({
+        where: {
+          userId: sub,
+          status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
+        },
+        select: { stripeSubscriptionId: true, status: true },
+      });
+      if (existingSubscription) {
+        return reply.code(409).send({ error: "subscription_exists" });
+      }
 
       let customerId = user.stripeCustomerId;
       if (!customerId) {
@@ -138,6 +154,7 @@ export async function billingRoutes(app: FastifyInstance) {
         const session = await stripe.checkout.sessions.create(
           {
             customer: customerId,
+            client_reference_id: sub,
             mode: "subscription",
             line_items: [{ price: priceId, quantity: 1 }],
             success_url: successUrl,
@@ -151,8 +168,11 @@ export async function billingRoutes(app: FastifyInstance) {
             },
             allow_promotion_codes: true,
           },
-          // Per-request key: same-day replays must not return an expired URL.
-          { idempotencyKey: `checkout:${sub}:${priceId}:${randomUUID()}` },
+          // Collapse double-clicks/retries into one session while allowing a
+          // fresh URL after the 30-minute checkout window.
+          {
+            idempotencyKey: `checkout:${sub}:${priceId}:${Math.floor(Date.now() / 1_800_000)}`,
+          },
         );
         if (!session.url) {
           req.log.error({ userId: sub }, "stripe checkout session has no url");
@@ -338,14 +358,19 @@ export async function billingRoutes(app: FastifyInstance) {
       if (!sub2) {
         return {
           status: "free" as const,
-          planTier: user.planTier,
+          // Subscription rows are authoritative. The denormalized user tier can
+          // lag a webhook and must never resurrect a stale Pro entitlement.
+          planTier: "free" as const,
           priceId: null,
           billingInterval: null,
           currentPeriodEnd: null,
           cancelAtPeriodEnd: false,
         };
       }
-      const strictTier = resolvePlanTier(sub2.status);
+      const strictTier =
+        sub2.currentPeriodEnd > new Date()
+          ? resolvePlanTier(sub2.status)
+          : ("free" as const);
       return {
         status: STATUS_MAP[sub2.status] ?? "incomplete",
         planTier: strictTier,

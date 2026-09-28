@@ -17,6 +17,48 @@ const HANDLED = new Set([
   "invoice.payment_failed",
 ]);
 
+type StripeEventPayload = {
+  data?: {
+    object?: {
+      id?: unknown;
+      subscription?: unknown;
+      parent?: {
+        subscription_details?: { subscription?: unknown };
+      };
+    };
+  };
+};
+
+function stripeId(value: unknown, prefix: string): string | null {
+  if (typeof value === "string" && value.startsWith(prefix)) return value;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    typeof value.id === "string" &&
+    value.id.startsWith(prefix)
+  ) {
+    return value.id;
+  }
+  return null;
+}
+
+/** Extract a subscription id without ever confusing an invoice id for one. */
+export function extractSubscriptionId(
+  eventType: string,
+  payload: StripeEventPayload,
+): string | null {
+  const object = payload.data?.object;
+  if (!object) return null;
+  if (eventType.startsWith("customer.subscription.")) {
+    return stripeId(object.id, "sub_");
+  }
+  return (
+    stripeId(object.subscription, "sub_") ??
+    stripeId(object.parent?.subscription_details?.subscription, "sub_")
+  );
+}
+
 async function syncSubscriptionFromStripe(
   prisma: PrismaClient,
   stripe: Stripe,
@@ -108,21 +150,13 @@ export async function processStripeEvent(
       stored.type === "customer.subscription.resumed" ||
       stored.type === "invoice.payment_succeeded"
     ) {
-      const payload = stored.payload as {
-        data?: { object?: { subscription?: unknown; id?: string } };
-      };
-      const obj = payload.data?.object ?? {};
-      const subscriptionId =
-        "subscription" in obj && typeof obj.subscription === "string"
-          ? obj.subscription
-          : "id" in obj && typeof obj.id === "string"
-            ? obj.id
-            : null;
+      const payload = stored.payload as StripeEventPayload;
+      const subscriptionId = extractSubscriptionId(stored.type, payload);
       if (!subscriptionId) throw new Error("event has no subscription id");
       await syncSubscriptionFromStripe(prisma, stripe, subscriptionId, log);
     } else if (stored.type === "customer.subscription.deleted") {
-      const payload = stored.payload as { data?: { object?: { id?: string } } };
-      const subscriptionId = payload.data?.object?.id;
+      const payload = stored.payload as StripeEventPayload;
+      const subscriptionId = extractSubscriptionId(stored.type, payload);
       if (!subscriptionId) throw new Error("event has no subscription id");
       const existing = await prisma.subscription.findUnique({
         where: { stripeSubscriptionId: subscriptionId },
@@ -148,11 +182,9 @@ export async function processStripeEvent(
         ]);
       }
     } else if (stored.type === "invoice.payment_failed") {
-      const payload = stored.payload as {
-        data?: { object?: { subscription?: unknown; customer?: unknown } };
-      };
-      const subscriptionId = payload.data?.object?.subscription;
-      if (typeof subscriptionId === "string") {
+      const payload = stored.payload as StripeEventPayload;
+      const subscriptionId = extractSubscriptionId(stored.type, payload);
+      if (subscriptionId) {
         const existing = await prisma.subscription.findUnique({
           where: { stripeSubscriptionId: subscriptionId },
         });

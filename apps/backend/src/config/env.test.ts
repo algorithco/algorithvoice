@@ -36,6 +36,15 @@ describe("loadEnv", () => {
         ...BASE,
         STRIPE_SECRET_KEY: "sk_x",
         STRIPE_WEBHOOK_SECRET: "wh_x",
+        STRIPE_PRICE_PRO_MONTHLY: "price_month",
+        STRIPE_PRICE_PRO_YEARLY: "price_year",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      loadEnv({
+        ...BASE,
+        STRIPE_SECRET_KEY: "sk_x",
+        STRIPE_WEBHOOK_SECRET: "wh_x",
       }),
     ).not.toThrow();
     expect(() => loadEnv({ ...BASE, R2_ACCOUNT_ID: "abc" })).toThrow();
