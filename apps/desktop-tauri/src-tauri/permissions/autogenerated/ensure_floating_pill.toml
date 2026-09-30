@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ensure-floating-pill"
+description = "Enables the ensure_floating_pill command without any pre-configured scope."
+commands.allow = ["ensure_floating_pill"]
+
+[[permission]]
+identifier = "deny-ensure-floating-pill"
+description = "Denies the ensure_floating_pill command without any pre-configured scope."
+commands.deny = ["ensure_floating_pill"]

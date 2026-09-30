@@ -135,14 +135,15 @@ export function OAuthButtons({ mode }: { mode: "login" | "register" }) {
             ? "GitHub sign-in needs a verified email on your GitHub account."
             : "GitHub sign-in failed — please try again or use email.",
         );
+      } else if (error === "account_exists_sign_in_first") {
+        setNotice(
+          "That email already has an account. Sign in with email first, then link GitHub from your account.",
+        );
       }
-      // GitHub success: backend redirected back with ?access_token=&email=.
-      // Complete the session through the BFF (sets the httpOnly cookie),
-      // then land on returnTo (e.g. /oauth2/consent?request=… for desktop
-      // auth) or the dashboard. The token never stays in history:
-      // replace the URL before navigating.
-      const token = q.get("access_token");
-      if (token && !error) {
+      // GitHub success carries only a short-lived, single-use handoff code.
+      // The BFF exchanges it and stores both tokens in HttpOnly cookies.
+      const code = q.get("code");
+      if (code && !error) {
         const rawReturnTo = q.get("returnTo");
         const safeReturnTo =
           rawReturnTo?.startsWith("/") && !rawReturnTo.startsWith("//")
@@ -152,17 +153,14 @@ export function OAuthButtons({ mode }: { mode: "login" | "register" }) {
         void fetch("/api/auth/oauth/session", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ accessToken: token }),
+          body: JSON.stringify({ code }),
         })
           .then((res) => {
             if (!res.ok) throw new Error("session");
-            // Scrub the token from this history entry before leaving, then
-            // continue to the original destination (desktop consent or
-            // dashboard). The token never stays in history.
+            // Scrub the one-time code from this history entry before leaving.
             try {
               const clean = new URL(window.location.href);
-              clean.searchParams.delete("access_token");
-              clean.searchParams.delete("email");
+              clean.searchParams.delete("code");
               clean.searchParams.delete("provider");
               window.history.replaceState(null, "", clean.toString());
             } catch {

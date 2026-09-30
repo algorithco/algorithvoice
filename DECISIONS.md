@@ -4,8 +4,17 @@ Best-choice answers to the 7 open questions from the full-stack plan:
 
 1. **Next.js: 16.3 LTS + React 19.2 + Tailwind v4** (NOT 14 — EOL Oct 2026). `next-themes` dark-default, BFF proxy, Vercel root `apps/web`.
 2. **Infra: Fly.io primary for API+WS+worker** (single region `fra` EU, min-1-warm, Upstash Fixed 1GB or self-host Redis). **Vercel for web.** `docker-compose` local mirrors prod. (v1.0 mentioned a `railway.toml` fallback — no such file exists in the repo; removed.)
-3. **Local models: 6-model `sherpa-onnx` int8 catalog, `parakeet-tdt-0.6b-v3` (~670MB, 25 EU langs) default** (see README “Local mode” table for sizes/licenses). Supersedes the v1.0 `base` (142MB) default. Cloud primary `voxtral-mini-transcribe-realtime-2602` ($0.006/min), fallback OpenRouter `nvidia/parakeet-tdt-0.6b-v3` ($0.0015/min).
-4. **Free tier: 60 min/mo cloud, unlimited local, 2 devices, 1 concurrent stream.** BYOK allowed on free (bypasses metering, still WS rate-limited). Paid: Pro monthly ($12) + Pro yearly ($115, ~20% off) — unlimited cloud + 10 devices + priority. No trials. past_due is strictly NOT entitled (Free quota until invoice.payment_succeeded); missed webhooks healed by hourly billing-reconcile.
-5. **License: 3 seats/user, 7d offline grace, stable-only updater channel.** Desktop split: Tauri + Rust is Windows & Linux only (`apps/desktop-tauri`, targets `nsis/deb/appimage`, no `macOSPrivateApi`/`.icns`); macOS is a separate native Swift app (`apps/desktop-swift`).
-6. **Security: env-held 32B `ENCRYPTION_KEK` for beta → Cloud KMS at Phase 5.** Min OS: Windows 10 1809+ (WebView2), Ubuntu 22.04+. macOS 13+ applies to the Swift app only.
-7. **Releases: `github.com/algorithco/algorithvoice`**, assets `algorithvoice_{version}_{target}_{arch}.{msi,AppImage,deb}` + `latest.json` + `.sig` (Tauri Windows/Linux; macOS Swift ships separately). Custody: `TAURI_SIGNING_*` in GitHub Secrets, never in repo.
+3. **Local models: 6-model `sherpa-onnx` int8 catalog, `parakeet-tdt-0.6b-v3` default.** Desktop cloud currently means BYO Groq; the backend exposes a separate OpenRouter STT path. Whether the desktop should migrate to the metered backend remains an open product decision.
+4. **Free tier: 60 min/mo on the metered backend path, unlimited local, 2 devices.** Pro has 10 devices. `past_due` is not entitled; missed webhooks are reconciled hourly. Direct BYO Groq traffic is not backend-metered.
+5. **Licensing decision open.** Device limits are enforced online (2 free / 10 pro), but signed offline license JWTs are not implemented. Tauri targets NSIS/deb/AppImage; macOS is a separate native Swift app.
+6. **Security:** the backend BYOK vault is not implemented, so `ENCRYPTION_KEK` is reserved and optional rather than presented as active encryption. Min OS: Windows 10 1809+ (WebView2), Ubuntu 22.04+. macOS 13+ applies to the Swift app only.
+7. **Releases: `github.com/algorithco/algorithvoice`**, Windows/Linux bundles use Tauri's configured NSIS (`.exe`), AppImage, and Debian (`.deb`) targets, plus updater metadata/signatures where produced. macOS Swift ships separately. Custody: `TAURI_SIGNING_*` in GitHub Secrets, never in repo.
+
+## Open remediation decisions
+
+These choices are intentionally not guessed by the remediation pass:
+
+8. **Email verification (H2):** recommended Resend, allow signup immediately, and require verification before OAuth account linking or billing. Postmark/SES are compatible alternatives; requiring verification before all access is stricter but adds signup friction.
+9. **Offline licensing (H9):** recommended RS256 license JWTs signed with a secret-managed private key, with the public key embedded in desktop builds and a 7-day offline grace period. Until selected, online seat enforcement remains authoritative and the license endpoint is an explicit compatibility stub.
+10. **Windows Authenticode (M-DESKTOP):** recommended Azure Trusted Signing. DigiCert/SSL.com are alternatives; remaining unsigned is supported only as a documented SmartScreen warning during the transition.
+11. **Desktop cloud STT (C4):** recommended backend-metered STT as the default product path while retaining BYO Groq as an explicit advanced mode. The current release keeps BYO Groq behavior unchanged until this product choice is approved.

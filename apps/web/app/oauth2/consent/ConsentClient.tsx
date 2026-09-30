@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import SlideCommit from "../../../components/SlideCommit";
+import { safeDesktopHandoffUrl } from "./handoff";
 
 export function ConsentClient({
   requestId,
@@ -23,28 +24,22 @@ export function ConsentClient({
   // Deep-link handoff must fire exactly once (StrictMode double-effects).
   const firedRef = useRef(false);
 
-  // Handoff + auto-close whenever we reach done. The desktop deep-link
+  // Attempt the handoff whenever we reach done. The desktop deep-link
   // (algorithvoice://auth-callback?code=&state=) fires as a top-level
   // navigation — hidden iframes to custom schemes are blocked by Chrome, so
-  // the old iframe approach silently dropped the handoff. Afterwards we try
-  // to close the tab. Never navigate to home: the user came from the desktop
-  // app and belongs back there. window.close() only succeeds on
-  // script-opened tabs; otherwise the success copy tells them to close it.
+  // the old iframe approach silently dropped the handoff. Do not auto-close:
+  // closing can cancel Chrome's external-protocol dispatch before Windows
+  // launches/focuses the desktop app. The success view keeps a real link as
+  // a user-gesture fallback when the browser blocks automatic navigation.
   useEffect(() => {
     if (!done) return;
     doneRef.current = done;
     if (redirectTo && redirectTo !== "/" && !firedRef.current) {
       firedRef.current = true;
       try {
-        window.location.href = redirectTo;
+        window.location.assign(redirectTo);
       } catch {}
     }
-    const t = window.setTimeout(() => {
-      try {
-        window.close();
-      } catch {}
-    }, 600);
-    return () => window.clearTimeout(t);
   }, [done, redirectTo]);
 
   // Closing the tab without deciding = deny. The website records the
@@ -113,7 +108,9 @@ export function ConsentClient({
       // Hand the deep-link to the done-effect: it fires as a top-level
       // navigation (reliable custom-scheme handoff) instead of an iframe.
       if (body.redirect_to && body.redirect_to !== "/") {
-        setRedirectTo(body.redirect_to);
+        const handoff = safeDesktopHandoffUrl(body.redirect_to);
+        if (!handoff) throw new Error("Invalid desktop callback");
+        setRedirectTo(handoff);
       }
       setDone("deny");
     } catch (e) {
@@ -140,7 +137,9 @@ export function ConsentClient({
       if (!res.ok) throw new Error(body.error ?? "Request failed");
       // Same top-level handoff as deny (see above).
       if (body.redirect_to && body.redirect_to !== "/") {
-        setRedirectTo(body.redirect_to);
+        const handoff = safeDesktopHandoffUrl(body.redirect_to);
+        if (!handoff) throw new Error("Invalid desktop callback");
+        setRedirectTo(handoff);
       }
       setDone("allow");
       return;
@@ -179,9 +178,17 @@ export function ConsentClient({
             {done === "allow" ? "Access granted" : "Access denied"}
           </p>
           <p className="mt-1 font-mono text-xs leading-4 text-faint">
-            Return to the desktop app — this tab closes automatically.
+            Return to the desktop app. You can close this tab after it opens.
           </p>
         </div>
+        {redirectTo ? (
+          <a
+            href={redirectTo}
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-ink px-4 font-mono text-xs font-semibold text-canvas transition-opacity hover:opacity-90"
+          >
+            Open Algorith Voice
+          </a>
+        ) : null}
         <div className="h-1 w-full overflow-hidden rounded-full bg-raised">
           <div className="h-full w-full animate-[shimmer_1.2s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-ink/20 to-transparent" />
         </div>

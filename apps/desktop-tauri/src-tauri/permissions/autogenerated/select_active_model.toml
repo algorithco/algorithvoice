@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-select-active-model"
+description = "Enables the select_active_model command without any pre-configured scope."
+commands.allow = ["select_active_model"]
+
+[[permission]]
+identifier = "deny-select-active-model"
+description = "Denies the select_active_model command without any pre-configured scope."
+commands.deny = ["select_active_model"]

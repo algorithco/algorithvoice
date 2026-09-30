@@ -121,22 +121,18 @@ export function smoothWaveformBarHeights(
 /**
  * Floating push-to-talk pill (rendered only in the `floating-pill` window).
  *
- * Two visual states:
- * - idle (160x40): [drag handle | hold-to-talk target]. Keeping these
- *   separate prevents a move gesture from accidentally starting a take.
+ * Three visual states:
+ * - idle (160x40): [logo | status]. The entire surface moves the window.
  * - recording (224x40): [logo | live waveform | X cancel | stop & send].
- *   Only the logo handle stays draggable; waveform + buttons opt out.
+ * - processing (160x40): [logo | spinner | status].
  *
- * Dragging calls Tauri's `startDragging()` directly from the logo handle.
- * The outer window container is never draggable, so transparent corners
- * cannot capture a move gesture and interactive controls remain reliable.
+ * Recording starts only from the configured global hotkey. Pointer input is
+ * reserved for moving the pill and for the explicit recording controls, so a
+ * drag can never accidentally open the microphone.
  *
- * - Press-and-hold → recording, release → processing → auto-paste.
- * - Presses < 300 ms are discarded as accidental (Superwhisper-style).
- * - Pointer capture keeps the press alive when the cursor slips off the
- *   pill; release anywhere still sends.
- * - Global hotkey (`ptt-pressed` / `ptt-released` from Rust, already
- *   deduped against OS key-repeat) drives the same state machine.
+ * - Hold the hotkey → recording, release → processing → auto-paste.
+ * - Holds < 300 ms are discarded as accidental (Superwhisper-style).
+ * - Rust dedupes global-hotkey events against OS key-repeat.
  */
 export function FloatingPill({
   prefs,
@@ -604,7 +600,11 @@ export function FloatingPill({
     // touch-emulation, hotkey repeat or double binding must be rejected
     // here, before any async work starts.
     if (stateRef.current !== "idle" || startingRef.current) return;
-    if (!entitlementRef.current?.valid) {
+    if (entitlementRef.current === null) {
+      showNotice("Checking Pro access…");
+      return;
+    }
+    if (!entitlementRef.current.valid) {
       showNotice("Pro required — subscribe in the desktop app.");
       return;
     }
@@ -873,11 +873,28 @@ export function FloatingPill({
 
   const pillWidth =
     state === "recording" ? PILL_WIDTH_RECORDING : PILL_WIDTH_IDLE;
-  const proRequired = entitlement?.valid !== true;
-  const idleLabel = notice ?? (proRequired ? "Pro required" : "Algorith Voice");
+  const checkingAccess = entitlement === null;
+  const accessUnavailable = entitlement?.status === "unavailable";
+  const proRequired = entitlement !== null && !entitlement.valid;
+  const accessIssue = proRequired;
+  const idleLabel =
+    notice ??
+    (checkingAccess
+      ? "Checking Pro…"
+      : accessUnavailable
+        ? "Verify Pro"
+        : proRequired
+          ? "Pro required"
+          : "Algorith Voice");
   const idleTitle =
     notice ??
-    (proRequired ? "Pro subscription required" : "Hold to talk — drag to move");
+    (checkingAccess
+      ? "Checking Pro access — drag to move"
+      : accessUnavailable
+        ? "Subscription could not be verified — open the desktop app"
+        : proRequired
+          ? "Pro subscription required — open the desktop app"
+          : `Hold ${prefs.hotkey} to talk — drag anywhere to move`);
   const recTitle = `Recording ${formatElapsed(elapsedMs)} — release to transcribe`;
   const label =
     state === "recording"
@@ -899,17 +916,24 @@ export function FloatingPill({
             ? "Transcribing."
             : (notice ?? "Idle.")}
       </span>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: this frameless Tauri window surface is its native drag handle. */}
       <div
         data-testid="floating-pill"
         data-state={state}
+        data-access={
+          checkingAccess ? "checking" : proRequired ? "required" : "ready"
+        }
+        title={state === "idle" ? idleTitle : "Drag to move"}
+        onPointerDown={startWindowDrag}
+        onContextMenu={(event) => event.preventDefault()}
         style={{ width: pillWidth, height: PILL_HEIGHT }}
         className={[
-          "flex items-center overflow-hidden rounded-full border shadow-lg transition-[width,background-color,border-color] duration-200 ease-out select-none",
+          "flex cursor-grab items-center overflow-hidden rounded-full border shadow-lg transition-[width,background-color,border-color] duration-200 ease-out select-none active:cursor-grabbing",
           state === "recording"
             ? "border-red-300 bg-red-500 text-white"
             : state === "processing"
               ? "border-gray-300 bg-gray-400 text-white dark:border-gray-600"
-              : notice
+              : notice || accessIssue
                 ? "border-amber-300 bg-black text-white dark:bg-white dark:text-black"
                 : "border-gray-200 bg-black text-white dark:border-white/15 dark:bg-white dark:text-black",
         ].join(" ")}
@@ -920,11 +944,8 @@ export function FloatingPill({
             className="flex h-full w-full items-center gap-1.5 px-2"
           >
             <div
-              data-testid="pill-logo-drag"
-              title="Drag to move"
               aria-hidden="true"
-              onPointerDown={startWindowDrag}
-              className="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing"
+              className="flex h-8 w-8 shrink-0 items-center justify-center"
             >
               <Logo className="h-4 w-auto" />
             </div>
@@ -982,11 +1003,8 @@ export function FloatingPill({
             aria-label="Transcribing…"
           >
             <div
-              data-testid="pill-logo-drag"
-              title="Drag to move"
               aria-hidden="true"
-              onPointerDown={startWindowDrag}
-              className="flex h-8 w-8 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing"
+              className="flex h-8 w-8 shrink-0 items-center justify-center"
             >
               <Logo className="h-4 w-auto" />
             </div>
@@ -996,61 +1014,23 @@ export function FloatingPill({
         ) : (
           <div
             data-testid="pill-idle"
-            className="flex h-full w-full items-center px-1.5"
+            className="flex h-full w-full items-center gap-2 px-3"
           >
-            <button
-              type="button"
-              aria-label="Move floating pill"
-              title="Drag to move"
-              data-testid="pill-drag-handle"
-              onPointerDown={startWindowDrag}
-              onContextMenu={(event) => event.preventDefault()}
-              className="grid h-8 w-8 shrink-0 cursor-grab place-items-center rounded-full transition-colors hover:bg-white/15 active:cursor-grabbing dark:hover:bg-black/10"
+            <div
+              aria-hidden="true"
+              className="grid size-5 shrink-0 place-items-center"
             >
               <Logo className="h-4 w-auto" />
-            </button>
-            <button
-              type="button"
-              aria-label={idleTitle}
-              aria-pressed={false}
-              title={idleTitle}
-              data-testid="pill-talk"
-              onPointerDown={(event) => {
-                if (!event.isPrimary) return;
-                if (event.pointerType === "mouse" && event.button !== 0) return;
-                event.preventDefault();
-                try {
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                } catch {
-                  // Capture unsupported — pointerup outside may be missed
-                  // (MAX_RECORD_MS still bounds the take).
-                }
-                if (notice) setNotice(null);
-                void startPress();
-              }}
-              onPointerUp={stopPress}
-              onPointerCancel={stopPress}
-              onKeyDown={(event) => {
-                // Keyboard hold-to-talk: Space/Enter starts, keyup sends.
-                if (event.repeat) return;
-                if (event.key === " " || event.key === "Enter") {
-                  event.preventDefault();
-                  void startPress();
-                }
-              }}
-              onKeyUp={(event) => {
-                if (event.key === " " || event.key === "Enter") {
-                  event.preventDefault();
-                  stopPress();
-                }
-              }}
-              onContextMenu={(event) => event.preventDefault()}
-              className="flex h-full min-w-0 flex-1 cursor-pointer items-center px-1.5 text-left focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
-            >
-              <span className="truncate text-xs font-semibold tracking-wide">
-                {idleLabel}
-              </span>
-            </button>
+            </div>
+            <span className="min-w-0 flex-1 truncate text-xs font-semibold tracking-wide">
+              {idleLabel}
+            </span>
+            {accessIssue && !notice ? (
+              <span
+                aria-hidden="true"
+                className="size-1.5 shrink-0 rounded-full bg-amber-300"
+              />
+            ) : null}
           </div>
         )}
       </div>

@@ -10,6 +10,7 @@ import {
 } from "@algorith-voice/shared-types";
 import type { FastifyInstance } from "fastify";
 import { getAppEnv } from "../../config/env.js";
+import { getUserId } from "../../plugins/jwt.js";
 import { QUEUES } from "../../queues/connection.js";
 import {
   billingIntervalForPrice,
@@ -86,8 +87,12 @@ export async function billingRoutes(app: FastifyInstance) {
       const stripe = getStripe();
       if (!stripe)
         return reply.code(503).send({ error: "billing_unavailable" });
-      const { sub } = req.user as { sub: string };
-      const { interval: intervalSlug, successUrl, cancelUrl } = req.body as {
+      const sub = getUserId(req);
+      const {
+        interval: intervalSlug,
+        successUrl,
+        cancelUrl,
+      } = req.body as {
         interval: "monthly" | "yearly";
         successUrl: string;
         cancelUrl: string;
@@ -95,7 +100,10 @@ export async function billingRoutes(app: FastifyInstance) {
 
       const priceId = configuredPriceForInterval(intervalSlug);
       if (!priceId) {
-        req.log.error({ interval: intervalSlug }, "Stripe price is not configured");
+        req.log.error(
+          { interval: intervalSlug },
+          "Stripe price is not configured",
+        );
         return reply.code(503).send({ error: "billing_unavailable" });
       }
       if (!isAllowedReturnUrl(successUrl) || !isAllowedReturnUrl(cancelUrl)) {
@@ -117,7 +125,7 @@ export async function billingRoutes(app: FastifyInstance) {
         select: { stripeSubscriptionId: true, status: true },
       });
       if (existingSubscription) {
-        return reply.code(409).send({ error: "subscription_exists" });
+        return reply.code(409).send({ error: "already_subscribed" });
       }
 
       let customerId = user.stripeCustomerId;
@@ -218,7 +226,7 @@ export async function billingRoutes(app: FastifyInstance) {
       const stripe = getStripe();
       if (!stripe)
         return reply.code(503).send({ error: "billing_unavailable" });
-      const { sub } = req.user as { sub: string };
+      const sub = getUserId(req);
       const { returnUrl } = req.body as { returnUrl: string };
 
       if (!isAllowedReturnUrl(returnUrl)) {
@@ -264,6 +272,7 @@ export async function billingRoutes(app: FastifyInstance) {
   app.post(
     "/webhook",
     {
+      config: { rateLimit: false },
       // Capture the raw body for signature verification, then re-emit it
       // so the JSON parser still works downstream.
       preParsing: async (req, _reply, payload) => {
@@ -307,7 +316,10 @@ export async function billingRoutes(app: FastifyInstance) {
           webhookSecret,
         );
       } catch (err) {
-        req.log.warn({ err }, "stripe webhook signature invalid");
+        req.log.warn(
+          { err, event: "stripe_webhook_failure", reason: "invalid_signature" },
+          "stripe webhook signature invalid",
+        );
         return reply.code(400).send({ error: "invalid_signature" });
       }
 
@@ -325,10 +337,18 @@ export async function billingRoutes(app: FastifyInstance) {
           attempts: { increment: 1 },
         },
       });
+      // A terminally failed event may be delivered again after the worker has
+      // exhausted its attempts. Reuse the stable ID while the event is
+      // received/processing (so concurrent deliveries collapse), but give a
+      // failed redelivery a new ID so BullMQ does not deduplicate it against
+      // the old failed job.
+      const retrySuffix =
+        existing?.status === "failed" ? `-${(existing.attempts ?? 0) + 1}` : "";
       await QUEUES.stripeWebhook.add(
         "webhook",
         { eventId: event.id },
-        { jobId: `stripe:${event.id}` },
+        // BullMQ 5 rejects `:` in custom job ids.
+        { jobId: `stripe-${event.id}${retrySuffix}` },
       );
       return { received: true };
     },
@@ -341,7 +361,7 @@ export async function billingRoutes(app: FastifyInstance) {
       schema: { response: { 200: subscriptionSchema, 404: errorSchema } },
     },
     async (req, reply) => {
-      const { sub } = req.user as { sub: string };
+      const sub = getUserId(req);
       const user = await app.prisma.user.findUnique({
         where: { id: sub },
       });

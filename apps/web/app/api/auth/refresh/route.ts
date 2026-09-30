@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { getApiUrl } from "@/lib/api-url";
 
-const API = process.env.API_URL ?? "https://api.trqsh.uz";
+const API = getApiUrl();
 const COOKIE_NAME = "__Host-av_at";
 const REFRESH_COOKIE_NAME = "__Host-av_rt";
 const COOKIE_MAX_AGE = 60 * 15; // 15m matches JWT
@@ -36,22 +37,31 @@ export async function POST(req: Request) {
   }
   const text = await res.text();
   if (!res.ok) {
-    // Refresh rejected (revoked/expired/theft) — clear both cookies so the
-    // next navigation lands on /login instead of retry-looping.
-    const cleared = new NextResponse(text, {
+    const response = new NextResponse(text, {
       status: res.status,
       headers: { "content-type": "application/json" },
     });
-    for (const name of [COOKIE_NAME, REFRESH_COOKIE_NAME]) {
-      cleared.cookies.set(name, "", {
-        httpOnly: true,
-        secure: true,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 0,
-      });
+    let invalidGrant = false;
+    if (res.status === 400 || res.status === 401) {
+      try {
+        invalidGrant =
+          (JSON.parse(text) as { error?: unknown }).error === "invalid_grant";
+      } catch {
+        invalidGrant = false;
+      }
     }
-    return cleared;
+    if (invalidGrant) {
+      for (const name of [COOKIE_NAME, REFRESH_COOKIE_NAME]) {
+        response.cookies.set(name, "", {
+          httpOnly: true,
+          secure: true,
+          sameSite: "lax",
+          path: "/",
+          maxAge: 0,
+        });
+      }
+    }
+    return response;
   }
   try {
     const data = JSON.parse(text) as {

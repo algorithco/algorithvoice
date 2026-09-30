@@ -61,8 +61,11 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const { showAuth, loggedIn } = useAuthGate(session);
-  const { entitlement, refreshing, refresh: refreshEntitlement } =
-    useDesktopEntitlement(loggedIn);
+  const {
+    entitlement,
+    refreshing,
+    refresh: refreshEntitlement,
+  } = useDesktopEntitlement(loggedIn || isPill);
   const showOnboarding = useOnboardingGate({ loggedIn, onboarded });
 
   // Auto-collapse while the desktop content pane is narrow. Below md the

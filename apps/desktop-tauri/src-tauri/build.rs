@@ -12,7 +12,59 @@ fn main() {
     // runs via `cargo test`; this guard covers the structural half without
     // needing the ed25519 crate in the build script.)
     enforce_signed_manifest();
-    tauri_build::build()
+    const COMMANDS: &[&str] = &[
+        "get_version",
+        "license_status",
+        "set_tray_state",
+        "get_tray_state",
+        "open_settings",
+        "store_session",
+        "session_status",
+        "revoke_and_clear_session",
+        "clear_session",
+        "get_hotkey",
+        "register_hotkey",
+        "unregister_hotkey",
+        "transcribe_audio",
+        "transcribe_and_paste",
+        "paste_text",
+        "set_groq_api_key",
+        "has_groq_key",
+        "clear_groq_key",
+        "get_foreground_info",
+        "ensure_floating_pill",
+        "set_floating_pill_visible",
+        "floating_pill_visible",
+        "set_floating_pill_expanded",
+        "history_save",
+        "history_list",
+        "history_stats",
+        "history_delete",
+        "history_clear",
+        "local_usage_summary",
+        "local_usage_clear",
+        "list_available_models",
+        "get_model_status",
+        "get_installed_models",
+        "download_model",
+        "cancel_download",
+        "delete_model",
+        "verify_model",
+        "select_active_model",
+        "start_inference_worker",
+        "stop_inference_worker",
+        "get_transcription_status",
+        "get_hardware_info",
+        "get_model_compatibilities",
+        "get_log_dir",
+        "read_recent_logs",
+        "log_frontend_error",
+    ];
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
+    )
+    .expect("failed to build Tauri ACL manifest")
 }
 
 fn enforce_signed_manifest() {

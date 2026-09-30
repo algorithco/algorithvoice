@@ -1,14 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
+import { API_URL as API } from "./endpoints.js";
 import { isTauri } from "./session/env.js";
 
-const API =
-  (import.meta.env.VITE_API_URL as string | undefined) ??
-  (import.meta.env.DEV ? "http://localhost:3001" : "https://api.trqsh.uz");
-
-export const APP_URL =
-  (import.meta.env.VITE_APP_URL as string | undefined) ??
-  (import.meta.env.DEV ? "http://localhost:3000" : "https://app.trqsh.uz");
+export { APP_URL } from "./endpoints.js";
 
 export interface DesktopEntitlement {
   valid: boolean;
@@ -26,23 +21,29 @@ const UNAVAILABLE: DesktopEntitlement = {
   reason: "Subscription could not be verified.",
 };
 
+function unavailableFrom(error: unknown): DesktopEntitlement {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" &&
+          error !== null &&
+          "message" in error &&
+          typeof error.message === "string"
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "Subscription check failed.";
+  return { ...UNAVAILABLE, reason: message };
+}
+
 export async function getDesktopEntitlement(
   force = false,
 ): Promise<DesktopEntitlement> {
   if (!isTauri()) return UNAVAILABLE;
-  try {
-    return await invoke<DesktopEntitlement>("license_status", {
-      apiUrl: API,
-      api_url: API,
-      force,
-    });
-  } catch (error) {
-    return {
-      ...UNAVAILABLE,
-      reason:
-        error instanceof Error ? error.message : "Subscription check failed.",
-    };
-  }
+  return invoke<DesktopEntitlement>("license_status", {
+    apiUrl: API,
+    force,
+  }).catch(unavailableFrom);
 }
 
 export function useDesktopEntitlement(enabled: boolean) {

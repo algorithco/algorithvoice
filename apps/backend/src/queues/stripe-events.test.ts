@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { extractSubscriptionId } from "./stripe-events.js";
+import type { PrismaClient } from "@prisma/client";
+import type pino from "pino";
+import type Stripe from "stripe";
+import { describe, expect, it, vi } from "vitest";
+import { extractSubscriptionId, processStripeEvent } from "./stripe-events.js";
 
 describe("extractSubscriptionId", () => {
   it("reads subscription lifecycle object ids", () => {
@@ -49,5 +52,43 @@ describe("extractSubscriptionId", () => {
         data: { object: { id: "in_not_a_subscription" } },
       }),
     ).toBeNull();
+  });
+
+  it("O-OBSERVABILITY: processing failures emit an alert-friendly webhook event", async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const prisma = {
+      stripeEvent: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "evt_broken",
+          type: "invoice.payment_succeeded",
+          status: "pending",
+          payload: { data: { object: { id: "in_without_subscription" } } },
+        }),
+        update,
+      },
+    } as unknown as PrismaClient;
+    const log = {
+      error: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+    } as unknown as pino.Logger;
+
+    await expect(
+      processStripeEvent(prisma, {} as unknown as Stripe, "evt_broken", log),
+    ).rejects.toThrow("event has no subscription id");
+
+    expect(log.error).toHaveBeenCalledWith(
+      {
+        event: "stripe_webhook_failure",
+        eventId: "evt_broken",
+        errorType: "Error",
+      },
+      "Stripe webhook processing failed",
+    );
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "failed" }),
+      }),
+    );
   });
 });

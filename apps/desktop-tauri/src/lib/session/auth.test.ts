@@ -38,13 +38,11 @@ const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
 const mockOpenUrl = openUrl as unknown as ReturnType<typeof vi.fn>;
 const VALID_CODE = "c".repeat(43);
 const VALID_STATE = "s".repeat(43);
-const PREFERRED_REDIRECT = "com.algorithvoice.app://oauth-callback";
+const PREFERRED_REDIRECT = "algorithvoice://auth-callback";
+const ALTERNATE_REDIRECT = "com.algorithvoice.app://oauth-callback";
 const OAUTH_METADATA = {
   code_challenge_methods_supported: ["S256"],
-  redirect_uris_supported: [
-    PREFERRED_REDIRECT,
-    "algorithvoice://auth-callback",
-  ],
+  redirect_uris_supported: [ALTERNATE_REDIRECT, PREFERRED_REDIRECT],
 };
 
 beforeEach(() => {
@@ -69,7 +67,7 @@ describe("parseOAuthCodeCallback (PKCE)", () => {
     ).toEqual({
       code: VALID_CODE,
       state: VALID_STATE,
-      redirectUri: PREFERRED_REDIRECT,
+      redirectUri: ALTERNATE_REDIRECT,
     });
     expect(
       parseOAuthCodeCallback(
@@ -78,7 +76,7 @@ describe("parseOAuthCodeCallback (PKCE)", () => {
     ).toEqual({
       code: VALID_CODE,
       state: VALID_STATE,
-      redirectUri: "algorithvoice://auth-callback",
+      redirectUri: PREFERRED_REDIRECT,
     });
     expect(
       parseOAuthCodeCallback(
@@ -118,7 +116,7 @@ describe("parseOAuthCodeCallback (PKCE)", () => {
     ).toEqual({
       error: "access_denied",
       state: VALID_STATE,
-      redirectUri: PREFERRED_REDIRECT,
+      redirectUri: ALTERNATE_REDIRECT,
     });
     expect(
       parseOAuthCodeCallback(
@@ -197,9 +195,7 @@ describe("signInDesktop", () => {
       ],
     });
     oauthMocks.callback?.({
-      payload: [
-        `com.algorithvoice.app://oauth-callback?code=${VALID_CODE}&state=${state}`,
-      ],
+      payload: [`${PREFERRED_REDIRECT}?code=${VALID_CODE}&state=${state}`],
     });
 
     await expect(pending).resolves.toEqual({
@@ -235,9 +231,7 @@ describe("signInDesktop", () => {
     const authorizeUrl = new URL(String(mockOpenUrl.mock.calls[0]?.[0]));
     const state = authorizeUrl.searchParams.get("state");
     oauthMocks.callback?.({
-      payload: [
-        `com.algorithvoice.app://oauth-callback?code=${VALID_CODE}&state=${state}`,
-      ],
+      payload: [`${PREFERRED_REDIRECT}?code=${VALID_CODE}&state=${state}`],
     });
     controller.abort();
 
@@ -252,6 +246,96 @@ describe("signInDesktop", () => {
     });
     await Promise.resolve();
     await Promise.resolve();
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      "store_session",
+      expect.anything(),
+    );
+  });
+
+  it("keeps the approved session when the login view unmounts during the keyring write", async () => {
+    // @ts-expect-error - test flag
+    window.__TAURI__ = {};
+    let finishStore!: () => void;
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "store_session") {
+        return new Promise<void>((resolve) => {
+          finishStore = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    globalThis.fetch = vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/oauth2/metadata")) {
+        return Promise.resolve({ ok: true, json: async () => OAUTH_METADATA });
+      }
+      if (url.includes("/oauth2/token")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            access_token: "a".repeat(64),
+            refresh_token: "r".repeat(43),
+            token_type: "Bearer",
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ email: "safe@example.com" }),
+      });
+    }) as unknown as typeof fetch;
+
+    const controller = new AbortController();
+    const pending = signInDesktop({ signal: controller.signal });
+    await vi.waitFor(() => expect(mockOpenUrl).toHaveBeenCalledOnce());
+    const authorizeUrl = new URL(String(mockOpenUrl.mock.calls[0]?.[0]));
+    const state = authorizeUrl.searchParams.get("state");
+    oauthMocks.callback?.({
+      payload: [`${PREFERRED_REDIRECT}?code=${VALID_CODE}&state=${state}`],
+    });
+    await vi.waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "store_session",
+        expect.anything(),
+      ),
+    );
+
+    // Mirrors AuthView unmounting after Rust emits `session-changed` from
+    // inside store_session, before the invoke promise resolves.
+    controller.abort();
+    finishStore();
+
+    await expect(pending).resolves.toEqual({
+      loggedIn: true,
+      email: "safe@example.com",
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith("clear_session");
+  });
+
+  it("reports a useful error when the token request is blocked", async () => {
+    // @ts-expect-error - test flag
+    window.__TAURI__ = {};
+    globalThis.fetch = vi.fn((input: string | URL | Request) => {
+      if (String(input).includes("/oauth2/metadata")) {
+        return Promise.resolve({ ok: true, json: async () => OAUTH_METADATA });
+      }
+      if (String(input).includes("/oauth2/token")) {
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    }) as unknown as typeof fetch;
+
+    const pending = signInDesktop();
+    await vi.waitFor(() => expect(mockOpenUrl).toHaveBeenCalledOnce());
+    const authorizeUrl = new URL(String(mockOpenUrl.mock.calls[0]?.[0]));
+    const state = authorizeUrl.searchParams.get("state");
+    oauthMocks.callback?.({
+      payload: [`${PREFERRED_REDIRECT}?code=${VALID_CODE}&state=${state}`],
+    });
+
+    await expect(pending).rejects.toThrow(
+      "Could not complete sign-in with api.trqsh.uz. Check your connection and try again.",
+    );
     expect(mockInvoke).not.toHaveBeenCalledWith(
       "store_session",
       expect.anything(),
@@ -316,5 +400,15 @@ describe("login/signup/logout", () => {
     }) as unknown as typeof fetch;
     await logout();
     expect(window.localStorage.getItem("algorith-voice-history")).toBeNull();
+  });
+
+  it("H10: desktop logout asks Rust to revoke stored tokens", async () => {
+    // @ts-expect-error - test flag
+    window.__TAURI__ = {};
+    mockInvoke.mockResolvedValue(undefined);
+    await logout();
+    expect(mockInvoke).toHaveBeenCalledWith("revoke_and_clear_session", {
+      apiBase: "https://api.trqsh.uz",
+    });
   });
 });

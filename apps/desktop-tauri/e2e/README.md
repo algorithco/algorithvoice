@@ -50,11 +50,11 @@ Screenshots land in `e2e/screenshots/` (gitignored) for human review.
   `pill_position()` in `push_to_talk.rs` (also unit-tested in Rust).
   Recording expands to 224x40 via `set_floating_pill_expanded` (grows
   leftward while preserving the user-moved right edge). Drag is exercised
-  via the dedicated logo handle + `allow-start-dragging` capability
+  via the full pill surface + `allow-start-dragging` capability
   (soft-checked: the pill is `focusable:false`, so some WebDriver builds
-  ignore pointer actions on unfocused windows; handle + capability are
-  the hard guarantees; outer container is explicitly non-draggable to fix
-  the ~15px corner overshoot).
+  ignore pointer actions on unfocused windows). The surface handler and
+  capability are the hard guarantees; recording control buttons stop pointer
+  propagation so cancel/stop remain clickable.
 
 ## What it does NOT cover (manual checklist)
 

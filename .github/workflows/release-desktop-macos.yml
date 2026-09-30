@@ -27,7 +27,7 @@ jobs:
       run:
         working-directory: apps/desktop-swift
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: toolchain
         run: swift --version
       - name: build
@@ -49,7 +49,7 @@ jobs:
     # ALGORITHVOICE_API_URL → VITE_API_URL → dev/prod defaults).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: reject hardcoded secrets in Swift sources
         run: |
           ! grep -RniE 'sk-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{10,}|BEGIN [A-Z ]*PRIVATE KEY' \

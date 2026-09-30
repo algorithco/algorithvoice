@@ -30,7 +30,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 const SERVICE: &str = "com.algorithvoice.app";
 const ACCOUNT: &str = "algorith-voice-session";
 const DEFAULT_HOTKEY: &str = "Ctrl+Space";
-const DEEP_LINK_SCHEMES: [&str; 2] = ["com.algorithvoice.app", "algorithvoice"];
+const DEEP_LINK_SCHEMES: [&str; 2] = ["algorithvoice", "com.algorithvoice.app"];
 
 #[tauri::command]
 fn get_version() -> String {
@@ -55,11 +55,7 @@ struct RefreshResponse {
 }
 
 fn default_api_base() -> &'static str {
-    if cfg!(debug_assertions) {
-        "http://localhost:3001"
-    } else {
-        "https://api.trqsh.uz"
-    }
+    "https://api.trqsh.uz"
 }
 
 fn validate_api_base(raw: Option<String>) -> AppResult<String> {
@@ -68,17 +64,20 @@ fn validate_api_base(raw: Option<String>) -> AppResult<String> {
         url::Url::parse(raw.trim()).map_err(|_| AppError::new("entitlement", "invalid API URL"))?;
     let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
     let trusted = parsed.scheme() == "https" && host == "api.trqsh.uz";
-    let dev_loopback = cfg!(debug_assertions)
-        && matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
-        && matches!(parsed.scheme(), "http" | "https");
-    if !trusted && !dev_loopback {
+    if !trusted {
         return Err(AppError::new("entitlement", "untrusted API URL"));
     }
     Ok(raw.trim_end_matches('/').to_string())
 }
 
 fn read_session_payload(app: &tauri::AppHandle) -> Option<serde_json::Value> {
-    match keyring_entry() {
+    if let Some(payload) = app
+        .try_state::<AppState>()
+        .and_then(|state| state.session_payload.lock().ok()?.clone())
+    {
+        return Some(payload);
+    }
+    let payload = match keyring_entry() {
         Ok(entry) => match entry.get_password() {
             Ok(raw) => serde_json::from_str(&raw).ok(),
             Err(keyring::Error::NoEntry) => read_fallback_payload(app),
@@ -86,7 +85,13 @@ fn read_session_payload(app: &tauri::AppHandle) -> Option<serde_json::Value> {
             Err(_) => None,
         },
         Err(_) => read_fallback_payload(app),
+    };
+    if let (Some(state), Some(value)) = (app.try_state::<AppState>(), payload.as_ref()) {
+        if let Ok(mut cached) = state.session_payload.lock() {
+            *cached = Some(value.clone());
+        }
     }
+    payload
 }
 
 async fn request_subscription(app: &tauri::AppHandle, api_base: &str) -> AppResult<LicenseStatus> {
@@ -196,15 +201,30 @@ async fn refresh_entitlement(
             }
         }
     }
-    let status = request_subscription(app, &api_base)
-        .await
-        .unwrap_or_else(|e| LicenseStatus {
-            valid: false,
-            status: "unavailable".to_string(),
-            plan_tier: "free".to_string(),
-            current_period_end: None,
-            reason: Some(e.message),
-        });
+    let status = match request_subscription(app, &api_base).await {
+        Ok(status) => {
+            logging::log_event(
+                app,
+                "entitlement",
+                "verified",
+                &format!(
+                    "status={} plan={} valid={}",
+                    status.status, status.plan_tier, status.valid
+                ),
+            );
+            status
+        }
+        Err(error) => {
+            logging::log_event(app, "entitlement", "verify-failed", &error.message);
+            LicenseStatus {
+                valid: false,
+                status: "unavailable".to_string(),
+                plan_tier: "free".to_string(),
+                current_period_end: None,
+                reason: Some(error.message),
+            }
+        }
+    };
     if let Ok(mut cache) = app_state.entitlement.lock() {
         cache.status = status.clone();
         cache.checked_at = Some(std::time::Instant::now());
@@ -213,16 +233,18 @@ async fn refresh_entitlement(
     status
 }
 
-#[allow(non_snake_case)]
 #[tauri::command]
 async fn license_status(
     app: tauri::AppHandle,
     app_state: tauri::State<'_, AppState>,
-    apiUrl: Option<String>,
     api_url: Option<String>,
     force: Option<bool>,
 ) -> AppResult<LicenseStatus> {
-    let api_base = validate_api_base(apiUrl.or(api_url))?;
+    // Tauri maps this idiomatic Rust `api_url` argument to the renderer's
+    // `apiUrl` key. Defining both spellings creates two command arguments with
+    // the same serialized name and makes the IPC request fail before Rust can
+    // contact the subscription endpoint.
+    let api_base = validate_api_base(api_url)?;
     Ok(refresh_entitlement(&app, &app_state, api_base, force.unwrap_or(false)).await)
 }
 
@@ -475,34 +497,12 @@ fn delete_fallback_payload(app: &tauri::AppHandle) {
 }
 
 fn read_session_email(app: &tauri::AppHandle) -> Option<String> {
-    match keyring_entry() {
-        Ok(entry) => match entry.get_password() {
-            Ok(raw) => serde_json::from_str::<serde_json::Value>(&raw)
-                .ok()
-                .and_then(|value| {
-                    value
-                        .get("email")
-                        .and_then(|email| email.as_str())
-                        .map(str::to_owned)
-                }),
-            Err(keyring::Error::NoEntry) => {
-                // No keyring credential — check for a fallback from an
-                // earlier headless session before reporting logged-out.
-                read_fallback_payload(app).and_then(|v| v.get("email")?.as_str().map(str::to_owned))
-            }
-            Err(e) if is_keyring_unavailable(&e) => {
-                eprintln!(
-                    "algorith-voice: keyring read failed, trying fallback: {}",
-                    keyring_guidance(&e)
-                );
-                read_fallback_payload(app).and_then(|v| v.get("email")?.as_str().map(str::to_owned))
-            }
-            Err(_) => None,
-        },
-        Err(_) => {
-            read_fallback_payload(app).and_then(|v| v.get("email")?.as_str().map(str::to_owned))
-        }
-    }
+    read_session_payload(app).and_then(|value| {
+        value
+            .get("email")
+            .and_then(|email| email.as_str())
+            .map(str::to_owned)
+    })
 }
 
 fn validate_session_input(token: &str, email: &str) -> AppResult<(String, String)> {
@@ -582,6 +582,9 @@ fn store_session(
     }
     logging::log_event(&app, "auth", "store-session", "session stored");
     if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut cached) = state.session_payload.lock() {
+            *cached = Some(payload);
+        }
         if let Ok(mut entitlement) = state.entitlement.lock() {
             *entitlement = state::EntitlementCache::default();
         }
@@ -599,6 +602,42 @@ fn session_status(app: tauri::AppHandle) -> SessionStatus {
         Some(email) => SessionStatus::logged_in(email),
         None => SessionStatus::logged_out(),
     }
+}
+
+#[allow(non_snake_case)]
+#[tauri::command]
+async fn revoke_and_clear_session(app: tauri::AppHandle, apiBase: Option<String>) -> AppResult<()> {
+    let payload = read_session_payload(&app);
+    if let (Some(payload), Ok(api_base)) = (payload, validate_api_base(apiBase)) {
+        if let Ok(client) = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+        {
+            let access = payload.get("access_token").and_then(|v| v.as_str());
+            let refresh = payload.get("refresh_token").and_then(|v| v.as_str());
+            if let Some(token) = access {
+                let _ = client
+                    .post(format!("{api_base}/oauth2/revoke"))
+                    .form(&[("token", token), ("token_type_hint", "access_token")])
+                    .send()
+                    .await;
+            }
+            if let Some(token) = refresh {
+                let _ = client
+                    .post(format!("{api_base}/oauth2/revoke"))
+                    .form(&[("token", token), ("token_type_hint", "refresh_token")])
+                    .send()
+                    .await;
+                let _ = client
+                    .post(format!("{api_base}/auth/logout"))
+                    .json(&serde_json::json!({ "refresh_token": token }))
+                    .send()
+                    .await;
+            }
+        }
+    }
+    // Offline/network/provider failures never prevent local logout.
+    clear_session(app)
 }
 
 #[tauri::command]
@@ -622,6 +661,9 @@ fn clear_session(app: tauri::AppHandle) -> AppResult<()> {
     }
     logging::log_event(&app, "auth", "clear-session", "session cleared");
     if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut cached) = state.session_payload.lock() {
+            *cached = None;
+        }
         if let Ok(mut entitlement) = state.entitlement.lock() {
             *entitlement = state::EntitlementCache::default();
         }
@@ -1070,6 +1112,7 @@ pub fn run() {
             open_settings,
             store_session,
             session_status,
+            revoke_and_clear_session,
             clear_session,
             get_hotkey,
             register_hotkey,
@@ -1149,6 +1192,7 @@ mod oauth_deep_link_tests {
             "https://api.trqsh.uz"
         );
         assert!(validate_api_base(Some("https://evil.example".to_string())).is_err());
+        assert!(validate_api_base(Some("http://localhost:3001".to_string())).is_err());
         assert!(validate_api_base(Some("file:///tmp/fake-api".to_string())).is_err());
     }
 }

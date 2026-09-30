@@ -59,6 +59,8 @@ export interface TranscribeOptions {
   mode?: SttMode;
   /** Manifest id of the local model. Required when mode is "local". */
   modelId?: string | null;
+  /** Paste strategy for Linux terminals or apps that reject synthetic paste. */
+  pasteMode?: "auto" | "ctrl_v" | "ctrl_shift_v" | "type";
 }
 
 export async function transcribeAudio(
@@ -94,6 +96,7 @@ export async function transcribeAndPaste(
     api_key: null,
     mime_type: mimeType ?? null,
     restore_clipboard: true,
+    paste_mode: opts?.pasteMode ?? null,
     mode: opts?.mode ?? null,
     model_id: opts?.modelId ?? null,
     // Back-compat
@@ -101,15 +104,21 @@ export async function transcribeAndPaste(
     apiKey: null,
     mimeType: mimeType ?? null,
     restoreClipboard: true,
+    pasteMode: opts?.pasteMode ?? null,
     modelId: opts?.modelId ?? null,
   });
 }
 
-export async function pasteText(text: string): Promise<void> {
+export async function pasteText(
+  text: string,
+  pasteMode: TranscribeOptions["pasteMode"] = "auto",
+): Promise<void> {
   await tauri("paste_text", {
     text,
     restore_clipboard: true,
     restoreClipboard: true,
+    paste_mode: pasteMode,
+    pasteMode,
   });
 }
 

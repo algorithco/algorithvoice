@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-inference-worker"
+description = "Enables the start_inference_worker command without any pre-configured scope."
+commands.allow = ["start_inference_worker"]
+
+[[permission]]
+identifier = "deny-start-inference-worker"
+description = "Denies the start_inference_worker command without any pre-configured scope."
+commands.deny = ["start_inference_worker"]

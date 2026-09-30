@@ -17,6 +17,8 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from "fastify-type-provider-zod";
+import { ZodError } from "zod";
+import { corsOrigins } from "./config/cors.js";
 import { loadEnv, setAppEnv } from "./config/env.js";
 import { adminRoutes } from "./modules/admin/admin.routes.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
@@ -27,10 +29,19 @@ import { sttRoutes } from "./modules/stt/stt.routes.js";
 import { usageRoutes } from "./modules/usage/usage.routes.js";
 import jwtPlugin from "./plugins/jwt.js";
 import prismaPlugin from "./plugins/prisma.js";
-import { pingRedis } from "./queues/connection.js";
+import { makeApiRedis, pingRedis } from "./queues/connection.js";
+
+export function requestLogPath(rawUrl: string, routeUrl?: string): string {
+  if (routeUrl) return routeUrl;
+  return rawUrl.split(/[?#]/, 1)[0] || "/";
+}
 
 export function buildApp() {
   const env = setAppEnv(loadEnv());
+  const trustProxy =
+    env.TRUST_PROXY_HOPS === 0
+      ? false
+      : (_address: string, hop: number) => hop < env.TRUST_PROXY_HOPS;
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,
@@ -50,7 +61,7 @@ export function buildApp() {
     // The onResponse hook below already logs completions (and skips
     // /health + /ready); the built-in line would duplicate it.
     logController: new LogController({ disableRequestLogging: true }),
-    trustProxy: true,
+    trustProxy,
     genReqId: () => randomUUID(),
   }).withTypeProvider<ZodTypeProvider>();
 
@@ -58,14 +69,7 @@ export function buildApp() {
   app.setSerializerCompiler(serializerCompiler);
 
   app.register(cors, {
-    origin: [
-      env.APP_URL,
-      "tauri://localhost",
-      "http://tauri.localhost",
-      // Local-dev loopback (direct localhost access bypassing the tunnel).
-      "http://localhost:3000",
-      "http://127.0.0.1:3000",
-    ],
+    origin: corsOrigins(env),
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -73,20 +77,15 @@ export function buildApp() {
   app.register(helmet);
   app.register(compress, { global: true, threshold: 1024 });
   app.register(cookie);
-  // Simple response-time + structured log: 1.1, 1.6
   app.addHook("onResponse", (req, reply, done) => {
-    const startTime = (req as unknown as { startTime?: number }).startTime;
-    const ms =
-      reply.elapsedTime ??
-      (startTime !== undefined ? Date.now() - startTime : 0);
     if (req.url !== "/health" && req.url !== "/ready") {
       req.log.info(
         {
           reqId: req.id,
           method: req.method,
-          url: req.url,
+          url: requestLogPath(req.url, req.routeOptions.url),
           statusCode: reply.statusCode,
-          responseTime: Math.round(ms),
+          responseTime: Math.round(reply.elapsedTime),
         },
         "request completed",
       );
@@ -107,32 +106,48 @@ export function buildApp() {
       allowedAud: ["api"],
     },
   });
-  app.register(multipart, { limits: { fileSize: 25 * 1024 * 1024 } });
-  app.register(rateLimit, { global: true, max: 100, timeWindow: "1 minute" });
+  app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
+  const rateLimitRedis = makeApiRedis();
+  app.register(rateLimit, {
+    global: true,
+    max: 100,
+    timeWindow: "1 minute",
+    redis: rateLimitRedis,
+    skipOnError: true,
+  });
+  app.addHook("onClose", async () => {
+    rateLimitRedis.disconnect();
+  });
   app.register(websocket);
 
-  app.register(swagger, {
-    openapi: {
-      openapi: "3.0.0",
-      info: {
-        title: "Algorith Voice API",
-        description:
-          "Accounts, licensing, billing, usage, and cloud transcription for the Algorith Voice desktop app.",
-        version: "0.1.0",
-      },
-      servers: [{ url: env.API_URL ?? `http://localhost:${env.PORT}` }],
-      components: {
-        securitySchemes: {
-          bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+  if (env.NODE_ENV !== "production") {
+    app.register(swagger, {
+      openapi: {
+        openapi: "3.0.0",
+        info: {
+          title: "Algorith Voice API",
+          description:
+            "Accounts, licensing, billing, usage, and cloud transcription for the Algorith Voice desktop app.",
+          version: "0.1.0",
+        },
+        servers: [{ url: env.API_URL }],
+        components: {
+          securitySchemes: {
+            bearerAuth: {
+              type: "http",
+              scheme: "bearer",
+              bearerFormat: "JWT",
+            },
+          },
         },
       },
-    },
-    transform: jsonSchemaTransform,
-  });
-  app.register(swaggerUi, {
-    routePrefix: "/docs",
-    uiConfig: { docExpansion: "list", deepLinking: true },
-  });
+      transform: jsonSchemaTransform,
+    });
+    app.register(swaggerUi, {
+      routePrefix: "/docs",
+      uiConfig: { docExpansion: "list", deepLinking: true },
+    });
+  }
 
   app.register(prismaPlugin);
   app.register(jwtPlugin);
@@ -142,7 +157,7 @@ export function buildApp() {
     service: "algorith-voice-backend",
     uptimeSec: Math.round(process.uptime()),
   }));
-  app.get("/ready", async (_req, reply) => {
+  app.get("/ready", async (req, reply) => {
     const checks: Record<string, string> = {};
     try {
       await app.prisma.$queryRaw`SELECT 1`;
@@ -155,10 +170,16 @@ export function buildApp() {
     } catch {
       checks.redis = "down";
     }
-    if (checks.db === "ok" && checks.redis === "ok") {
-      return { ok: true, checks };
+    const ok = checks.db === "ok" && checks.redis === "ok";
+    const detailsAuthorized =
+      env.READINESS_TOKEN !== undefined &&
+      req.headers["x-readiness-token"] === env.READINESS_TOKEN;
+    if (ok) {
+      return detailsAuthorized ? { ok: true, checks } : { ok: true };
     }
-    return reply.code(503).send({ ok: false, checks });
+    return reply
+      .code(503)
+      .send(detailsAuthorized ? { ok: false, checks } : { ok: false });
   });
 
   app.register(authRoutes, { prefix: "/auth" });
@@ -180,6 +201,11 @@ export function buildApp() {
         return reply
           .code(400)
           .send({ error: "validation_error", issues: err.validation });
+      }
+      if (err instanceof ZodError) {
+        return reply
+          .code(400)
+          .send({ error: "validation_error", issues: err.issues });
       }
       if (err.code === "P2002") {
         return reply.code(409).send({ error: "conflict" });

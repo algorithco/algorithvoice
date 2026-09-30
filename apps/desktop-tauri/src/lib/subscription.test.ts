@@ -9,7 +9,9 @@ vi.mock("./session/env.js", () => ({ isTauri: () => true }));
 
 import { getDesktopEntitlement } from "./subscription.js";
 
-beforeEach(() => mocks.invoke.mockReset());
+beforeEach(() => {
+  mocks.invoke.mockReset();
+});
 
 describe("desktop subscription entitlement", () => {
   it("returns a server-verified active Pro subscription", async () => {
@@ -26,10 +28,10 @@ describe("desktop subscription entitlement", () => {
       status: "active",
       planTier: "pro",
     });
-    expect(mocks.invoke).toHaveBeenCalledWith(
-      "license_status",
-      expect.objectContaining({ apiUrl: expect.any(String) }),
-    );
+    expect(mocks.invoke).toHaveBeenCalledWith("license_status", {
+      apiUrl: "https://api.trqsh.uz",
+      force: false,
+    });
   });
 
   it("fails closed when native verification is unavailable", async () => {
@@ -44,6 +46,19 @@ describe("desktop subscription entitlement", () => {
       valid: false,
       status: "unavailable",
       planTier: "free",
+    });
+  });
+
+  it("shows native errors instead of hiding the refresh failure", async () => {
+    mocks.invoke.mockRejectedValue(
+      new Error("Subscription check returned 503 Service Unavailable"),
+    );
+
+    const result = await getDesktopEntitlement(true);
+    expect(result).toMatchObject({
+      valid: false,
+      status: "unavailable",
+      reason: "Subscription check returned 503 Service Unavailable",
     });
   });
 });

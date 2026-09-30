@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-revoke-and-clear-session"
+description = "Enables the revoke_and_clear_session command without any pre-configured scope."
+commands.allow = ["revoke_and_clear_session"]
+
+[[permission]]
+identifier = "deny-revoke-and-clear-session"
+description = "Denies the revoke_and_clear_session command without any pre-configured scope."
+commands.deny = ["revoke_and_clear_session"]

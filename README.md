@@ -16,13 +16,13 @@
 
 - **Push-to-talk, everywhere** — `Ctrl+Space` in any app (terminal, IDE, browser). Release → text lands at the cursor in <1s.
 - **Local-first privacy** — offline mode: audio never leaves the device, no account, no telemetry by default.
-- **Cloud when you want it** — Voxtral Realtime primary + Parakeet fallback. 60 free cloud min/mo, unlimited local.
+- **Cloud when you want it** — the desktop can use BYO Groq; the authenticated backend STT API uses configured OpenRouter models and metering. Unlimited local transcription remains available.
 
 ### How it works
 
 ```text
 Desktop (Tauri 2 + Rust, Windows & Linux)  <── WS / REST ──>  Backend (Fastify 5)  <── BFF ──>  Web (Next.js 16)
-  sherpa-onnx, offline-first                                  Voxtral + Parakeet                  marketing + dashboard
+  sherpa-onnx, offline-first                         BYO Groq / metered OpenRouter              marketing + dashboard
 macOS: separate native Swift app in apps/desktop-swift (not Tauri).
 ```
 
@@ -56,7 +56,7 @@ pnpm dev
 ### Full stack in Docker
 
 ```bash
-cp .env.example .env  # set real JWT_ACCESS_SECRET / JWT_REFRESH_PEPPER / ENCRYPTION_KEK
+cp .env.example .env  # set real JWT_ACCESS_SECRET / JWT_REFRESH_PEPPER
 docker compose -f infra/docker-compose.yml up -d --build
 ```
 

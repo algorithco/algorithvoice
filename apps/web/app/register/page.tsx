@@ -118,7 +118,7 @@ function RegisterInner() {
               <Input
                 type="email"
                 autoComplete="email"
-                placeholder="you@algorithvoice.com"
+                placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required

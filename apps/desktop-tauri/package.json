@@ -8,7 +8,7 @@
     "build": "vite build",
     "build:check": "tsc -p tsconfig.json && vite build",
     "dev": "vite",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build": "tauri build",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",

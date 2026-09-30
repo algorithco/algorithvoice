@@ -3,12 +3,10 @@
 export class ProviderError extends Error {
   readonly http: number;
   readonly retryable: boolean;
-  readonly body: string;
 
-  constructor(http: number, body: string) {
+  constructor(http: number, _discardedBody?: string) {
     super(`stt provider ${http}`);
     this.http = http;
-    this.body = body;
     this.retryable =
       http === 408 || http === 425 || http === 429 || http >= 500;
   }
@@ -81,34 +79,69 @@ export function sniffAudioFormat(audio: Uint8Array): string | null {
   return null;
 }
 
-/** Nominal bytes/sec per container for metering fallback estimates. */
-const BYTES_PER_SEC: Record<string, number> = {
-  wav: 32000, // 16kHz mono 16-bit
-  mp3: 16000,
-  flac: 16000,
-  m4a: 16000,
-  ogg: 8000,
-  webm: 8000,
-  aac: 16000,
+/** Generous upper bounds used to prevent a forged duration from under-metering. */
+const MAX_BYTES_PER_SEC: Record<string, number> = {
+  wav: 192000, // 48 kHz, stereo, 16-bit PCM
+  mp3: 40000, // 320 kbps
+  flac: 288000, // generous ceiling for lossless 48 kHz stereo audio
+  m4a: 64000, // 512 kbps
+  ogg: 64000,
+  webm: 128000,
+  aac: 64000,
 };
 
+const MAX_DURATION_SEC = 7200;
+
+function asciiAt(audio: Uint8Array, at: number, length: number): string {
+  return String.fromCharCode(...audio.subarray(at, at + length));
+}
+
+function wavHeaderDurationSec(audio: Uint8Array): number | null {
+  if (
+    audio.length < 12 ||
+    asciiAt(audio, 0, 4) !== "RIFF" ||
+    asciiAt(audio, 8, 4) !== "WAVE"
+  ) {
+    return null;
+  }
+
+  const view = new DataView(audio.buffer, audio.byteOffset, audio.byteLength);
+  let byteRate: number | null = null;
+  let dataBytes: number | null = null;
+
+  for (let offset = 12; offset + 8 <= audio.length; ) {
+    const id = asciiAt(audio, offset, 4);
+    const declaredSize = view.getUint32(offset + 4, true);
+    const dataStart = offset + 8;
+    const availableSize = Math.min(declaredSize, audio.length - dataStart);
+
+    if (id === "fmt " && availableSize >= 12) {
+      const candidate = view.getUint32(dataStart + 8, true);
+      if (candidate > 0) byteRate = candidate;
+    } else if (id === "data") {
+      dataBytes = Math.max(0, availableSize);
+    }
+
+    if (declaredSize > audio.length - dataStart) break;
+    offset = dataStart + declaredSize + (declaredSize % 2);
+  }
+
+  return byteRate && dataBytes !== null ? dataBytes / byteRate : null;
+}
+
 /**
- * Server-side duration estimate. Prefers the WAV data-chunk header
- * (exact), else nominal bitrate. Never trusts the provider blindly.
+ * Server-side duration estimate. Uses a parsed WAV duration when available,
+ * but never below a container-specific lower bound derived from upload size.
  */
 export function estimateDurationSec(audio: Uint8Array, format: string): number {
-  if (format === "wav" && audio.length >= 44) {
-    const view = new DataView(audio.buffer, audio.byteOffset, audio.byteLength);
-    if (String.fromCharCode(...audio.subarray(0, 4)) === "RIFF") {
-      const byteRate = view.getUint32(28, true);
-      const dataSize = view.getUint32(40, true);
-      if (byteRate > 0 && dataSize > 0 && dataSize <= audio.length) {
-        return dataSize / byteRate;
-      }
-    }
-  }
-  const rate = BYTES_PER_SEC[format] ?? 16000;
-  return audio.length / rate;
+  if (audio.length === 0) return 0;
+  const maxRate = MAX_BYTES_PER_SEC[format] ?? 288000;
+  const lowerBound = audio.length / maxRate;
+  const headerDuration = format === "wav" ? wavHeaderDurationSec(audio) : null;
+  return Math.min(
+    MAX_DURATION_SEC,
+    Math.max(1, lowerBound, headerDuration ?? 0),
+  );
 }
 
 /** Sanitize provider-reported duration; fall back to local estimate. */
@@ -117,7 +150,8 @@ export function resolveDurationSec(
   audio: Uint8Array,
   format: string,
 ): number {
+  const lowerBound = estimateDurationSec(audio, format);
   const n = typeof reported === "number" ? reported : Number.NaN;
-  if (Number.isFinite(n) && n > 0 && n <= 7200) return n;
-  return estimateDurationSec(audio, format);
+  if (!Number.isFinite(n) || n <= 0) return lowerBound;
+  return Math.min(MAX_DURATION_SEC, Math.max(lowerBound, n));
 }

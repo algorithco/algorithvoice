@@ -17,8 +17,8 @@ jobs:
     timeout-minutes: 20
     environment: production
     steps:
-      - uses: actions/checkout@v5
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # tag 1.6
       # Builds apps/backend/Dockerfile from the repo root; the
       # [deploy] release_command runs prisma migrate deploy first.
       - run: flyctl deploy --config infra/fly.toml

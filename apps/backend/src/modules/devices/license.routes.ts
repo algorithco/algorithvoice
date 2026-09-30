@@ -2,23 +2,13 @@ import {
   licenseActivateSchema,
   OFFLINE_GRACE_DAYS,
 } from "@algorith-voice/shared-types";
-import type { DeviceType } from "@prisma/client";
 import type { FastifyInstance } from "fastify";
+import { getUserId } from "../../plugins/jwt.js";
 import { deviceLimitForUser } from "../billing/guard.js";
+import { parseDeviceType } from "./device-type.js";
 
 // Phase 3 adds RS256 license JWTs with 7d offline grace. Seat counting and
 // fingerprint binding are live: activate upserts by (userId, fingerprint).
-function toDeviceTypeEnum(input: unknown): DeviceType {
-  switch (input) {
-    case "desktop-windows":
-      return "DESKTOP_WINDOWS";
-    case "desktop-linux":
-      return "DESKTOP_LINUX";
-    default:
-      return "DESKTOP_MACOS";
-  }
-}
-
 // Prisma stores DESKTOP_*; the shared contract speaks kebab-case.
 function toDeviceTypeKebab(input: string): string {
   const normalized = input.toLowerCase().replace(/_/g, "-");
@@ -36,13 +26,17 @@ export async function licenseRoutes(app: FastifyInstance) {
     "/activate",
     { onRequest: [app.authenticate], schema: { body: licenseActivateSchema } },
     async (req, reply) => {
-      const { sub } = req.user as { sub: string };
+      const sub = getUserId(req);
       const { deviceName, deviceType, deviceFingerprint } = req.body as {
         deviceName: string;
         deviceType: string;
         deviceFingerprint: string;
       };
       const now = new Date();
+      const parsedDeviceType = parseDeviceType(deviceType);
+      if (!parsedDeviceType) {
+        return reply.code(400).send({ error: "invalid_device_type" });
+      }
       const select = {
         id: true,
         name: true,
@@ -50,89 +44,64 @@ export async function licenseRoutes(app: FastifyInstance) {
         lastSeenAt: true,
         createdAt: true,
       } as const;
-      const existing = await app.prisma.device.findFirst({
-        where: { userId: sub, fingerprint: deviceFingerprint },
-        select: { ...select },
-      });
-      let device = existing;
-      if (existing) {
-        device = await app.prisma.device.update({
-          where: { id: existing.id },
+      const seatsMax = await deviceLimitForUser(app.prisma, sub);
+      const result = await app.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sub}))`;
+        const existing = await tx.device.findFirst({
+          where: { userId: sub, fingerprint: deviceFingerprint },
+          select: { ...select },
+        });
+        if (existing) {
+          const device = await tx.device.update({
+            where: { id: existing.id },
+            data: { name: deviceName, type: parsedDeviceType, lastSeenAt: now },
+            select: { ...select },
+          });
+          await tx.auditLog.create({
+            data: {
+              actorUserId: sub,
+              deviceId: device.id,
+              action: "device.activate",
+            },
+          });
+          return {
+            device,
+            exhausted: false,
+            seatsUsed: await tx.device.count({ where: { userId: sub } }),
+          };
+        }
+        const count = await tx.device.count({ where: { userId: sub } });
+        if (count >= seatsMax) {
+          return { device: null, exhausted: true, seatsUsed: count };
+        }
+        const device = await tx.device.create({
           data: {
+            userId: sub,
             name: deviceName,
-            type: toDeviceTypeEnum(deviceType),
+            type: parsedDeviceType,
+            fingerprint: deviceFingerprint,
             lastSeenAt: now,
           },
           select: { ...select },
         });
-        await app.prisma.auditLog.create({
-          data: {
-            actorUserId: sub,
-            deviceId: existing.id,
-            action: "device.activate",
-          },
-        });
-      } else {
-        const count = await app.prisma.device.count({
-          where: { userId: sub },
-        });
-        const seatsMax = await deviceLimitForUser(app.prisma, sub);
-        if (count >= seatsMax) {
-          return reply.code(403).send({
-            error: "seats_exhausted",
-            seatsUsed: count,
-            seatsMax,
-          });
-        }
-        try {
-          device = await app.prisma.device.create({
-            data: {
-              userId: sub,
-              name: deviceName,
-              type: toDeviceTypeEnum(deviceType),
-              fingerprint: deviceFingerprint,
-              lastSeenAt: now,
-            },
-            select: { ...select },
-          });
-        } catch (e: unknown) {
-          // Concurrent double-activate with the same fingerprint hits the
-          // partial unique (userId, fingerprint): fall back to updating it.
-          if (
-            typeof e !== "object" ||
-            e === null ||
-            !("code" in e) ||
-            e.code !== "P2002"
-          ) {
-            throw e;
-          }
-          const raced = await app.prisma.device.findFirst({
-            where: { userId: sub, fingerprint: deviceFingerprint },
-            select: { ...select },
-          });
-          if (!raced) throw e;
-          device = await app.prisma.device.update({
-            where: { id: raced.id },
-            data: {
-              name: deviceName,
-              type: toDeviceTypeEnum(deviceType),
-              lastSeenAt: now,
-            },
-            select: { ...select },
-          });
-        }
-        await app.prisma.auditLog.create({
+        await tx.auditLog.create({
           data: {
             actorUserId: sub,
             deviceId: device.id,
             action: "device.create",
           },
         });
-      }
-      const seatsUsed = await app.prisma.device.count({
-        where: { userId: sub },
+        return { device, exhausted: false, seatsUsed: count + 1 };
       });
-      const seatsMax = await deviceLimitForUser(app.prisma, sub);
+      if (result.exhausted || !result.device) {
+        return reply.code(403).send({
+          error: "seats_exhausted",
+          seatsUsed: result.seatsUsed,
+          seatsMax,
+        });
+      }
+      const device = result.device;
+      const seatsUsed = result.seatsUsed;
       return {
         licenseJwt: "stub.license.jwt",
         device: {
@@ -156,7 +125,7 @@ export async function licenseRoutes(app: FastifyInstance) {
   // Real devices for dashboard — no mocks. Types are kebab-case per the
   // shared deviceSchema; the dashboard accepts both casings during rollout.
   app.get("/devices", { onRequest: [app.authenticate] }, async (req) => {
-    const { sub } = req.user as { sub: string };
+    const sub = getUserId(req);
     const seatsMax = await deviceLimitForUser(app.prisma, sub);
     const devices = await app.prisma.device.findMany({
       where: { userId: sub },
@@ -168,7 +137,6 @@ export async function licenseRoutes(app: FastifyInstance) {
         lastSeenAt: true,
         createdAt: true,
       },
-      take: seatsMax,
     });
     return {
       devices: devices.map((d) => ({
@@ -189,7 +157,7 @@ export async function licenseRoutes(app: FastifyInstance) {
     "/devices/:id",
     { onRequest: [app.authenticate] },
     async (req, reply) => {
-      const { sub } = req.user as { sub: string };
+      const sub = getUserId(req);
       const { id } = req.params as { id: string };
       const existing = await app.prisma.device.findFirst({
         where: { id, userId: sub },

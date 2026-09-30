@@ -75,6 +75,15 @@ pub struct AppState {
     pub entitlement: Mutex<EntitlementCache>,
     /// Serializes access-token refresh across main/settings/pill webviews.
     pub entitlement_refresh: tokio::sync::Mutex<()>,
+    /// Process-local copy of the session written by `store_session`.
+    ///
+    /// Some Windows credential providers acknowledge a write before the new
+    /// credential is readable from another command. Without this bridge the
+    /// auth event marks the renderer signed in, then the entitlement request
+    /// immediately reports "Sign in to verify Pro". The OS keyring remains
+    /// the durable source; this cache only keeps commands in the same process
+    /// consistent and is cleared on logout.
+    pub session_payload: Mutex<Option<serde_json::Value>>,
 }
 
 impl AppState {
@@ -85,6 +94,7 @@ impl AppState {
             exiting: AtomicBool::new(false),
             entitlement: Mutex::new(EntitlementCache::default()),
             entitlement_refresh: tokio::sync::Mutex::new(()),
+            session_payload: Mutex::new(None),
         }
     }
 }

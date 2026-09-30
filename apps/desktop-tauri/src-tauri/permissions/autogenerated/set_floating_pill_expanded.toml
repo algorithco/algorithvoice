@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-floating-pill-expanded"
+description = "Enables the set_floating_pill_expanded command without any pre-configured scope."
+commands.allow = ["set_floating_pill_expanded"]
+
+[[permission]]
+identifier = "deny-set-floating-pill-expanded"
+description = "Denies the set_floating_pill_expanded command without any pre-configured scope."
+commands.deny = ["set_floating_pill_expanded"]

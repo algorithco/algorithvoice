@@ -150,9 +150,9 @@ export function TalkScene() {
                 ◉
               </div>
               <div style={{ fontSize: 30, color: COLORS.sub, lineHeight: 1.4 }}>
-                The 160×40 floating pill (260×40 while recording).
+                The 160×40 floating pill (224×40 while recording).
                 <br />
-                Drag the pill or logo anywhere.
+                Drag anywhere on the pill to move it.
               </div>
             </div>
           </div>

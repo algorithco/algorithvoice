@@ -78,7 +78,7 @@ afterEach(() => {
 });
 
 describe("settings window boot", () => {
-  it("does not expose settings when a desktop session cannot be verified", async () => {
+  it("loads the stored desktop session and entitlement before showing settings", async () => {
     vi.useFakeTimers();
     const div = document.createElement("div");
     document.body.appendChild(div);
@@ -87,7 +87,8 @@ describe("settings window boot", () => {
     await act(async () => {
       root.render(<App />);
     });
-    // Splash gate (3.8s) + async prefs/session loads.
+    // Secondary windows skip the animated splash but still resolve prefs,
+    // session, and entitlement before exposing protected settings.
     await act(async () => {
       vi.advanceTimersByTime(4000);
     });
@@ -96,8 +97,9 @@ describe("settings window boot", () => {
     });
 
     const text = div.textContent ?? "";
-    expect(text).toContain("Welcome back");
-    expect(text).not.toContain("Dictation");
+    expect(text).toContain("Settings");
+    expect(text).toContain("Dictation");
+    expect(text).not.toContain("Welcome back");
     expect(text).not.toContain("Loading");
 
     await act(async () => {

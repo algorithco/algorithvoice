@@ -11,6 +11,8 @@
 // best-effort: only a full seat table (`seats_exhausted`) throws, everything
 // else warns so sign-in never breaks on a flaky network.
 
+import { API_URL as API } from "../endpoints.js";
+
 export type DesktopDeviceType =
   | "desktop-macos"
   | "desktop-windows"
@@ -24,10 +26,6 @@ export interface DeviceIdentity {
 
 const FINGERPRINT_KEY = "algorith-voice-device-fingerprint";
 const NAME_KEY = "algorith-voice-device-name";
-
-const API: string =
-  (import.meta.env.VITE_API_URL as string | undefined) ??
-  (import.meta.env.DEV ? "http://localhost:3001" : "https://api.trqsh.uz");
 
 /** Infer the desktop OS without new native dependencies. */
 export function detectDeviceType(): DesktopDeviceType {

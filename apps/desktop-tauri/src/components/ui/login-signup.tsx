@@ -144,7 +144,7 @@ export default function LoginCardSection({ onDone }: Props) {
                 </CardTitle>
                 <CardDescription className="text-[13px] leading-relaxed text-white/60">
                   Continue with Algorith Voice — you’ll be redirected to
-                  <span className="text-white"> algorithvoice.com </span>
+                  <span className="text-white"> app.trqsh.uz </span>
                   to sign in securely.
                 </CardDescription>
               </CardHeader>
@@ -175,7 +175,7 @@ export default function LoginCardSection({ onDone }: Props) {
                 ) : null}
                 <p className="text-center text-[11px] leading-relaxed text-white/35">
                   {busy
-                    ? "Verify the algorithvoice.com address in your browser, then approve or deny access."
+                    ? "Verify the app.trqsh.uz address in your browser, then approve or deny access."
                     : "System browser • OAuth 2.0 • PKCE S256 • Password stays out of the app"}
                 </p>
               </motion.div>
@@ -207,12 +207,12 @@ export default function LoginCardSection({ onDone }: Props) {
                   Your browser will open to complete sign-in.
                 </p>
                 <a
-                  href="https://algorithvoice.com"
+                  href="https://app.trqsh.uz"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[10px] tracking-[0.14em] text-white/20 transition-colors hover:text-white/40 uppercase"
                 >
-                  algorithvoice.com
+                  app.trqsh.uz
                 </a>
               </CardFooter>
             </motion.div>

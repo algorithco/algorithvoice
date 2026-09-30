@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-floating-pill-visible"
+description = "Enables the floating_pill_visible command without any pre-configured scope."
+commands.allow = ["floating_pill_visible"]
+
+[[permission]]
+identifier = "deny-floating-pill-visible"
+description = "Denies the floating_pill_visible command without any pre-configured scope."
+commands.deny = ["floating_pill_visible"]

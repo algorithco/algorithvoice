@@ -292,7 +292,7 @@ export function DashboardView({
                   Hold {hotkey}
                 </p>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Press and hold anywhere to start listening
+                  Works from any app; the pill is for status and movement
                 </p>
               </div>
             </li>

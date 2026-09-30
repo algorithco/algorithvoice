@@ -93,6 +93,8 @@ async function syncSubscriptionFromStripe(
         currentPeriodStart: snap.currentPeriodStart,
         currentPeriodEnd: snap.currentPeriodEnd,
         cancelAtPeriodEnd: snap.cancelAtPeriodEnd,
+        lastSyncAttemptAt: new Date(),
+        syncFailureCount: 0,
       },
       update: {
         stripePriceId: snap.priceId,
@@ -101,6 +103,8 @@ async function syncSubscriptionFromStripe(
         currentPeriodStart: snap.currentPeriodStart,
         currentPeriodEnd: snap.currentPeriodEnd,
         cancelAtPeriodEnd: snap.cancelAtPeriodEnd,
+        lastSyncAttemptAt: new Date(),
+        syncFailureCount: 0,
       },
     }),
     prisma.user.update({ where: { id: user.id }, data: { planTier } }),
@@ -184,33 +188,11 @@ export async function processStripeEvent(
     } else if (stored.type === "invoice.payment_failed") {
       const payload = stored.payload as StripeEventPayload;
       const subscriptionId = extractSubscriptionId(stored.type, payload);
-      if (subscriptionId) {
-        const existing = await prisma.subscription.findUnique({
-          where: { stripeSubscriptionId: subscriptionId },
-        });
-        if (existing) {
-          // Strict: past_due is NOT entitled — downgrade immediately.
-          // The subscription row stays PAST_DUE for UI banner; tier is free.
-          await prisma.$transaction([
-            prisma.subscription.update({
-              where: { stripeSubscriptionId: subscriptionId },
-              data: { status: "PAST_DUE" },
-            }),
-            prisma.user.update({
-              where: { id: existing.userId },
-              data: { planTier: "free" },
-            }),
-            prisma.auditLog.create({
-              data: {
-                actorUserId: existing.userId,
-                action: "billing.payment_failed",
-                model: "Subscription",
-                recordId: subscriptionId,
-              },
-            }),
-          ]);
-        }
-      }
+      if (!subscriptionId) throw new Error("event has no subscription id");
+      // Webhooks are not ordered. Reconcile from Stripe instead of applying
+      // this event's historical state, so an old payment failure delivered
+      // after a successful retry cannot downgrade an active subscription.
+      await syncSubscriptionFromStripe(prisma, stripe, subscriptionId, log);
     }
 
     await prisma.stripeEvent.update({
@@ -224,6 +206,14 @@ export async function processStripeEvent(
       where: { id: eventId },
       data: { status: "failed", lastError: message.slice(0, 500) },
     });
+    log.error(
+      {
+        event: "stripe_webhook_failure",
+        eventId,
+        errorType: err instanceof Error ? err.name : "UnknownError",
+      },
+      "Stripe webhook processing failed",
+    );
     throw err;
   }
 }
@@ -239,31 +229,50 @@ export async function syncStaleSubscriptions(
   log: pino.Logger,
   limit = 50,
 ): Promise<{ checked: number; synced: number }> {
-  const stale = await prisma.subscription.findMany({
-    where: {
-      status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
-      currentPeriodEnd: { lt: new Date() },
-    },
-    orderBy: { currentPeriodEnd: "asc" },
-    take: limit,
-    select: { stripeSubscriptionId: true },
-  });
+  const cutoff = new Date();
+  const batchSize = Math.max(1, limit);
+  let cursor: string | undefined;
+  let checked = 0;
   let synced = 0;
-  for (const row of stale) {
-    try {
-      await syncSubscriptionFromStripe(
-        prisma,
-        stripe,
-        row.stripeSubscriptionId,
-        log,
-      );
-      synced += 1;
-    } catch (err) {
-      log.warn(
-        { err, subscriptionId: row.stripeSubscriptionId },
-        "reconcile sync failed",
-      );
+  for (;;) {
+    const stale = await prisma.subscription.findMany({
+      where: {
+        status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
+        currentPeriodEnd: { lt: cutoff },
+        ...(cursor ? { id: { gt: cursor } } : {}),
+      },
+      orderBy: { id: "asc" },
+      take: batchSize,
+      select: { id: true, stripeSubscriptionId: true },
+    });
+    if (stale.length === 0) break;
+    for (const row of stale) {
+      checked += 1;
+      cursor = row.id;
+      await prisma.subscription.update({
+        where: { id: row.id },
+        data: { lastSyncAttemptAt: new Date() },
+      });
+      try {
+        await syncSubscriptionFromStripe(
+          prisma,
+          stripe,
+          row.stripeSubscriptionId,
+          log,
+        );
+        synced += 1;
+      } catch (err) {
+        await prisma.subscription.update({
+          where: { id: row.id },
+          data: { syncFailureCount: { increment: 1 } },
+        });
+        log.warn(
+          { err, subscriptionId: row.stripeSubscriptionId },
+          "reconcile sync failed",
+        );
+      }
     }
+    if (stale.length < batchSize) break;
   }
-  return { checked: stale.length, synced };
+  return { checked, synced };
 }

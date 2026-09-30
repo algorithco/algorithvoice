@@ -9,14 +9,13 @@
 #        pnpm install && pnpm db:generate && pnpm db:migrate && pnpm dev
 #
 #   2. Full stack in Docker — everything containerized:
-#        cp .env.example .env   # then set real JWT_*/ENCRYPTION_KEK
+#        cp .env.example .env   # then set real JWT_* values
 #        docker compose -f infra/docker-compose.yml up -d --build
-#        Web http://127.0.0.1:3000 · API http://127.0.0.1:3001/health
+#        Public web https://app.trqsh.uz · API https://api.trqsh.uz
+#        Local health ports remain 127.0.0.1:3000 and 127.0.0.1:3001.
 #
-# Loopback uses 127.0.0.1 (NOT localhost) on purpose: the backend refuses
-# `localhost` APP_URL with NODE_ENV=production, and CORS allows exactly
-# APP_URL — so browse the stack at http://127.0.0.1:3000 for cookies/CORS
-# to line up. Override with a real domain via environment when self-hosting.
+# OAuth and browser-facing URLs use the deployed trqsh.uz hosts. Loopback is
+# used only for container health checks and host port exposure.
 #
 # Env: service-to-service URLs below default to Compose DNS
 # (postgres/redis/backend). Secrets come from the repo-root `.env`
@@ -40,6 +39,7 @@ networks:
 volumes:
   pgdata:
   redisdata:
+  sttaudio:
 
 services:
   postgres:
@@ -52,10 +52,10 @@ services:
         required: false
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-algorith}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-algorith}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-algorith_voice}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -70,13 +70,15 @@ services:
     networks: [app]
     logging: *default-logging
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -98,7 +100,7 @@ services:
       - path: ../.env
         required: false
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-algorith}:${POSTGRES_PASSWORD:-algorith}@postgres:5432/${POSTGRES_DB:-algorith_voice}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-algorith}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-algorith_voice}?schema=public
     command: ["prisma", "migrate", "deploy", "--schema", "infra/prisma/schema.prisma"]
     depends_on:
       postgres:
@@ -118,13 +120,18 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: postgresql://${POSTGRES_USER:-algorith}:${POSTGRES_PASSWORD:-algorith}@postgres:5432/${POSTGRES_DB:-algorith_voice}?schema=public
-      REDIS_URL: redis://redis:6379
-      APP_URL: ${APP_URL:-http://127.0.0.1:3000}
-      API_URL: ${API_URL:-http://127.0.0.1:3001}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-algorith}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-algorith_voice}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      STT_STORAGE_BACKEND: local
+      STT_TEMP_DIR: /var/lib/algorith-voice/stt
+      APP_URL: https://app.trqsh.uz
+      API_URL: https://api.trqsh.uz
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      TRUST_PROXY_HOPS: "0"
     ports:
       - "${BACKEND_PORT:-3001}:3001"
+    volumes:
+      - sttaudio:/var/lib/algorith-voice/stt
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -152,13 +159,17 @@ services:
         required: false
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-algorith}:${POSTGRES_PASSWORD:-algorith}@postgres:5432/${POSTGRES_DB:-algorith_voice}?schema=public
-      REDIS_URL: redis://redis:6379
-      APP_URL: ${APP_URL:-http://127.0.0.1:3000}
-      API_URL: ${API_URL:-http://127.0.0.1:3001}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-algorith}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-algorith_voice}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      STT_STORAGE_BACKEND: local
+      STT_TEMP_DIR: /var/lib/algorith-voice/stt
+      APP_URL: https://app.trqsh.uz
+      API_URL: https://api.trqsh.uz
       LOG_LEVEL: ${LOG_LEVEL:-info}
     # Same image, different process (see apps/backend/src/queues/worker.ts).
     command: ["node", "apps/backend/dist/queues/worker.js"]
+    volumes:
+      - sttaudio:/var/lib/algorith-voice/stt
     # No HTTP listener here — the image HEALTHCHECK targets :3001 (API).
     healthcheck:
       disable: true
@@ -175,8 +186,8 @@ services:
       context: ..
       dockerfile: apps/web/Dockerfile
       args:
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://127.0.0.1:3000}
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:3001}
+        NEXT_PUBLIC_APP_URL: https://app.trqsh.uz
+        NEXT_PUBLIC_API_URL: https://api.trqsh.uz
         NEXT_PUBLIC_STRIPE_PRICE_PRO: ${NEXT_PUBLIC_STRIPE_PRICE_PRO:-}
         NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY: ${NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY:-${NEXT_PUBLIC_STRIPE_PRICE_PRO:-}}
         NEXT_PUBLIC_STRIPE_PRICE_PRO_YEARLY: ${NEXT_PUBLIC_STRIPE_PRICE_PRO_YEARLY:-}
@@ -191,7 +202,7 @@ services:
     environment:
       PORT: 3000
       # Server-side BFF proxy target (Compose DNS — NOT localhost).
-      API_URL: https://api.trqsh.uz
+      API_URL: http://backend:3001
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:
