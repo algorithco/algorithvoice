@@ -8,15 +8,34 @@ import {
   sniffAudioFormat,
 } from "./stt.utils.js";
 
-function wavBytes(dataSize: number, byteRate = 32000): Uint8Array {
-  const buf = new Uint8Array(44 + dataSize);
+function wavBytes(
+  dataSize: number,
+  byteRate = 32000,
+  extraChunkSize = 0,
+): Uint8Array {
+  const extraPadded = extraChunkSize + (extraChunkSize % 2);
+  const dataHeader = extraChunkSize > 0 ? 44 + extraPadded : 36;
+  const buf = new Uint8Array(dataHeader + 8 + dataSize);
   const set = (at: number, s: string) => {
     for (let i = 0; i < s.length; i++) buf[at + i] = s.charCodeAt(i);
   };
   set(0, "RIFF");
   set(8, "WAVE");
-  new DataView(buf.buffer).setUint32(28, byteRate, true);
-  new DataView(buf.buffer).setUint32(40, dataSize, true);
+  set(12, "fmt ");
+  const view = new DataView(buf.buffer);
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 16000, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  if (extraChunkSize > 0) {
+    set(36, "LIST");
+    view.setUint32(40, extraChunkSize, true);
+  }
+  set(dataHeader, "data");
+  view.setUint32(dataHeader + 4, dataSize, true);
   return buf;
 }
 
@@ -57,24 +76,44 @@ describe("resolveAudioFormat", () => {
 });
 
 describe("estimateDurationSec", () => {
-  it("reads exact duration from wav header", () => {
+  it("H6: reads exact duration from a canonical wav header", () => {
     expect(estimateDurationSec(wavBytes(64000, 32000), "wav")).toBeCloseTo(
       2,
       5,
     );
   });
-  it("falls back to nominal bitrate", () => {
-    expect(estimateDurationSec(new Uint8Array(16000), "mp3")).toBeCloseTo(1, 5);
+  it("H6: finds fmt and data around an extra RIFF chunk", () => {
+    expect(estimateDurationSec(wavBytes(64000, 32000, 7), "wav")).toBe(2);
+  });
+  it("H6: forged and truncated wav headers cannot under-meter", () => {
+    const forged = wavBytes(10 * 1024 * 1024, 0xffffffff);
+    expect(estimateDurationSec(forged, "wav")).toBeGreaterThan(54);
+
+    const truncated = wavBytes(32000).subarray(0, 16044);
+    expect(estimateDurationSec(truncated, "wav")).toBe(1);
+  });
+  it.each(["wav", "mp3", "flac", "m4a", "ogg", "webm", "aac"])(
+    "H6: applies a lower bound and minimum charge for %s",
+    (format) => {
+      expect(estimateDurationSec(new Uint8Array(1), format)).toBe(1);
+    },
+  );
+  it("H6: does not charge empty uploads", () => {
+    expect(estimateDurationSec(new Uint8Array(), "wav")).toBe(0);
   });
 });
 
 describe("resolveDurationSec", () => {
-  it("accepts sane provider values, estimates the rest", () => {
+  it("H6: accepts sane provider values, estimates the rest", () => {
     const audio = wavBytes(64000, 32000);
     expect(resolveDurationSec(2.5, audio, "wav")).toBe(2.5);
     expect(resolveDurationSec(undefined, audio, "wav")).toBeCloseTo(2, 5);
     expect(resolveDurationSec(-3, audio, "wav")).toBeCloseTo(2, 5);
-    expect(resolveDurationSec(99999, audio, "wav")).toBeCloseTo(2, 5);
+    expect(resolveDurationSec(99999, audio, "wav")).toBe(7200);
+  });
+  it("H6: rejects a provider duration below the byte lower bound", () => {
+    const audio = new Uint8Array(400000);
+    expect(resolveDurationSec(1, audio, "mp3")).toBe(10);
   });
 });
 
@@ -86,6 +125,13 @@ describe("ProviderError", () => {
     expect(new ProviderError(400, "").retryable).toBe(false);
     expect(new ProviderError(401, "").retryable).toBe(false);
     expect(new ProviderError(402, "").retryable).toBe(false);
+  });
+  it("O-OBSERVABILITY: never retains upstream response bodies", () => {
+    const secretProviderBody = "transcript and provider diagnostic";
+    const error = new ProviderError(503, secretProviderBody);
+
+    expect(JSON.stringify(error)).not.toContain(secretProviderBody);
+    expect(Object.values(error)).not.toContain(secretProviderBody);
   });
   it("detects aborts", () => {
     expect(isAbortError({ name: "AbortError" })).toBe(true);

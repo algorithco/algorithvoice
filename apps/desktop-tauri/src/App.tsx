@@ -1,10 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { motion } from "motion/react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { AppSidebar } from "./components/AppSidebar.js";
 import { AuthView } from "./components/AuthView.js";
-import { ArrowLeft } from "./components/animate-ui/icons/arrow-left.js";
+import { PanelLeft } from "./components/animate-ui/icons/panel-left.js";
 import { DashboardView } from "./components/DashboardView.js";
 import { DictateView } from "./components/DictateView.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -12,6 +19,7 @@ import { FloatingPill } from "./components/FloatingPill.js";
 import { HistoryView } from "./components/HistoryView.js";
 import ParticleLogoLoader from "./components/ParticleLogoLoader.js";
 import { type Prefs, SettingsView } from "./components/SettingsView.js";
+import { SubscriptionRequiredView } from "./components/SubscriptionRequiredView.js";
 import { UpdateAnnouncement } from "./components/UpdateAnnouncement.js";
 import { useAuthGate } from "./hooks/useAuthGate.js";
 import { useOnboardingGate } from "./hooks/useOnboardingGate.js";
@@ -22,6 +30,7 @@ import { ensureFloatingPill } from "./lib/ptt.js";
 import { logout } from "./lib/session/auth.js";
 import { isTauri } from "./lib/session/env.js";
 import type { SessionInfo } from "./lib/session/types.js";
+import { useDesktopEntitlement } from "./lib/subscription.js";
 
 // Code-split heavy, rarely-needed bundles so the floating-pill and settings
 // windows don't pay for onboarding/model-management on first paint.
@@ -50,8 +59,32 @@ export default function App() {
     isFloatingPill: isPill,
   });
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const { showAuth, loggedIn } = useAuthGate(session);
+  const {
+    entitlement,
+    refreshing,
+    refresh: refreshEntitlement,
+  } = useDesktopEntitlement(loggedIn || isPill);
   const showOnboarding = useOnboardingGate({ loggedIn, onboarded });
+
+  // Auto-collapse while the desktop content pane is narrow. Below md the
+  // sidebar becomes a drawer; between md and lg it remains as a compact rail.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia("(max-width: 959px)");
+    const sync = () => {
+      if (mql.matches) setCollapsed(true);
+    };
+    sync();
+    // Modern browsers
+    if (mql.addEventListener) mql.addEventListener("change", sync);
+    else mql.addListener(sync);
+    return () => {
+      if (mql.removeEventListener) mql.removeEventListener("change", sync);
+      else mql.removeListener(sync);
+    };
+  }, []);
 
   // Auto-show floating pill once main app is ready (not in pill/settings windows)
   useEffect(() => {
@@ -89,6 +122,7 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return;
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
     void listen<SessionInfo>("session-changed", (event) => {
       const payload = event.payload as unknown as SessionInfo;
       if (payload && typeof payload.loggedIn === "boolean") {
@@ -97,20 +131,44 @@ export default function App() {
       }
     })
       .then((fn) => {
-        unlisten = fn;
+        if (cancelled) fn();
+        else unlisten = fn;
       })
-      .catch(() => {});
+      .catch((e) =>
+        console.warn("algorith-voice: session-changed listen failed", e),
+      );
     return () => {
+      cancelled = true;
       if (unlisten) unlisten();
     };
   }, [setSession]);
 
-  const updatePrefs = (p: Prefs) => {
-    setPrefs(p);
-    void savePrefs(p).catch((e: unknown) => {
-      console.error("algorith-voice: savePrefs failed", e);
-    });
-  };
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastSavedRef = useRef<Prefs>(prefs);
+  useEffect(() => {
+    lastSavedRef.current = prefs;
+  }, [prefs]);
+  const updatePrefs = useCallback(
+    (p: Prefs) => {
+      setPrefs(p);
+      const task = saveQueueRef.current.then(async () => {
+        await savePrefs(p);
+        if (isTauri()) {
+          await emit("settings-refresh", p).catch((e: unknown) => {
+            console.warn("algorith-voice: settings-refresh emit failed", e);
+          });
+        }
+        lastSavedRef.current = p;
+      });
+      task.catch((e: unknown) => {
+        console.error("algorith-voice: savePrefs failed", e);
+        // keep optimistic UI — do not revert; next reload will reconcile
+      });
+      // Keep queue chain alive even after failure
+      saveQueueRef.current = task.catch(() => {});
+    },
+    [setPrefs],
+  );
 
   const handleLogout = () => {
     void logout()
@@ -119,27 +177,17 @@ export default function App() {
   };
 
   const shell =
-    "min-h-screen bg-white text-black dark:bg-black dark:text-white";
+    "min-h-screen w-full min-w-0 overflow-x-hidden bg-white text-black dark:bg-black dark:text-white";
 
   if (isPill) {
     return (
       <ErrorBoundary>
-        <FloatingPill prefs={prefs} />
+        <FloatingPill prefs={prefs} entitlement={entitlement} />
       </ErrorBoundary>
     );
   }
 
   const updateBanner = !isSettings && !isPill ? <UpdateAnnouncement /> : null;
-
-  if (isSettings) {
-    return (
-      <ErrorBoundary>
-        <main className={shell}>
-          <SettingsView prefs={prefs} onPrefs={updatePrefs} />
-        </main>
-      </ErrorBoundary>
-    );
-  }
 
   if (!ready || !splashDone || session === null) {
     return (
@@ -201,49 +249,44 @@ export default function App() {
   }
 
   if (showAuth) {
-    if (view === "settings") {
-      return (
-        <ErrorBoundary>
-          <main className={shell}>
-            {updateBanner}
-            <div className="flex min-h-screen">
-              <AppSidebar
-                active={view}
-                onSelect={(id) => setView(id as View)}
-                collapsed={collapsed}
-                onCollapsedChange={setCollapsed}
-                email={null}
-                onLogout={handleLogout}
-              />
-              <div className="min-w-0 flex-1 overflow-auto">
-                <SettingsView prefs={prefs} onPrefs={updatePrefs} />
-              </div>
-            </div>
-            <div className="fixed bottom-3 right-3 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-black shadow">
-              <button
-                type="button"
-                onClick={() => setView("dashboard")}
-                className="inline-flex items-center gap-1.5"
-              >
-                <ArrowLeft size={14} animateOnHover />
-                Back to sign in
-              </button>
-            </div>
-          </main>
-        </ErrorBoundary>
-      );
-    }
     return (
       <ErrorBoundary>
         <main className="min-h-screen bg-transparent text-white">
           <AuthView onDone={setSession} />
-          <button
-            type="button"
-            onClick={() => setView("settings")}
-            className="fixed bottom-3 right-3 rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/60 hover:bg-white/15 hover:text-white"
-          >
-            Settings
-          </button>
+        </main>
+      </ErrorBoundary>
+    );
+  }
+
+  if (loggedIn && entitlement === null) {
+    return (
+      <ErrorBoundary>
+        <main className="grid min-h-screen place-items-center bg-white text-sm text-gray-500 dark:bg-black">
+          Verifying Pro subscription…
+        </main>
+      </ErrorBoundary>
+    );
+  }
+
+  if (loggedIn && entitlement && !entitlement.valid) {
+    return (
+      <ErrorBoundary>
+        <SubscriptionRequiredView
+          entitlement={entitlement}
+          email={session?.email}
+          refreshing={refreshing}
+          onRefresh={() => void refreshEntitlement()}
+          onLogout={handleLogout}
+        />
+      </ErrorBoundary>
+    );
+  }
+
+  if (isSettings) {
+    return (
+      <ErrorBoundary>
+        <main className={shell}>
+          <SettingsView prefs={prefs} onPrefs={updatePrefs} />
         </main>
       </ErrorBoundary>
     );
@@ -272,24 +315,93 @@ export default function App() {
     <ErrorBoundary>
       <main className={shell}>
         {updateBanner}
-        <div className="flex min-h-screen">
-          <AppSidebar
-            active={view}
-            onSelect={(id) => setView(id as View)}
-            collapsed={collapsed}
-            onCollapsedChange={setCollapsed}
-            email={session?.email ?? null}
-            onLogout={handleLogout}
-          />
-          <div className="min-w-0 flex-1 overflow-auto">
+        <div
+          data-testid="app-shell"
+          className="flex h-[100dvh] w-full min-w-0 overflow-hidden"
+        >
+          {/* Desktop sidebar */}
+          <div className="hidden md:flex">
+            <AppSidebar
+              active={view}
+              onSelect={(id) => setView(id as View)}
+              collapsed={collapsed}
+              onCollapsedChange={setCollapsed}
+              email={session?.email ?? null}
+              planTier={entitlement?.planTier ?? null}
+              onLogout={handleLogout}
+            />
+          </div>
+          {/* Mobile drawer */}
+          {mobileOpen ? (
+            <button
+              type="button"
+              aria-label="Close menu"
+              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+              onClick={() => setMobileOpen(false)}
+            />
+          ) : null}
+          <div
+            inert={!mobileOpen}
+            aria-hidden={!mobileOpen}
+            className={`fixed inset-y-0 left-0 z-50 flex max-w-[85vw] transition-transform duration-200 md:hidden ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+          >
+            <AppSidebar
+              active={view}
+              onSelect={(id) => {
+                setView(id as View);
+                setMobileOpen(false);
+              }}
+              collapsed={false}
+              onCollapsedChange={() => {}}
+              email={session?.email ?? null}
+              planTier={entitlement?.planTier ?? null}
+              onLogout={handleLogout}
+            />
+          </div>
+          <div
+            data-testid="app-content"
+            className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
+          >
+            {/* Mobile top bar */}
+            <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-gray-200 bg-white px-3 dark:border-white/10 dark:bg-black md:hidden">
+              <button
+                type="button"
+                aria-label={mobileOpen ? "Close menu" : "Open menu"}
+                onClick={() => setMobileOpen((v) => !v)}
+                className="grid size-8 place-items-center rounded-md text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/10"
+              >
+                <PanelLeft size={18} />
+              </button>
+              <span className="text-sm font-semibold tracking-tight text-black dark:text-white">
+                Algorith Voice
+              </span>
+              <span className="ml-auto text-xs text-gray-500">
+                {view === "dashboard"
+                  ? "Dashboard"
+                  : view === "dictate"
+                    ? "Dictate"
+                    : view === "history"
+                      ? "History"
+                      : "Settings"}
+              </span>
+            </div>
             {view === "dashboard" ? (
               <DashboardView
                 hotkey={prefs.hotkey}
+                mode={prefs.mode}
+                activeModelId={prefs.activeModelId}
                 email={session?.email ?? null}
+                entitlement={entitlement}
                 onNavigate={setView}
               />
             ) : null}
-            {view === "dictate" ? <DictateView hotkey={prefs.hotkey} /> : null}
+            {view === "dictate" ? (
+              <DictateView
+                hotkey={prefs.hotkey}
+                mode={prefs.mode}
+                activeModelId={prefs.activeModelId}
+              />
+            ) : null}
             {view === "history" ? <HistoryView /> : null}
             {view === "settings" ? (
               <SettingsView prefs={prefs} onPrefs={updatePrefs} />

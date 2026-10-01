@@ -5,7 +5,11 @@ import {
   randomUUID,
   timingSafeEqual,
 } from "node:crypto";
-import { CUSTOM_SCHEME_REDIRECT, DESKTOP_CLIENT_ID } from "./oauth2.schemas.js";
+import {
+  CUSTOM_SCHEME_REDIRECT,
+  DESKTOP_CLIENT_ID,
+  LEGACY_CUSTOM_SCHEME_REDIRECT,
+} from "./oauth2.schemas.js";
 
 // Pure helpers for the first-party OAuth 2.0 authorization server.
 // No Prisma/Redis imports here so the security-critical validators stay
@@ -13,8 +17,13 @@ import { CUSTOM_SCHEME_REDIRECT, DESKTOP_CLIENT_ID } from "./oauth2.schemas.js";
 
 // ---- Lifetimes (seconds) ----
 
-/** Pending browser-side authorization request. */
-export const REQUEST_TTL_SEC = 600;
+/**
+ * Pending browser-side authorization request.
+ * 5m matches the desktop deep-link wait — a closed/cancelled tab must never
+ * linger 10-15m. Cancel/close deletes the keys immediately (see
+ * POST /oauth2/cancel + consent close-beacon); TTL is only the backstop.
+ */
+export const REQUEST_TTL_SEC = 300;
 /** Authorization code: short-lived and single-use (RFC 6749 §4.1.2). */
 export const CODE_TTL_SEC = 120;
 /** Access JWT lifetime; matches the @fastify/jwt signer default. */
@@ -33,6 +42,19 @@ export const codeKey = (code: string) => `oauth2:code:${code}`;
 export const denyKey = (jti: string) => `oauth2:deny:${jti}`;
 export const familyLockKey = (familyId: string) =>
   `oauth2:lock:family:${familyId}`;
+/**
+ * Secondary index: desktop `state` (unguessable 128-bit) -> requestId.
+ * Lets the desktop Cancel button expire a pending request immediately via
+ * POST /oauth2/cancel without ever learning the server-side requestId.
+ * Same TTL as the request itself; deleted together with it on
+ * approve/deny/cancel/expire.
+ */
+export const stateKey = (state: string) => `oauth2:state:${state}`;
+
+/** State must be unguessable + URL-safe; enforced on authorize + cancel. */
+export function isValidStateValue(state: unknown): state is string {
+  return typeof state === "string" && /^[A-Za-z0-9_-]{22,128}$/.test(state);
+}
 
 // ---- Client + redirect validation (RFC 8252 §8.4, RFC 9700 §4.1.3) ----
 
@@ -53,8 +75,11 @@ export type RedirectCheck = { ok: true; normalized: string } | { ok: false };
 export function validateRedirectUri(raw: unknown): RedirectCheck {
   if (typeof raw !== "string") return { ok: false };
   const input = raw.trim();
-  if (input === CUSTOM_SCHEME_REDIRECT) {
-    return { ok: true, normalized: CUSTOM_SCHEME_REDIRECT };
+  if (
+    input === CUSTOM_SCHEME_REDIRECT ||
+    input === LEGACY_CUSTOM_SCHEME_REDIRECT
+  ) {
+    return { ok: true, normalized: input };
   }
   let url: URL;
   try {
@@ -82,6 +107,11 @@ export function validateRedirectUri(raw: unknown): RedirectCheck {
 // ---- PKCE (RFC 7636, S256 only) ----
 
 const VERIFIER_RE = /^[A-Za-z0-9\-._~]{43,128}$/;
+const S256_CHALLENGE_RE = /^[A-Za-z0-9_-]{43}$/;
+
+export function isValidS256Challenge(challenge: unknown): challenge is string {
+  return typeof challenge === "string" && S256_CHALLENGE_RE.test(challenge);
+}
 
 /**
  * Verify `code_verifier` against the stored `code_challenge` using S256.
@@ -96,7 +126,7 @@ export function verifyCodeChallenge(
     return false;
   }
   if (!VERIFIER_RE.test(verifier)) return false;
-  if (challenge.length === 0 || challenge.length > 256) return false;
+  if (!isValidS256Challenge(challenge)) return false;
   const computed = createHash("sha256")
     .update(verifier, "ascii")
     .digest("base64url");

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { getApiUrl } from "@/lib/api-url";
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = getApiUrl();
 const COOKIE_NAME = "__Host-av_at";
+const REFRESH_COOKIE_NAME = "__Host-av_rt";
 const COOKIE_MAX_AGE = 60 * 15;
+const REFRESH_COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30d sliding refresh
 
 export async function POST(req: Request) {
   const body = await req.text();
@@ -15,26 +18,37 @@ export async function POST(req: Request) {
   const headers = new Headers({
     "content-type": res.headers.get("content-type") ?? "application/json",
   });
-  const setCookie = res.headers.get("set-cookie");
-  if (setCookie) headers.set("set-cookie", setCookie);
 
   if (res.ok) {
     try {
-      const data = JSON.parse(text) as { accessToken?: string };
+      const data = JSON.parse(text) as {
+        accessToken?: string;
+        refreshToken?: string;
+        user?: unknown;
+      };
       const token = data.accessToken;
       if (token) {
-        const isProd = process.env.NODE_ENV === "production";
-        const response = new NextResponse(text, {
-          status: res.status,
-          headers,
-        });
+        // __Host- requires Secure (see login route) — same fix applies here.
+        const response = NextResponse.json(
+          { user: data.user },
+          { status: res.status },
+        );
         response.cookies.set(COOKIE_NAME, token, {
           httpOnly: true,
-          secure: isProd,
+          secure: true,
           sameSite: "lax",
           path: "/",
           maxAge: COOKIE_MAX_AGE,
         });
+        if (data.refreshToken) {
+          response.cookies.set(REFRESH_COOKIE_NAME, data.refreshToken, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "lax",
+            path: "/",
+            maxAge: REFRESH_COOKIE_MAX_AGE,
+          });
+        }
         return response;
       }
     } catch {

@@ -28,7 +28,7 @@ export function HotkeyStep({
               setHotkeyInput(e.target.value);
               setHotkeyError(null);
             }}
-            className="h-full w-full bg-transparent text-center text-[15px] font-medium tracking-wide text-white placeholder:text-white/30 focus:outline-none"
+            className="h-full w-full bg-transparent text-center text-[15px] font-medium tracking-wide text-white placeholder:text-white/60 focus:outline-none"
             spellCheck={false}
             aria-label="Hotkey"
             placeholder="Ctrl + Space"
@@ -37,7 +37,7 @@ export function HotkeyStep({
         {hotkeyError ? (
           <p className="mt-2 text-center text-xs text-red-400">{hotkeyError}</p>
         ) : (
-          <p className="mt-2 text-center text-xs text-white/25">
+          <p className="mt-2 text-center text-xs text-white/60">
             Press to record • Example: Ctrl + Space
           </p>
         )}

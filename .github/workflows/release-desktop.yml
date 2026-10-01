@@ -26,13 +26,18 @@ jobs:
             target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # Fail fast on tag/config version skew: tauri-action's v__VERSION__
       # release would otherwise diverge from the git tag that triggered us.
       - name: version consistency gate
         shell: bash
         run: |
-          TAG="${GITHUB_REF#refs/tags/v}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/v}"
+          else
+            TAG="${{ inputs.version }}"
+          fi
+          [ -n "$TAG" ] || { echo "version input is required for workflow_dispatch"; exit 1; }
           CARGO=$(grep -m1 '^version' apps/desktop-tauri/src-tauri/Cargo.toml | cut -d'"' -f2)
           CONF=$(python3 -c "import json;print(json.load(open('apps/desktop-tauri/src-tauri/tauri.conf.json'))['version'])")
           PKG=$(node -p "require('./apps/desktop-tauri/package.json').version")
@@ -40,15 +45,18 @@ jobs:
       - name: signing secrets preflight
         shell: bash
         run: |
-          # With createUpdaterArtifacts:true a tag build without signing keys
-          # ships no .sig/latest.json and breaks auto-update in the field.
           [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ] || { echo "TAURI_SIGNING_PRIVATE_KEY missing — updater artifacts would be unsigned"; exit 1; }
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - name: manifest signature check
+        shell: bash
+        run: |
+          pip install pynacl
+          python apps/desktop-tauri/src-tauri/scripts/sign-manifest.py check --manifest apps/desktop-tauri/src-tauri/src/local_asr/default_manifest.json --pubkey apps/desktop-tauri/src-tauri/src/local_asr/manifest_signing_pubkey.hex
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable commit 2026-09-03
         with:
           targets: ${{ matrix.target }}
       - name: Linux deps
@@ -59,7 +67,7 @@ jobs:
         run: |
           pnpm --filter @algorith-voice/shared-types build
           pnpm --filter @algorith-voice/ui build
-      - uses: tauri-apps/tauri-action@v1
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

@@ -17,17 +17,17 @@ jobs:
     # (see apps/desktop-tauri/e2e/README.md). Windows is the release target;
     # Linux would additionally need xvfb + WebKit deps.
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable commit 2026-09-03
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: apps/desktop-tauri/src-tauri -> target
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
       - run: pip install pynacl --quiet
@@ -48,10 +48,6 @@ jobs:
         run: cargo build --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
-      - name: build desktop (debug)
-        run: cargo build --manifest-path apps/desktop-tauri/src-tauri/Cargo.toml
-        env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
       - name: install tauri-driver
         # Pinned: the driver speaks the native-driver protocol, so it must
         # move in lockstep with tauri/cli (floating broke nothing yet, but a
@@ -67,7 +63,7 @@ jobs:
         run: pnpm --filter @algorith-voice/desktop e2e
       - name: upload screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-screenshots-windows
           path: apps/desktop-tauri/e2e/screenshots/

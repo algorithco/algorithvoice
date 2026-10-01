@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const checkoutRequestSchema = z
   .object({
-    priceId: z.string().min(1),
+    interval: z.enum(["monthly", "yearly"]),
     successUrl: z.string().url(),
     cancelUrl: z.string().url(),
   })
@@ -30,6 +30,9 @@ export const portalResponseSchema = z
   .strict();
 export type PortalResponse = z.infer<typeof portalResponseSchema>;
 
+export const billingIntervalSchema = z.enum(["monthly", "yearly"]);
+export type BillingInterval = z.infer<typeof billingIntervalSchema>;
+
 export const subscriptionSchema = z
   .object({
     status: z.enum([
@@ -41,6 +44,8 @@ export const subscriptionSchema = z
       "free",
     ]),
     planTier: z.enum(["free", "pro"]),
+    priceId: z.string().nullable().default(null),
+    billingInterval: billingIntervalSchema.nullable().default(null),
     currentPeriodEnd: z.string().nullable(),
     cancelAtPeriodEnd: z.boolean().default(false),
   })

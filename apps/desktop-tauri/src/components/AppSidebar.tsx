@@ -12,8 +12,8 @@ import { UserRound } from "./animate-ui/icons/user-round.js";
 // cubic-bezier(0.4, 0, 0.2, 1). Sidebar width 220px expanded.
 const EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 const DURATION = 200;
-const EXPANDED = "220px";
-const COLLAPSED = "3.3rem";
+const EXPANDED = "240px";
+const COLLAPSED = "64px";
 
 type View = "dashboard" | "dictate" | "history" | "settings";
 
@@ -21,7 +21,6 @@ type NavItem = {
   id: View;
   label: string;
   icon: React.ReactNode;
-  shortcut?: string;
 };
 
 export function AppSidebar({
@@ -30,6 +29,7 @@ export function AppSidebar({
   collapsed,
   onCollapsedChange,
   email,
+  planTier,
   onLogout,
 }: {
   active: View;
@@ -37,6 +37,7 @@ export function AppSidebar({
   collapsed: boolean;
   onCollapsedChange: (v: boolean) => void;
   email?: string | null;
+  planTier?: "free" | "pro" | null;
   onLogout?: () => void;
 }) {
   const navItems: NavItem[] = [
@@ -49,7 +50,6 @@ export function AppSidebar({
       label: "Dictate",
       id: "dictate",
       icon: <AudioLines size={18} animateOnHover />,
-      shortcut: "Ctrl+Space",
     },
     {
       label: "History",
@@ -65,13 +65,13 @@ export function AppSidebar({
 
   return (
     <div
-      className="sticky top-0 h-screen shrink-0 overflow-hidden border-r border-gray-200 bg-white dark:border-white/10 dark:bg-black"
+      className="desktop-sidebar sticky top-0 h-full shrink-0 overflow-hidden border-r border-gray-200 bg-white dark:border-white/10 dark:bg-black"
       style={{
         width: collapsed ? COLLAPSED : EXPANDED,
         transition: `width ${DURATION}ms ${EASE}`,
       }}
     >
-      <div className="flex h-full min-h-[520px] w-full flex-col">
+      <div className="flex h-full min-h-0 w-full flex-col">
         {/* Header: wordmark + collapse */}
         <div className="relative flex h-12 shrink-0 items-center p-2">
           <div
@@ -94,7 +94,10 @@ export function AppSidebar({
         </div>
 
         {/* Primary nav */}
-        <nav className="flex flex-col gap-px px-2 pt-2" aria-label="Primary">
+        <nav
+          className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pt-4"
+          aria-label="Primary"
+        >
           {navItems.map((it) => (
             <NavRow
               key={it.id}
@@ -136,7 +139,11 @@ export function AppSidebar({
                       {email ?? "Guest"}
                     </span>
                     <span className="av-small w-full truncate text-left text-[11px] text-gray-500">
-                      {email ? "Signed in" : "Local only"}
+                      {email
+                        ? planTier === "pro"
+                          ? "Pro subscription"
+                          : "Subscription required"
+                        : "Signed out"}
                     </span>
                   </div>
                   <span className="grid size-7 shrink-0 place-items-center rounded-control text-gray-500 transition-colors duration-150 group-hover:bg-white group-hover:text-black dark:group-hover:bg-white/10 dark:group-hover:text-white">
@@ -190,7 +197,7 @@ function NavRow({
       aria-label={item.label}
       aria-current={active ? "page" : undefined}
       title={collapsed ? item.label : undefined}
-      className={`group relative flex h-10 w-full items-center overflow-hidden rounded-full text-sm transition-all duration-150 active:scale-[0.99] ${
+      className={`group relative flex h-11 shrink-0 w-full items-center overflow-hidden rounded-xl text-sm transition-colors duration-150 ${
         collapsed ? "justify-center px-0" : "px-4"
       } ${
         active
@@ -200,23 +207,16 @@ function NavRow({
     >
       <span
         className={`flex min-w-0 items-center ${
-          collapsed ? "justify-center" : "w-full -translate-x-2 gap-3"
+          collapsed ? "justify-center" : "w-full gap-3"
         }`}
       >
         <span className="grid size-5 shrink-0 place-items-center">
           {item.icon}
         </span>
         {collapsed ? null : (
-          <>
-            <span className="min-w-0 flex-1 truncate text-left">
-              {item.label}
-            </span>
-            {item.shortcut ? (
-              <span className="shrink-0 text-[12px] text-gray-500 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                {item.shortcut}
-              </span>
-            ) : null}
-          </>
+          <span className="min-w-0 flex-1 truncate text-left">
+            {item.label}
+          </span>
         )}
       </span>
     </button>

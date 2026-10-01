@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { getApiUrl } from "@/lib/api-url";
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = getApiUrl();
 
 // Thin BFF: the browser's httpOnly __Host-av_at cookie never leaves this
 // origin. We read it server-side and forward it to the backend as Bearer.
@@ -11,6 +12,23 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  // Validate shape before forwarding: prevents garbage reaching the backend
+  // and gives the consent UI fast 400s. Backend re-validates authoritatively.
+  const b = body as Record<string, unknown> | null;
+  const requestId = b?.request_id;
+  const approved = b?.approved;
+  const via = b?.via;
+  const uuidRe =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (
+    typeof requestId !== "string" ||
+    requestId.length > 64 ||
+    !uuidRe.test(requestId) ||
+    typeof approved !== "boolean" ||
+    (via !== undefined && via !== "button" && via !== "close")
+  ) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   const cookieStore = await cookies();

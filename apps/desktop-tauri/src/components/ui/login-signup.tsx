@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Particles from "@/components/Particles";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,9 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { signInDesktop } from "@/lib/session/auth";
-import { loginDemo } from "@/lib/session/demo-account";
+import { sessionStatus, signInDesktop } from "@/lib/session/auth";
 import type { SessionInfo } from "@/lib/session/types";
 
 type Props = {
@@ -24,30 +22,67 @@ type Props = {
 export default function LoginCardSection({ onDone }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      // Unmount mid-flight (e.g. navigating to Settings): cancel the pending
+      // deep-link listener instead of orphaning it until the 5-min timeout.
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  // Returning from the browser (deny, close, or approve in another window)
+  // should reconcile immediately instead of looking stuck in-progress.
+  useEffect(() => {
+    if (!busy) return;
+    const reconcile = async () => {
+      try {
+        const s = await sessionStatus();
+        if (s.loggedIn && mountedRef.current) onDoneRef.current(s);
+      } catch {
+        // Keyring IPC can be slow — ignore, the deep-link listener owns it.
+      }
+    };
+    const onFocus = () => void reconcile();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void reconcile();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [busy]);
 
   const handleContinue = async () => {
+    if (busy) return;
     setError(null);
     setBusy(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const s = await signInDesktop();
-      onDone(s);
+      const s = await signInDesktop({ signal: controller.signal });
+      if (mountedRef.current) onDone(s);
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Sign in failed. Please try again.",
-      );
+      if (mountedRef.current && !controller.signal.aborted)
+        setError(
+          e instanceof Error ? e.message : "Sign in failed. Please try again.",
+        );
     } finally {
-      setBusy(false);
+      abortRef.current = null;
+      if (mountedRef.current) setBusy(false);
     }
   };
 
-  const handleDemo = async () => {
-    setError(null);
-    try {
-      const s = await loginDemo();
-      onDone(s);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Demo sign-in failed.");
-    }
+  const handleCancel = () => {
+    abortRef.current?.abort();
   };
 
   return (
@@ -109,7 +144,7 @@ export default function LoginCardSection({ onDone }: Props) {
                 </CardTitle>
                 <CardDescription className="text-[13px] leading-relaxed text-white/60">
                   Continue with Algorith Voice — you’ll be redirected to
-                  <span className="text-white"> algorithvoice.com </span>
+                  <span className="text-white"> app.trqsh.uz </span>
                   to sign in securely.
                 </CardDescription>
               </CardHeader>
@@ -129,8 +164,19 @@ export default function LoginCardSection({ onDone }: Props) {
                 >
                   {busy ? "Opening browser…" : "Continue with Algorith Voice"}
                 </Button>
-                <p className="text-center text-[11px] leading-none text-white/35">
-                  Secure OAuth 2.0 • PKCE • No password in the app
+                {busy ? (
+                  <Button
+                    className="h-[42px] w-full rounded-xl border border-white/10 bg-transparent text-[13px] text-white/70 hover:bg-white/[0.04] hover:text-white transition-all"
+                    onClick={handleCancel}
+                    type="button"
+                  >
+                    Cancel
+                  </Button>
+                ) : null}
+                <p className="text-center text-[11px] leading-relaxed text-white/35">
+                  {busy
+                    ? "Verify the app.trqsh.uz address in your browser, then approve or deny access."
+                    : "System browser • OAuth 2.0 • PKCE S256 • Password stays out of the app"}
                 </p>
               </motion.div>
 
@@ -147,36 +193,6 @@ export default function LoginCardSection({ onDone }: Props) {
                   </motion.p>
                 ) : null}
               </AnimatePresence>
-
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.5, delay: 0.45 }}
-                className="relative"
-              >
-                <Separator className="bg-white/10" />
-                <span className="absolute left-1/2 -translate-x-1/2 -top-2.5 bg-black px-3 text-[11px] uppercase tracking-widest text-white/30">
-                  or
-                </span>
-              </motion.div>
-
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.52 }}
-              >
-                <Button
-                  variant="outline"
-                  className="h-[46px] w-full rounded-xl border border-white/10 bg-black text-[14px] font-medium text-white hover:bg-white/[0.04] hover:border-white/15 hover:text-white transition-all"
-                  onClick={handleDemo}
-                  disabled={busy}
-                >
-                  Continue as demo — no backend needed
-                </Button>
-                <p className="mt-2.5 text-center text-[11px] text-white/30">
-                  demo@algorithvoice.local · local-only session
-                </p>
-              </motion.div>
             </CardContent>
 
             <motion.div
@@ -191,12 +207,12 @@ export default function LoginCardSection({ onDone }: Props) {
                   Your browser will open to complete sign-in.
                 </p>
                 <a
-                  href="https://algorithvoice.com"
+                  href="https://app.trqsh.uz"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[10px] tracking-[0.14em] text-white/20 transition-colors hover:text-white/40 uppercase"
                 >
-                  algorithvoice.com
+                  app.trqsh.uz
                 </a>
               </CardFooter>
             </motion.div>

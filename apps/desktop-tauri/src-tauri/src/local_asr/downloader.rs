@@ -96,17 +96,20 @@ fn check_https(raw: &str) -> AppResult<reqwest::Url> {
     if url.scheme() == "https" {
         return Ok(url);
     }
-    // Loopback HTTP exists so integration tests can run against a local
-    // fixture server (and mirrors Tauri's own http://localhost devUrl).
-    // Manifests stay HTTPS-strict at validation time; this is transport
-    // enforcement with a test-only-shaped carve-out, and hashes are still
-    // verified regardless of scheme.
-    let loopback = url.scheme() == "http"
+    // Loopback HTTP only allowed in tests/fixtures — production manifests are
+    // HTTPS-strict at validation time. Gate with debug_assert in release.
+    #[cfg(test)]
+    let allow_loopback = true;
+    #[cfg(not(test))]
+    let allow_loopback =
+        url.scheme() == "http" && std::env::var("ALLOW_HTTP_LOOPBACK").as_deref() == Ok("1");
+    if allow_loopback
+        && url.scheme() == "http"
         && matches!(
             url.host_str(),
             Some("localhost") | Some("127.0.0.1") | Some("::1")
-        );
-    if loopback {
+        )
+    {
         Ok(url)
     } else {
         Err(AppError::model_download_failed(
@@ -167,6 +170,14 @@ impl SpeedTracker {
 /// Shared with the verify path so install-time and on-demand checks agree.
 pub(crate) async fn verify_file(path: &Path, expected_sha256: &str) -> AppResult<()> {
     use tokio::io::AsyncReadExt as _;
+    let metadata = tokio::fs::symlink_metadata(path).await.map_err(|e| {
+        AppError::model_download_failed(format!("cannot inspect file for verify: {e}"))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(AppError::model_checksum_mismatch(
+            "refusing to verify a symlink or non-regular model file",
+        ));
+    }
     let mut file = tokio::fs::File::open(path).await.map_err(|e| {
         AppError::model_download_failed(format!("cannot open file for verify: {e}"))
     })?;
@@ -185,21 +196,28 @@ pub(crate) async fn verify_file(path: &Path, expected_sha256: &str) -> AppResult
     if actual == expected_sha256.to_lowercase() {
         Ok(())
     } else {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "model file".to_string());
         Err(AppError::model_checksum_mismatch(format!(
-            "checksum mismatch for {}",
-            path.display()
+            "checksum mismatch for {name}"
         )))
     }
 }
 
 fn map_write_error(e: std::io::Error, dest: &Path) -> AppError {
-    if e.kind() == std::io::ErrorKind::StorageFull {
-        AppError::model_insufficient_disk_space(format!(
-            "disk full while writing {}",
-            dest.display()
-        ))
+    let is_full = e.kind() == std::io::ErrorKind::StorageFull
+        || e.raw_os_error() == Some(28)
+        || e.to_string().contains("No space");
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "model file".to_string());
+    if is_full {
+        AppError::model_insufficient_disk_space(format!("disk full while writing {name}"))
     } else {
-        AppError::model_download_failed(format!("cannot write {}: {e}", dest.display()))
+        AppError::model_download_failed(format!("cannot write {name}: {e}"))
     }
 }
 
@@ -251,12 +269,20 @@ async fn fetch_once(
     // Enforce HTTPS even after redirects (prevents CDN http downgrade/SSRF).
     {
         let final_url = response.url();
-        let is_loopback = final_url.scheme() == "http"
+        #[cfg(test)]
+        let allow_loopback = final_url.scheme() == "http"
             && matches!(
                 final_url.host_str(),
                 Some("localhost") | Some("127.0.0.1") | Some("::1")
             );
-        if final_url.scheme() != "https" && !is_loopback {
+        #[cfg(not(test))]
+        let allow_loopback = final_url.scheme() == "http"
+            && std::env::var("ALLOW_HTTP_LOOPBACK").as_deref() == Ok("1")
+            && matches!(
+                final_url.host_str(),
+                Some("localhost") | Some("127.0.0.1") | Some("::1")
+            );
+        if final_url.scheme() != "https" && !allow_loopback {
             return Err(AppError::model_download_failed(
                 "refusing non-HTTPS redirect target",
             ));
@@ -345,27 +371,17 @@ where
             AppError::model_download_failed(format!("cannot create model dir: {e}"))
         })?;
         // Reject symlink parent after creation (prevents Startup folder hijack)
-        if let Ok(meta) = tokio::fs::symlink_metadata(parent).await {
-            if meta.file_type().is_symlink() {
-                return Err(AppError::model_download_failed(
-                    "model directory is a symlink — refusing to write",
-                ));
-            }
-        }
-        // Walk parent components for symlink (defense against nested tokenizer symlink)
-        let mut cur = parent;
-        while let Some(p) = cur.parent() {
-            if p.as_os_str().is_empty() {
-                break;
-            }
-            if let Ok(m) = std::fs::symlink_metadata(p) {
-                if m.file_type().is_symlink() {
+        // Walk entire parent chain including root (C:\ on Windows).
+        let mut cur: Option<&Path> = Some(parent);
+        while let Some(p) = cur {
+            if let Ok(meta) = std::fs::symlink_metadata(p) {
+                if meta.file_type().is_symlink() {
                     return Err(AppError::model_download_failed(
                         "model path contains symlink — refusing to write",
                     ));
                 }
             }
-            cur = p;
+            cur = p.parent();
         }
     }
     // Refuse to overwrite an existing symlink file
@@ -378,20 +394,35 @@ where
     }
     let part = part_path(&req.dest_final);
     let meta_path = meta_path(&req.dest_final);
+    // TOCTOU: reject if .part or .part.json are already symlinks
+    for p in [&part, &meta_path] {
+        if let Ok(meta) = std::fs::symlink_metadata(p) {
+            if meta.file_type().is_symlink() {
+                return Err(AppError::model_download_failed(
+                    "partial download path is a symlink — refusing to write",
+                ));
+            }
+        }
+    }
 
     let urls: Vec<&str> = std::iter::once(req.url.as_str())
         .chain(req.fallback_url.as_deref())
         .collect();
     let mut last_err: Option<AppError> = None;
-    for url_raw in urls {
+    for (idx, url_raw) in urls.iter().enumerate() {
         let url = check_https(url_raw)?;
         match download_from_url(client, req, &url, &part, &meta_path, &on_progress).await {
             Ok(()) => return Ok(()),
             Err(e) => {
-                // Checksum mismatch and disk-full are terminal: retrying the
-                // same bytes cannot help (mismatch also deletes the part).
-                if e.code == "model-checksum-mismatch" || e.code == "model-insufficient-disk-space"
-                {
+                if e.code == "model-insufficient-disk-space" {
+                    return Err(e);
+                }
+                if e.code == "model-checksum-mismatch" {
+                    // Primary CDN corrupt — try fallback mirror before failing
+                    if idx + 1 < urls.len() {
+                        last_err = Some(e);
+                        continue;
+                    }
                     return Err(e);
                 }
                 last_err = Some(e);
@@ -493,6 +524,16 @@ where
         let _ = tokio::fs::remove_file(part).await;
         let _ = tokio::fs::remove_file(meta_path).await;
     }
+    if req
+        .expected_size
+        .is_some_and(|expected| expected != 0 && resume_from > expected)
+    {
+        // A corrupt/hostile sidecar must not make us request beyond the
+        // signed payload boundary or preserve oversized disk contents.
+        let _ = tokio::fs::remove_file(part).await;
+        let _ = tokio::fs::remove_file(meta_path).await;
+        resume_from = 0;
+    }
 
     let plan = fetch_once(client, url, resume_from, req.timeout).await?;
     if plan.start_offset == 0 && resume_from > 0 {
@@ -502,10 +543,12 @@ where
     }
     let total = plan.server_total.or(req.expected_size);
     if let (Some(expected), Some(server)) = (req.expected_size, plan.server_total) {
-        if expected != 0 && server != 0 && expected != server && resume_from == 0 {
+        if expected != 0 && server != 0 && expected != server {
             // Remote file changed size between manifest and download and we
-            // are already starting fresh: the manifest is stale for this URL.
-            return Err(AppError::model_download_failed(format!(
+            // must not keep or extend bytes from a different payload.
+            let _ = tokio::fs::remove_file(part).await;
+            let _ = tokio::fs::remove_file(meta_path).await;
+            return Err(AppError::model_checksum_mismatch(format!(
                 "remote file size changed (manifest: {expected} bytes, server: {server} bytes)"
             )));
         }
@@ -520,6 +563,22 @@ where
         },
     )
     .await?;
+
+    // TOCTOU re-check just before open (attacker could swap after download_file check)
+    if let Ok(meta) = tokio::fs::symlink_metadata(part).await {
+        if meta.file_type().is_symlink() {
+            return Err(AppError::model_download_failed(
+                "partial path is a symlink — refusing to write",
+            ));
+        }
+    }
+    if let Ok(meta) = tokio::fs::symlink_metadata(meta_path).await {
+        if meta.file_type().is_symlink() {
+            return Err(AppError::model_download_failed(
+                "resume meta path is a symlink — refusing to write",
+            ));
+        }
+    }
 
     let file = tokio::fs::OpenOptions::new()
         .create(true)
@@ -552,6 +611,16 @@ where
         let Some(bytes) = chunk else { break };
         if bytes.is_empty() {
             continue;
+        }
+        if req.expected_size.is_some_and(|expected| {
+            expected != 0 && downloaded.saturating_add(bytes.len() as u64) > expected
+        }) {
+            drop(file);
+            let _ = tokio::fs::remove_file(part).await;
+            let _ = tokio::fs::remove_file(meta_path).await;
+            return Err(AppError::model_checksum_mismatch(
+                "download exceeded the signed manifest size",
+            ));
         }
         file.write_all(&bytes)
             .await
@@ -712,9 +781,18 @@ impl DownloadManager {
         Ok(())
     }
 
-    /// Abort a running download. Returns true when a live task was stopped;
-    /// the partial file is kept so the user can resume. Never an error.
-    pub fn cancel(&self, id: &str) -> bool {
+    /// Abort a running download and wait until it has actually stopped.
+    /// Returns true when a live task was stopped; the partial file is kept
+    /// so the user can resume. Never an error.
+    ///
+    /// The wait matters: `abort()` alone only *schedules* cancellation, so
+    /// the task may still hold an open `tokio::fs::File` when this returns.
+    /// Callers that touch the model directory next (e.g. `delete_model`'s
+    /// `remove_dir_all`, which fails outright on Windows while a handle is
+    /// open) must observe a fully-stopped task. The wait is bounded (abort
+    /// delivery is prompt once scheduled) so a stuck task can never hang
+    /// the caller.
+    pub async fn cancel(&self, id: &str) -> bool {
         let handle = self
             .tasks
             .lock()
@@ -723,6 +801,10 @@ impl DownloadManager {
         match handle {
             Some(h) if !h.is_finished() => {
                 h.abort();
+                // Await the aborted task so its file handles are dropped
+                // before returning. `JoinHandle::abort` + `.await` resolves
+                // once the task is actually done (cancelled or finished).
+                let _ = tokio::time::timeout(Duration::from_secs(3), h).await;
                 true
             }
             Some(_) => false,
@@ -1179,6 +1261,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn close_delimited_body_cannot_exceed_signed_size() {
+        let dir = test_dir("oversize-no-length");
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let (fx, body) = start_server(payload(64 * 1024)).await;
+        let mut req = request(fx.addr, "/no-length", &dir, body.len());
+        req.expected_size = Some(1024);
+        req.expected_sha256 = sha_hex(&body);
+        req.max_retries = 0;
+        let manager = DownloadManager::new();
+        let (outcome, _) = run_via_manager(&manager, "m", req).await;
+        let err = outcome.expect_err("oversized stream must fail");
+        assert_eq!(err.code, "model-checksum-mismatch");
+        assert!(!dir.join("model.bin").exists());
+        assert!(!dir.join("model.bin.part").exists());
+        assert!(!dir.join("model.bin.part.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
     async fn cancel_keeps_partial_for_resume_and_is_not_an_error() {
         let dir = test_dir("cancel");
         std::fs::create_dir_all(&dir).expect("scratch dir");
@@ -1210,11 +1311,28 @@ mod tests {
             )
             .expect("start ok");
         assert!(manager.is_running("m"));
-        // Let a few chunks land, then cancel.
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(manager.cancel("m"), "live task must cancel");
+        // Wait until a few chunks have landed (part file exists and is
+        // non-empty) before cancelling. A fixed sleep races task startup
+        // on fast CI runners: cancel could win before the first flush and
+        // the part file would never exist (NotFound flake).
+        let part_path = dir.join("model.bin.part");
+        let mut landed = false;
+        for _ in 0..200 {
+            if let Ok(md) = std::fs::metadata(&part_path) {
+                if md.len() > 0 {
+                    landed = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(landed, "some bytes must land before cancel");
+        assert!(manager.cancel("m").await, "live task must cancel");
         assert!(!manager.is_running("m"));
-        assert!(!manager.cancel("m"), "second cancel reports nothing live");
+        assert!(
+            !manager.cancel("m").await,
+            "second cancel reports nothing live"
+        );
         // The aborted task must never report completion: poll briefly and
         // require silence (abort delivery itself is prompt).
         for _ in 0..20 {
@@ -1230,6 +1348,63 @@ mod tests {
         assert!(part_len > 0, "some bytes must have landed, got {part_len}");
         assert!(!dir.join("model.bin").exists(), "final must not exist");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn cancel_then_delete_leaves_no_files_behind() {
+        // Regression test for `delete_model` racing an in-flight download:
+        // `cancel()` must await the aborted task (releasing its open file
+        // handle) so the subsequent `remove_dir_all` wipes everything. On
+        // Windows the removal fails outright while a handle is still open,
+        // leaving the directory partially intact and disk unreclaimed.
+        let dir = test_dir("cancel-delete");
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let (fx, _body) = start_server(payload(1024)).await;
+        let manager = DownloadManager::new();
+        let req = DownloadRequest {
+            url: format!("http://127.0.0.1:{}/slow", fx.addr.port()),
+            fallback_url: None,
+            dest_final: dir.join("model.bin"),
+            resume_key: "test-v1".to_string(),
+            expected_sha256: "ab".repeat(32),
+            expected_size: Some(8 * 1024 * 1024),
+            timeout: Duration::from_secs(60),
+            max_retries: 0,
+        };
+        manager
+            .start_model(
+                "m".to_string(),
+                vec![ModelFileRequest {
+                    request: req,
+                    completed_offset: 0,
+                    model_total: 8 * 1024 * 1024,
+                }],
+                |_| {},
+                |_| {},
+            )
+            .expect("start ok");
+        // Wait for bytes to land so the task holds an open file handle,
+        // mirroring a mid-download delete.
+        let part_path = dir.join("model.bin.part");
+        let mut landed = false;
+        for _ in 0..200 {
+            if let Ok(md) = std::fs::metadata(&part_path) {
+                if md.len() > 0 {
+                    landed = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(landed, "some bytes must land before cancel");
+        // The `delete_model` sequence: awaited cancel, then wipe the dir.
+        assert!(manager.cancel("m").await, "live task must cancel");
+        std::fs::remove_dir_all(&dir).expect("dir must wipe after awaited cancel");
+        assert!(!dir.exists(), "no leftover files or folders may remain");
+        // Grace period: a zombie task still holding the handle would keep
+        // writing and resurrect the directory; nothing may reappear.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!dir.exists(), "aborted task must not resurrect files");
     }
 
     #[tokio::test]
@@ -1259,7 +1434,7 @@ mod tests {
             .start_model("m".to_string(), vec![mk()], |_| {}, |_| {})
             .expect_err("second start must fail");
         assert_eq!(err.code, "model-download-failed");
-        manager.cancel("m");
+        manager.cancel("m").await;
         let _ = std::fs::remove_dir_all(&dir);
     }
 

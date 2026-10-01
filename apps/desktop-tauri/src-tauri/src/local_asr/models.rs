@@ -137,14 +137,43 @@ pub fn disk_status(app_data: &Path, model: &LocalModel) -> AppResult<DiskStatus>
             })
         }
     };
-    if record.id != model.id {
+    if record.id != model.id || record.version != model.version {
         return Ok(DiskStatus::Broken {
-            message: "install record belongs to a different model; re-download".to_string(),
+            message: "install record does not match the current model version; re-download"
+                .to_string(),
         });
     }
-    for file in &record.files {
-        let len = std::fs::metadata(dir.join(&file.filename)).map(|m| m.len());
-        if len.ok() != Some(file.size_bytes) {
+    if record.files.len() != model.files.len() {
+        return Ok(DiskStatus::Broken {
+            message: "install record is incomplete; re-download or verify the model".to_string(),
+        });
+    }
+    for expected in &model.files {
+        let Some(file) = record
+            .files
+            .iter()
+            .find(|f| f.filename == expected.filename)
+        else {
+            return Ok(DiskStatus::Broken {
+                message: "install record is missing required files; re-download or verify"
+                    .to_string(),
+            });
+        };
+        if file.sha256.to_lowercase() != expected.sha256.to_lowercase()
+            || (expected.size_bytes != 0 && file.size_bytes != expected.size_bytes)
+        {
+            return Ok(DiskStatus::Broken {
+                message: "install record does not match the signed manifest; re-download or verify"
+                    .to_string(),
+            });
+        }
+        let path = dir.join(&file.filename);
+        let meta = std::fs::symlink_metadata(&path);
+        if meta
+            .as_ref()
+            .is_ok_and(|m| m.file_type().is_symlink() || !m.is_file())
+            || meta.as_ref().map(|m| m.len()).ok() != Some(file.size_bytes)
+        {
             return Ok(DiskStatus::Broken {
                 message: "installed files changed or are missing; re-download or verify"
                     .to_string(),
@@ -385,25 +414,10 @@ struct PartMeta {
 pub fn installed_models(app_data: &Path, manifest: &ModelManifest) -> Vec<InstalledModel> {
     let mut out = Vec::new();
     for model in &manifest.models {
-        let Ok(dir) = model_dir(app_data, &model.id) else {
-            continue;
+        let record = match disk_status(app_data, model) {
+            Ok(DiskStatus::Ready(r)) => r,
+            _ => continue,
         };
-        let record = match read_installed_record(&dir) {
-            Some(r) => r,
-            None => continue,
-        };
-        if record.id != model.id {
-            continue;
-        }
-        let complete = record.files.iter().all(|f| {
-            std::fs::metadata(dir.join(&f.filename))
-                .map(|m| m.len())
-                .ok()
-                == Some(f.size_bytes)
-        });
-        if !complete {
-            continue;
-        }
         out.push(InstalledModel {
             id: record.id.clone(),
             name: model.name.clone(),
@@ -521,8 +535,19 @@ mod tests {
     #[test]
     fn complete_record_reads_ready() {
         let base = test_dir("ready");
-        let m = manifest();
-        let model = parakeet(&m);
+        let mut m = manifest();
+        let mut model = parakeet(&m);
+        model.files = vec![crate::local_asr::manifest::ModelFile {
+            filename: "encoder.int8.onnx".to_string(),
+            url: "https://cdn.example.com/encoder.int8.onnx".to_string(),
+            fallback_url: None,
+            sha256: "aa".repeat(32),
+            size_bytes: 10,
+        }];
+        *m.models
+            .iter_mut()
+            .find(|entry| entry.id == model.id)
+            .expect("model entry") = model.clone();
         let dir = model_dir(&base, &model.id).expect("dir");
         std::fs::create_dir_all(&dir).expect("mkdir");
         std::fs::write(dir.join("encoder.int8.onnx"), vec![1u8; 10]).expect("file");
@@ -544,6 +569,28 @@ mod tests {
         let installed = installed_models(&base, &m);
         assert_eq!(installed.len(), 1);
         assert_eq!(installed[0].id, model.id);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn incomplete_or_stale_record_is_never_ready() {
+        let base = test_dir("incomplete-record");
+        let m = manifest();
+        let model = parakeet(&m);
+        let dir = model_dir(&base, &model.id).expect("dir");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let record = InstalledRecord {
+            id: model.id.clone(),
+            version: model.version.clone(),
+            installed_at: "2026-01-01T00:00:00Z".to_string(),
+            files: vec![],
+        };
+        write_installed_record(&dir, &record).expect("record");
+        assert!(matches!(
+            disk_status(&base, &model).expect("status"),
+            DiskStatus::Broken { .. }
+        ));
+        assert!(installed_models(&base, &m).is_empty());
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -43,27 +43,26 @@ const SECTIONS = [
 const OS_DETAILS = [
   {
     id: "macos",
-    os: "macOS 13+",
+    os: "macOS 13+ — native Swift app, coming soon",
     icon: "◐",
     steps: [
-      "Open the .dmg and drag Algorith Voice to Applications.",
-      "System Settings → Privacy & Security → Microphone → enable Algorith Voice.",
-      "Privacy & Security → Accessibility → enable Algorith Voice, then relaunch.",
-      "Hold Ctrl+Space and speak — text appears where your cursor was.",
+      "macOS ships as a separate native Swift app (not the Tauri bundle) — it is in development and has no download yet.",
+      "Windows & Linux are available today via the Tauri desktop app (see below).",
+      "Planned macOS UX matches the other platforms: hold the hotkey, speak, release → text at cursor.",
     ],
-    code: "open Algorith.Voice_0.4.0_aarch64.dmg  # or x64.dmg",
+    code: "# macOS Swift app — coming soon (no download yet)",
   },
   {
     id: "windows",
     os: "Windows 10 1809+",
     icon: "▣",
     steps: [
-      "Run the .msi installer — WebView2 is installed automatically if missing.",
+      "Run the .exe installer — WebView2 is installed automatically if missing. Silent: .\\Algorith.Voice_0.5.10_x64-setup.exe /S",
       "Settings → Privacy → Microphone → allow desktop apps if dictation stays silent.",
       "Elevated apps (Run as admin) require Algorith Voice also elevated to paste.",
       "Hold Ctrl+Space and speak.",
     ],
-    code: "msiexec /i Algorith.Voice_0.4.0_x64_en-US.msi /quiet",
+    code: "curl -LO https://github.com/algorithco/algorithvoice-app/releases/download/v0.5.10/Algorith.Voice_0.5.10_x64-setup.exe\n# Double-click to install\n# Or silent:\n.\\Algorith.Voice_0.5.10_x64-setup.exe /S\n# Or winget (if published):\nwinget install Algorith.Voice",
   },
   {
     id: "linux",
@@ -75,7 +74,7 @@ const OS_DETAILS = [
       "Wayland: sudo apt install ydotool && systemctl --user enable ydotool && enable clipboard mode in Settings.",
       "Hold Ctrl+Space and speak.",
     ],
-    code: "chmod +x Algorith.Voice_0.4.0_amd64.AppImage && ./Algorith.Voice_0.4.0_amd64.AppImage",
+    code: "curl -LO https://github.com/algorithco/algorithvoice-app/releases/download/v0.5.10/Algorith.Voice_0.5.10_amd64.AppImage\nchmod +x Algorith.Voice_0.5.10_amd64.AppImage && ./Algorith.Voice_0.5.10_amd64.AppImage\n# Or deb:\nsudo dpkg -i Algorith.Voice_0.5.10_amd64.deb  # or sudo apt install ./Algorith.Voice_0.5.10_amd64.deb",
   },
 ];
 
@@ -124,7 +123,7 @@ export default function DocsPage() {
         {/* Main content */}
         <main className="min-w-0 flex-1 py-10 md:py-12">
           <Reveal>
-            <p className="t-cap text-faint">Docs • v0.4.0 • 6 models</p>
+            <p className="t-cap text-faint">Docs • v0.5.10 • 6 models</p>
             <h1 className="t-h1 mt-3">Setup guide.</h1>
             <p className="t-body mt-4 max-w-[68ch] text-sub">
               One panel per operating system. Four steps each. Local mode
@@ -230,7 +229,7 @@ export default function DocsPage() {
                     </span>
                     <h2 className="t-h2 min-w-0 flex-1">{s.os}</h2>
                     <span className="ml-auto hidden rounded-full bg-black px-2.5 py-1 text-xs font-medium text-white md:inline dark:bg-white dark:text-black">
-                      4 steps
+                      {s.steps.length} steps
                     </span>
                   </div>
                   <ol className="mt-6 flex flex-col gap-3">
@@ -291,8 +290,9 @@ export default function DocsPage() {
                     Cloud (Groq Whisper)
                   </p>
                   <p className="t-body mt-2 text-sub">
-                    whisper-large-v3-turbo via Groq, streamed only while you
-                    hold the hotkey. Groq key in OS keyring or BYOK.
+                    whisper-large-v3-turbo via Groq. The completed recording is
+                    uploaded after you release the hotkey. Groq key in the OS
+                    keyring (BYOK).
                   </p>
                   <p className="mt-3 font-mono text-xs text-faint">
                     prefs.mode = cloud
@@ -353,9 +353,10 @@ export default function DocsPage() {
               <h2 className="t-h2">Hotkey & floating pill</h2>
               <p className="t-body mt-3 text-sub">
                 Default Ctrl+Space (change in Onboarding or Settings). The pill
-                is a 72×72 frameless always-on-top window — drag its padded
-                edge, press the round button to talk. Global hotkey (Rust
-                dedupes OS repeat) drives the same state machine.
+                is a 160×40 (idle) / 224×40 (recording) frameless always-on-top
+                status pill. Hold the hotkey to talk, and drag anywhere on the
+                pill to move it; recording shows a live waveform with cancel /
+                stop &amp; send. Rust dedupes global-hotkey OS repeat.
               </p>
               <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-sub">
                 <li>
@@ -419,7 +420,7 @@ export default function DocsPage() {
               href="/download"
               className="inline-flex min-h-[44px] items-center justify-center rounded-full bg-black px-5 text-sm font-medium text-white dark:bg-white dark:text-black"
             >
-              Download v0.4.0
+              Download v0.5.10
             </a>
             <a
               href="/pricing"

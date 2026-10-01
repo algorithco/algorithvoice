@@ -1,3 +1,4 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   authPairSchema,
   errorSchema,
@@ -5,10 +6,36 @@ import {
   signupSchema,
   userSchema,
 } from "@algorith-voice/shared-types";
-import type { DeviceType } from "@prisma/client";
+import type { AuthProvider } from "@prisma/client";
 import * as argon2 from "argon2";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
+import { getAppEnv } from "../../config/env.js";
+import { getUserId } from "../../plugins/jwt.js";
+import { redis } from "../../queues/connection.js";
+import { parseDeviceType } from "../devices/device-type.js";
+import {
+  hashRefreshToken,
+  newFamilyId,
+  newOpaqueToken,
+  REFRESH_ABSOLUTE_SEC,
+  REFRESH_SLIDING_SEC,
+} from "../oauth2/oauth2.store.js";
+import {
+  clearAccountLoginFailures,
+  recordAccountLoginFailure,
+  waitForAccountLogin,
+  withPasswordWork,
+} from "./login-protection.js";
+import { signOAuthState, verifyOAuthState } from "./oauth-state.js";
+import { rotateRefreshSession } from "./refresh-rotation.js";
 
+// ---- GitHub OAuth (Phase 3, minimal) ----
+// Browser (web) + desktop deep-link flows share one callback. The client
+// secret never leaves the server: `start` redirects to github.com, GitHub
+// redirects back to `${API_URL}/auth/oauth/github/callback`, we exchange
+// the code server-side and finish with a first-party redirect.
+// State is a short-lived backend-signed JWT (no Redis needed): it binds
+// the provider, the validated return callback, and the client state.
 const HASH_OPTS = {
   type: argon2.argon2id,
   memoryCost: 65536,
@@ -22,15 +49,32 @@ const HASH_OPTS = {
 const DUMMY_HASH =
   "$argon2id$v=19$m=65536,t=3,p=4$xSOEF+zYJxUh2Z6QplEj7g$bmxrOQUSGpzpBURngAcoUZcv+azJynPluSfIYUd0v24";
 
-function toDeviceType(input: unknown): DeviceType {
-  switch (input) {
-    case "desktop-windows":
-      return "DESKTOP_WINDOWS";
-    case "desktop-linux":
-      return "DESKTOP_LINUX";
-    default:
-      return "DESKTOP_MACOS";
-  }
+const OAUTH_NONCE_COOKIE = "__Host-av_oauth_nonce";
+const OAUTH_HANDOFF_PREFIX = "oauth:handoff:";
+const OAUTH_HANDOFF_TTL_SEC = 60;
+const LEGACY_DESKTOP_CALLBACK = "algorithvoice://auth-callback";
+
+function hashOAuthNonce(nonce: string): string {
+  return createHash("sha256").update(nonce).digest("base64url");
+}
+
+function setOAuthNonceCookie(reply: FastifyReply, nonce: string): void {
+  reply.setCookie(OAUTH_NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 10 * 60,
+  });
+}
+
+function clearOAuthNonceCookie(reply: FastifyReply): void {
+  reply.clearCookie(OAUTH_NONCE_COOKIE, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+  });
 }
 
 const publicUser = {
@@ -60,6 +104,139 @@ function toUserSchema(u: {
   };
 }
 
+interface GitHubUser {
+  id: number;
+  login: string;
+  name: string | null;
+  email: string | null;
+}
+
+interface GitHubEmail {
+  email: string;
+  primary: boolean;
+  verified: boolean;
+}
+
+function githubRedirectUri(apiUrl: string): string {
+  return `${apiUrl.replace(/\/$/, "")}/auth/oauth/github/callback`;
+}
+
+// ---- Web sliding sessions (fixes 15m hard logout) ----
+// Email/password web logins mint a short-lived access JWT (15m) plus an
+// opaque rotating refresh token stored hashed in the Session table (30d
+// sliding, 90d absolute cap — same windows as the desktop OAuth2 flow).
+// Raw refresh values never touch the DB or logs; revocation kills the
+// whole family so token theft cannot be replayed.
+async function mintWebSession(
+  prisma: {
+    session: {
+      create: (args: {
+        data: {
+          userId: string;
+          refreshHash: string;
+          familyId: string;
+          deviceInfo?: string;
+          ip?: string;
+          expiresAt: Date;
+          absoluteLimitAt: Date;
+        };
+      }) => Promise<unknown>;
+    };
+  },
+  userId: string,
+  pepper: string,
+  opts?: { deviceInfo?: string; ip?: string },
+): Promise<string> {
+  const refreshToken = newOpaqueToken();
+  const now = new Date();
+  await prisma.session.create({
+    data: {
+      userId,
+      refreshHash: hashRefreshToken(refreshToken, pepper),
+      familyId: newFamilyId(),
+      deviceInfo: (opts?.deviceInfo ?? "web").slice(0, 200),
+      ...(opts?.ip ? { ip: opts.ip } : {}),
+      expiresAt: new Date(now.getTime() + REFRESH_SLIDING_SEC * 1000),
+      absoluteLimitAt: new Date(now.getTime() + REFRESH_ABSOLUTE_SEC * 1000),
+    },
+  });
+  return refreshToken;
+}
+
+async function exchangeGitHubCode(
+  code: string,
+  clientId: string,
+  clientSecret: string,
+  redirectUri: string,
+): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        redirect_uri: redirectUri,
+      }),
+    });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const data = (await res.json().catch(() => null)) as {
+    access_token?: string;
+    error?: string;
+  } | null;
+  return typeof data?.access_token === "string" ? data.access_token : null;
+}
+
+async function fetchGitHubUser(token: string): Promise<GitHubUser | null> {
+  try {
+    const res = await fetch("https://api.github.com/user", {
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/vnd.github+json",
+        "user-agent": "algorith-voice",
+      },
+    });
+    if (!res.ok) return null;
+    const u = (await res.json()) as GitHubUser;
+    if (typeof u?.id !== "number") return null;
+    // `/user.email` has no accompanying verification signal. Never treat it
+    // as proof of ownership; accept only an address explicitly marked
+    // verified by `/user/emails`.
+    u.email = null;
+    try {
+      const er = await fetch("https://api.github.com/user/emails", {
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/vnd.github+json",
+          "user-agent": "algorith-voice",
+        },
+      });
+      if (er.ok) {
+        const emails = (await er.json()) as GitHubEmail[];
+        const primary = emails.find((e) => e.primary && e.verified)?.email;
+        const anyVerified = emails.find((e) => e.verified)?.email;
+        if (primary ?? anyVerified) u.email = primary ?? anyVerified ?? null;
+      }
+    } catch {
+      // Keep whatever /user returned.
+    }
+    return u;
+  } catch {
+    return null;
+  }
+}
+
 // NOTE: refresh rotation + OAuth land in Phase 3. Contracts are stable;
 // stubs return 501 with a fixed envelope (no roadmap leakage on the wire).
 export async function authRoutes(app: FastifyInstance) {
@@ -73,27 +250,44 @@ export async function authRoutes(app: FastifyInstance) {
       config: { rateLimit: { max: 10, timeWindow: "1 hour" } },
     },
     async (req, reply) => {
-      const { email, password, name, deviceName, deviceType } = req.body as {
+      const {
+        email,
+        password,
+        name,
+        deviceName,
+        deviceType,
+        deviceFingerprint,
+      } = req.body as {
         email: string;
         password: string;
         name?: string;
         deviceName?: string;
         deviceType?: string;
+        deviceFingerprint?: string;
       };
-      const passwordHash = await argon2.hash(password, { ...HASH_OPTS });
+      const passwordHash = await withPasswordWork(() =>
+        argon2.hash(password, { ...HASH_OPTS }),
+      );
       try {
         const user = await app.prisma.$transaction(async (tx) => {
           const created = await tx.user.create({
-            data: { email, name, passwordHash, planTier: "free" },
+            data: {
+              email,
+              ...(name === undefined ? {} : { name }),
+              passwordHash,
+              planTier: "free",
+            },
             select: publicUser,
           });
           // Phase 1 pairing: register the signup device (seats in Phase 3).
-          if (deviceName) {
+          const parsedDeviceType = parseDeviceType(deviceType);
+          if (deviceName && parsedDeviceType) {
             await tx.device.create({
               data: {
                 userId: created.id,
                 name: deviceName,
-                type: toDeviceType(deviceType),
+                type: parsedDeviceType,
+                fingerprint: deviceFingerprint ?? null,
                 lastSeenAt: new Date(),
               },
             });
@@ -106,8 +300,17 @@ export async function authRoutes(app: FastifyInstance) {
           });
           return created;
         });
-        const accessToken = app.jwt.sign({ sub: user.id });
-        return reply.code(201).send({ user: toUserSchema(user), accessToken });
+        const accessToken = app.jwt.sign({ sub: user.id, jti: randomUUID() });
+        const env = getAppEnv();
+        const refreshToken = await mintWebSession(
+          app.prisma,
+          user.id,
+          env.JWT_REFRESH_PEPPER,
+          { deviceInfo: "web-signup", ip: req.ip },
+        );
+        return reply
+          .code(201)
+          .send({ user: toUserSchema(user), accessToken, refreshToken });
       } catch (e: unknown) {
         if (
           typeof e === "object" &&
@@ -126,41 +329,328 @@ export async function authRoutes(app: FastifyInstance) {
     "/login",
     {
       schema: { body: loginSchema },
-      config: { rateLimit: { max: 5, timeWindow: "10 minutes" } },
+      config: { rateLimit: { max: 30, timeWindow: "10 minutes" } },
     },
     async (req, reply) => {
       const { email, password } = req.body as {
         email: string;
         password: string;
       };
+      await waitForAccountLogin(email).catch(() => {});
       const user = await app.prisma.user.findUnique({
         where: { email },
-        select: { ...publicUser, passwordHash: true },
+        select: { ...publicUser, passwordHash: true, blockedAt: true },
       });
-      const ok = user?.passwordHash
-        ? await argon2.verify(user.passwordHash, password).catch(() => false)
-        : await argon2.verify(DUMMY_HASH, password).catch(() => false);
+      const ok = await withPasswordWork(() =>
+        user?.passwordHash
+          ? argon2.verify(user.passwordHash, password).catch(() => false)
+          : argon2.verify(DUMMY_HASH, password).catch(() => false),
+      );
       if (!user?.passwordHash || !ok) {
+        req.log.warn({ event: "login_failure" }, "login failed");
+        await recordAccountLoginFailure(email).catch((error: unknown) =>
+          req.log.warn(
+            { err: error, event: "login_protection_write_failed" },
+            "could not record login failure",
+          ),
+        );
         return reply.code(401).send({ error: "invalid_credentials" });
       }
-      const accessToken = app.jwt.sign({ sub: user.id });
-      return { user: toUserSchema(user), accessToken };
+      if (user.blockedAt) {
+        return reply.code(403).send({ error: "account_blocked" });
+      }
+      await clearAccountLoginFailures(email).catch(() => {});
+      const accessToken = app.jwt.sign({ sub: user.id, jti: randomUUID() });
+      const env = getAppEnv();
+      const refreshToken = await mintWebSession(
+        app.prisma,
+        user.id,
+        env.JWT_REFRESH_PEPPER,
+        { deviceInfo: "web-login", ip: req.ip },
+      );
+      return { user: toUserSchema(user), accessToken, refreshToken };
     },
   );
 
-  app.post("/logout", async () => {
-    // Phase 3 adds server-side jti blocklist + refresh revocation.
-    // Desktop clears its keyring session; web clears httpOnly cookies.
+  app.post("/logout", async (req) => {
+    // Revoke the web refresh family when the client sends it; always 200
+    // so logout never blocks on an already-expired token. Cookie clearing
+    // stays with the web BFF / desktop keyring clear.
+    try {
+      const body = (req.body ?? {}) as { refresh_token?: unknown };
+      const presented =
+        typeof body.refresh_token === "string" ? body.refresh_token : null;
+      if (presented) {
+        const env = getAppEnv();
+        const row = await app.prisma.session.findUnique({
+          where: {
+            refreshHash: hashRefreshToken(presented, env.JWT_REFRESH_PEPPER),
+          },
+          select: { familyId: true },
+        });
+        if (row) {
+          await app.prisma.session.updateMany({
+            where: { familyId: row.familyId, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        }
+      }
+    } catch {
+      // Best-effort: logout must not fail.
+    }
     return { ok: true };
   });
 
-  app.post("/refresh", async (_req, reply) => {
-    return reply.code(501).send({ error: "not_implemented" });
-  });
+  app.post(
+    "/refresh",
+    { config: { rateLimit: { max: 30, timeWindow: "10 minutes" } } },
+    async (req, reply) => {
+      const body = (req.body ?? {}) as { refresh_token?: unknown };
+      const presented =
+        typeof body.refresh_token === "string" ? body.refresh_token : null;
+      if (!presented) {
+        return reply.code(400).send({ error: "invalid_request" });
+      }
+      const env = getAppEnv();
+      const rotation = await rotateRefreshSession(
+        app.prisma,
+        presented,
+        env.JWT_REFRESH_PEPPER,
+        req.ip,
+      );
+      if (rotation.status === "retry") {
+        return reply.code(409).send({ error: "retry" });
+      }
+      if (rotation.status === "invalid") {
+        if (rotation.reuse && rotation.userId) {
+          req.log.warn(
+            { event: "refresh_reuse", familyId: rotation.familyId },
+            "refresh token reuse detected",
+          );
+          await app.prisma.auditLog.create({
+            data: {
+              actorUserId: rotation.userId,
+              action: "auth.refresh_reuse",
+              metadata: { familyId: rotation.familyId },
+            },
+          });
+        }
+        return reply.code(401).send({ error: "invalid_grant" });
+      }
+      const accessToken = app.jwt.sign({
+        sub: rotation.userId,
+        jti: randomUUID(),
+      });
+      return { accessToken, refreshToken: rotation.refreshToken };
+    },
+  );
 
   app.post("/oauth/:provider", async (_req, reply) => {
     return reply.code(501).send({ error: "not_implemented" });
   });
+
+  // GitHub callback: GitHub redirects here with ?code=&state=. The state
+  // is the backend-signed JWT minted by /start (binds return callback).
+  // Registered as the OAuth app's Authorization callback URL, e.g.
+  // https://api.trqsh.uz/auth/oauth/github/callback
+  app.get(
+    "/oauth/github/callback",
+    { config: { rateLimit: { max: 30, timeWindow: "10 minutes" } } },
+    async (req, reply) => {
+      const q = req.query as { code?: string; state?: string };
+      const env = getAppEnv();
+      const fail = (error: string) => reply.code(400).send({ error });
+      if (!q.code || !q.state) return fail("invalid_request");
+      let st: ReturnType<typeof verifyOAuthState>;
+      try {
+        st = verifyOAuthState(env.JWT_ACCESS_SECRET, q.state);
+      } catch {
+        return fail("invalid_state");
+      }
+      if (st.provider !== "github" || typeof st.cb !== "string" || !st.cb) {
+        return fail("invalid_state");
+      }
+      const nonce = req.cookies[OAUTH_NONCE_COOKIE];
+      if (!nonce || !st.n || hashOAuthNonce(nonce) !== st.n) {
+        clearOAuthNonceCookie(reply);
+        return fail("invalid_state");
+      }
+      clearOAuthNonceCookie(reply);
+      const clientId = env.OAUTH_GITHUB_CLIENT_ID;
+      const clientSecret = env.OAUTH_GITHUB_CLIENT_SECRET;
+      if (!clientId || !clientSecret) {
+        return fail("oauth_not_configured");
+      }
+      const redirectUri = githubRedirectUri(env.API_URL);
+      const ghToken = await exchangeGitHubCode(
+        q.code,
+        clientId,
+        clientSecret,
+        redirectUri,
+      );
+      const errRedirect = (error: string) => {
+        const sep = st.cb.includes("?") ? "&" : "?";
+        const params = new URLSearchParams({ error, provider: "github" });
+        if (st.s) params.set("state", st.s);
+        // Desktop deep-link callbacks take the same shape as web:
+        // the Tauri shell parses access_token/email/error from the URL.
+        return reply.redirect(`${st.cb}${sep}${params.toString()}`, 302);
+      };
+      if (!ghToken) return errRedirect("oauth_failed");
+      const gh = await fetchGitHubUser(ghToken);
+      if (!gh?.email) return errRedirect("no_verified_email");
+      const email = gh.email.toLowerCase();
+      const provider: AuthProvider = "GITHUB";
+      const providerId = String(gh.id);
+      let userId: string;
+      let isSignup = false;
+      const linked = await app.prisma.account.findUnique({
+        where: { provider_providerId: { provider, providerId } },
+        select: { userId: true },
+      });
+      if (linked) {
+        userId = linked.userId;
+      } else {
+        const existing = await app.prisma.user.findUnique({
+          where: { email },
+          select: {
+            id: true,
+            name: true,
+            passwordHash: true,
+            accounts: { select: { id: true }, take: 1 },
+          },
+        });
+        if (existing) {
+          if (existing.passwordHash || existing.accounts.length > 0) {
+            return errRedirect("account_exists_sign_in_first");
+          }
+          userId = existing.id;
+          await app.prisma.account.create({
+            data: {
+              userId,
+              provider,
+              providerId,
+              email,
+            },
+          });
+          if (!existing.name && gh.name) {
+            await app.prisma.user.update({
+              where: { id: userId },
+              data: { name: gh.name },
+            });
+          }
+        } else {
+          isSignup = true;
+          const created = await app.prisma.user.create({
+            data: {
+              email,
+              name: gh.name ?? gh.login,
+              passwordHash: null,
+              emailVerifiedAt: new Date(),
+              planTier: "free",
+              accounts: {
+                create: { provider, providerId, email },
+              },
+              auditLogs: {
+                create: { action: "auth.oauth_signup" },
+              },
+            },
+            select: { id: true },
+          });
+          userId = created.id;
+        }
+      }
+      if (!isSignup) {
+        const account = await app.prisma.user.findUnique({
+          where: { id: userId },
+          select: { blockedAt: true },
+        });
+        if (!account || account.blockedAt)
+          return errRedirect("account_blocked");
+        await app.prisma.auditLog.create({
+          data: { actorUserId: userId, action: "auth.oauth_login" },
+        });
+      }
+      const sep = st.cb.includes("?") ? "&" : "?";
+      const isLegacyDesktop = st.cb.toLowerCase() === LEGACY_DESKTOP_CALLBACK;
+      if (isLegacyDesktop) {
+        if (!env.LEGACY_DESKTOP_OAUTH_TOKEN_IN_URL) {
+          return errRedirect("legacy_oauth_disabled");
+        }
+        req.log.warn(
+          { event: "legacy_desktop_oauth_token_url" },
+          "deprecated desktop OAuth token-in-URL flow used",
+        );
+        const accessToken = app.jwt.sign({ sub: userId, jti: randomUUID() });
+        const params = new URLSearchParams({
+          access_token: accessToken,
+          email,
+          provider: "github",
+        });
+        if (st.s) params.set("state", st.s);
+        return reply.redirect(`${st.cb}${sep}${params.toString()}`, 302);
+      }
+
+      const code = randomBytes(32).toString("base64url");
+      await redis.set(
+        `${OAUTH_HANDOFF_PREFIX}${code}`,
+        JSON.stringify({ userId, deviceHint: st.device }),
+        "EX",
+        OAUTH_HANDOFF_TTL_SEC,
+        "NX",
+      );
+      const params = new URLSearchParams({ code, provider: "github" });
+      if (st.s) params.set("state", st.s);
+      return reply.redirect(`${st.cb}${sep}${params.toString()}`, 302);
+    },
+  );
+
+  app.post(
+    "/oauth/exchange",
+    { config: { rateLimit: { max: 20, timeWindow: "10 minutes" } } },
+    async (req, reply) => {
+      const body = req.body as { code?: unknown };
+      if (
+        typeof body?.code !== "string" ||
+        !/^[A-Za-z0-9_-]{43}$/.test(body.code)
+      ) {
+        return reply.code(400).send({ error: "invalid_grant" });
+      }
+      const serialized = await redis.getdel(
+        `${OAUTH_HANDOFF_PREFIX}${body.code}`,
+      );
+      if (!serialized) {
+        return reply.code(400).send({ error: "invalid_grant" });
+      }
+      let handoff: { userId: string; deviceHint?: string };
+      try {
+        handoff = JSON.parse(serialized) as {
+          userId: string;
+          deviceHint?: string;
+        };
+      } catch {
+        return reply.code(400).send({ error: "invalid_grant" });
+      }
+      if (typeof handoff.userId !== "string" || handoff.userId === "") {
+        return reply.code(400).send({ error: "invalid_grant" });
+      }
+      const env = getAppEnv();
+      const accessToken = app.jwt.sign({
+        sub: handoff.userId,
+        jti: randomUUID(),
+      });
+      const refreshToken = await mintWebSession(
+        app.prisma,
+        handoff.userId,
+        env.JWT_REFRESH_PEPPER,
+        {
+          deviceInfo: handoff.deviceHint ?? "web-oauth",
+          ip: req.ip,
+        },
+      );
+      return { accessToken, refreshToken };
+    },
+  );
 
   // Desktop deep-link flow: GET /auth/oauth/:provider/start?callback=algorithvoice://auth-callback&device=Desktop
   // Opens system browser; backend must validate and either redirect to provider OAuth
@@ -172,7 +662,7 @@ export async function authRoutes(app: FastifyInstance) {
       device?: string;
       state?: string;
     };
-    const callback = query.callback ?? "algorithvoice://auth-callback";
+    const callback = query.callback ?? LEGACY_DESKTOP_CALLBACK;
     const state = typeof query.state === "string" ? query.state : undefined;
     const device = typeof query.device === "string" ? query.device : undefined;
     const allowedProviders = new Set(["google", "github"]);
@@ -188,14 +678,11 @@ export async function authRoutes(app: FastifyInstance) {
     // (or a same-origin path resolved against APP_URL) instead of an
     // algorithvoice:// deep link. Redirects carry the same honest error
     // shape (?error=&provider=[&state=]) so the login/register pages can
-    // show an inline notice. Real Google/GitHub app registration
-    // (OAUTH_*_CLIENT_ID/SECRET) is out of scope — the token exchange
-    // below stays an oauth_not_configured stub until then.
-    // TODO(web-oauth): wire real provider authorize redirect + callback
-    // (/api/auth/oauth/:provider/callback) that sets the session cookie
-    // and redirects to /dashboard once OAUTH_*_* env is configured.
+    // show an inline notice. GitHub is wired (redirects to github.com);
+    // Google stays an oauth_not_configured/not_implemented stub until its
+    // handler lands.
+    // TODO(web-oauth): Google provider authorize redirect + callback.
     if (device === "web") {
-      const { getAppEnv } = await import("../../config/env.js");
       const env = getAppEnv();
       const allowedOrigins = new Set<string>();
       try {
@@ -203,14 +690,15 @@ export async function authRoutes(app: FastifyInstance) {
       } catch {
         // APP_URL is validated at boot — unreachable in practice.
       }
-      // Local-dev loopback (web :3000, backend :3001, same machine).
-      for (const o of [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-      ]) {
-        allowedOrigins.add(o);
+      if (env.NODE_ENV !== "production") {
+        for (const origin of [
+          "http://localhost:3000",
+          "http://127.0.0.1:3000",
+          "http://localhost:3001",
+          "http://127.0.0.1:3001",
+        ]) {
+          allowedOrigins.add(origin);
+        }
       }
       const raw = (query.callback ?? "").trim();
       let callbackUrl: URL | null = null;
@@ -245,20 +733,39 @@ export async function authRoutes(app: FastifyInstance) {
       if (!configured) {
         return reply.redirect(buildWebRedirect("oauth_not_configured"), 302);
       }
-      // Configured but Phase 3 handler not yet wired — honest stub redirect.
+      if (provider === "github") {
+        const nonce = randomBytes(32).toString("base64url");
+        setOAuthNonceCookie(reply, nonce);
+        const oauthState = signOAuthState(env.JWT_ACCESS_SECRET, {
+          provider,
+          device: "web",
+          cb: callbackUrl.toString(),
+          s: state,
+          n: hashOAuthNonce(nonce),
+        });
+        const authUrl = new URL("https://github.com/login/oauth/authorize");
+        authUrl.searchParams.set("client_id", env.OAUTH_GITHUB_CLIENT_ID ?? "");
+        authUrl.searchParams.set(
+          "redirect_uri",
+          githubRedirectUri(env.API_URL),
+        );
+        authUrl.searchParams.set("scope", "user:email");
+        authUrl.searchParams.set("state", oauthState);
+        return reply.redirect(authUrl.toString(), 302);
+      }
+      // Google handler not yet wired — honest stub redirect.
       return reply.redirect(buildWebRedirect("not_implemented"), 302);
     }
     // Validate callback scheme — must be algorithvoice:// to avoid open redirect.
     const isValidCallback =
       typeof callback === "string" &&
-      callback.toLowerCase().startsWith("algorithvoice:");
+      callback.toLowerCase() === LEGACY_DESKTOP_CALLBACK;
     if (!isValidCallback) {
       return reply.code(400).send({ error: "invalid_callback" });
     }
-    // Phase 3 will redirect to real provider OAuth. Until env is configured,
+    // GitHub is wired above (real provider redirect). Google stays a stub:
     // redirect back with error so desktop's auth-callback listener resolves
     // (otherwise openUrl would show a dead 501 page with no deep-link return).
-    const { getAppEnv } = await import("../../config/env.js");
     const env = getAppEnv();
     const configured =
       provider === "google"
@@ -274,7 +781,24 @@ export async function authRoutes(app: FastifyInstance) {
     if (!configured) {
       return reply.redirect(buildRedirect("oauth_not_configured"), 302);
     }
-    // Configured but Phase 3 handler not yet wired — return honest stub redirect.
+    if (provider === "github") {
+      const nonce = randomBytes(32).toString("base64url");
+      setOAuthNonceCookie(reply, nonce);
+      const oauthState = signOAuthState(env.JWT_ACCESS_SECRET, {
+        provider,
+        device: device ?? "desktop",
+        cb: callback,
+        s: state,
+        n: hashOAuthNonce(nonce),
+      });
+      const authUrl = new URL("https://github.com/login/oauth/authorize");
+      authUrl.searchParams.set("client_id", env.OAUTH_GITHUB_CLIENT_ID ?? "");
+      authUrl.searchParams.set("redirect_uri", githubRedirectUri(env.API_URL));
+      authUrl.searchParams.set("scope", "user:email");
+      authUrl.searchParams.set("state", oauthState);
+      return reply.redirect(authUrl.toString(), 302);
+    }
+    // Google handler not yet wired — return honest stub redirect.
     return reply.redirect(buildRedirect("not_implemented"), 302);
   });
 
@@ -285,7 +809,7 @@ export async function authRoutes(app: FastifyInstance) {
       schema: { response: { 200: userSchema } },
     },
     async (req) => {
-      const { sub } = req.user as { sub: string };
+      const sub = getUserId(req);
       const user = await app.prisma.user.findUniqueOrThrow({
         where: { id: sub },
         select: publicUser,
@@ -293,4 +817,37 @@ export async function authRoutes(app: FastifyInstance) {
       return toUserSchema(user);
     },
   );
+
+  app.get("/providers", { onRequest: [app.authenticate] }, async (req) => {
+    const sub = getUserId(req);
+    const [accounts, user] = await Promise.all([
+      app.prisma.account.findMany({
+        where: { userId: sub },
+        select: { provider: true, email: true },
+      }),
+      app.prisma.user.findUnique({
+        where: { id: sub },
+        select: { email: true },
+      }),
+    ]);
+    if (accounts.length === 0) {
+      return {
+        providers: [
+          { provider: "EMAIL", email: user?.email ?? "", label: "Email" },
+        ],
+      };
+    }
+    return {
+      providers: accounts.map((a) => ({
+        provider: a.provider,
+        email: a.email,
+        label:
+          a.provider === "GITHUB"
+            ? "GitHub"
+            : a.provider === "GOOGLE"
+              ? "Google"
+              : a.provider,
+      })),
+    };
+  });
 }

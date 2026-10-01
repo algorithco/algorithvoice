@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { type JobsOptions, Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { z } from "zod";
 import { loadEnv } from "../config/env.js";
+import { safeRedisEndpoint } from "../config/redis-url.js";
 
 // Single validated Redis connection for queues. No localhost fallback:
 // a missing REDIS_URL must fail boot loudly, never silently queue nowhere.
@@ -13,6 +15,7 @@ import { loadEnv } from "../config/env.js";
 // (enableOfflineQueue: false) so /ready and routes 503 quickly instead
 // of hanging. Production (Docker/Fly) is unchanged — same URL, same queues.
 const env = loadEnv();
+const redisEndpoint = safeRedisEndpoint(env.REDIS_URL);
 
 // Throttle reconnect warnings: one line per client per interval, not one
 // per retry. Without any 'error' listener ioredis throws "Unhandled error
@@ -26,7 +29,7 @@ function guardRedis(client: Redis, label: string) {
       const detail =
         (err as Error & { code?: string }).code ?? err.message ?? String(err);
       console.warn(
-        `[redis:${label}] Redis unavailable at ${env.REDIS_URL} [${detail}]. ` +
+        `[redis:${label}] Redis unavailable at ${redisEndpoint} [${detail}]. ` +
           `API keeps running; queue/auth-code features 503 until Redis is back. ` +
           `Start it with: pnpm redis:wsl (no Docker needed)`,
       );
@@ -45,6 +48,11 @@ export function makeApiRedis() {
       maxRetriesPerRequest: 1,
       enableReadyCheck: false,
       connectTimeout: 5000,
+      // Docker Desktop (Windows) NAT drops idle host→container TCP mappings
+      // faster than Redis' own 300s keepalive, leaving half-open corpses
+      // (ECONNRESET on next use). Kernel probes every 10s keep the mapping
+      // alive; harmless everywhere else.
+      keepAlive: 10_000,
       retryStrategy: (times) => Math.min(times * 100, 2000),
     }),
     "api",
@@ -57,6 +65,8 @@ export function makeQueueRedis(label: string) {
     new Redis(env.REDIS_URL, {
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
+      // Same NAT idle-death workaround as makeApiRedis.
+      keepAlive: 10_000,
       retryStrategy: (times) => Math.min(times * 100, 2000),
     }),
     label,
@@ -104,6 +114,10 @@ export const QUEUES = {
     connection: makeRedis(),
     defaultJobOptions: queueDefaults,
   }),
+  billingReconcile: new Queue("billing.reconcile", {
+    connection: makeRedis(),
+    defaultJobOptions: queueDefaults,
+  }),
   usageRollup: new Queue("usage.report-to-stripe", {
     connection: makeRedis(),
     defaultJobOptions: queueDefaults,
@@ -145,13 +159,20 @@ export type MeteringJob = z.infer<typeof MeteringJob>;
 
 export function enqueueMetering(data: unknown, opts?: JobsOptions) {
   const job = MeteringJob.parse(data);
-  const jobId = `meter:${job.sessionId}:${job.seq}`;
+  // BullMQ 5 rejects `:` in custom job ids. Keep the human-readable
+  // idempotency key in the payload/database and use a stable, safe queue id.
+  const idempotencyKey = `meter:${job.sessionId}:${job.seq}`;
+  const jobId = `meter-${createHash("sha256").update(idempotencyKey).digest("hex")}`;
   // jobId last: callers must not override idempotency.
-  return QUEUES.metering.add("meter", job, {
-    ...opts,
-    ...queueDefaults,
-    jobId,
-  });
+  return QUEUES.metering.add(
+    "meter",
+    { ...job, idempotencyKey },
+    {
+      ...queueDefaults,
+      ...opts,
+      jobId,
+    },
+  );
 }
 
 export const SttJob = z

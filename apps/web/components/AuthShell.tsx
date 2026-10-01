@@ -76,7 +76,7 @@ export function Input({
   );
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://api.trqsh.uz";
 
 function GoogleMark() {
   return (
@@ -129,6 +129,48 @@ export function OAuthButtons({ mode }: { mode: "login" | "register" }) {
               ? "GitHub"
               : "Social";
         setNotice(`${name} sign-in isn't available yet — use email for now.`);
+      } else if (error === "oauth_failed" || error === "no_verified_email") {
+        setNotice(
+          error === "no_verified_email"
+            ? "GitHub sign-in needs a verified email on your GitHub account."
+            : "GitHub sign-in failed — please try again or use email.",
+        );
+      } else if (error === "account_exists_sign_in_first") {
+        setNotice(
+          "That email already has an account. Sign in with email first, then link GitHub from your account.",
+        );
+      }
+      // GitHub success carries only a short-lived, single-use handoff code.
+      // The BFF exchanges it and stores both tokens in HttpOnly cookies.
+      const code = q.get("code");
+      if (code && !error) {
+        const rawReturnTo = q.get("returnTo");
+        const safeReturnTo =
+          rawReturnTo?.startsWith("/") && !rawReturnTo.startsWith("//")
+            ? rawReturnTo
+            : "/dashboard";
+        setNotice("Finishing GitHub sign-in…");
+        void fetch("/api/auth/oauth/session", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code }),
+        })
+          .then((res) => {
+            if (!res.ok) throw new Error("session");
+            // Scrub the one-time code from this history entry before leaving.
+            try {
+              const clean = new URL(window.location.href);
+              clean.searchParams.delete("code");
+              clean.searchParams.delete("provider");
+              window.history.replaceState(null, "", clean.toString());
+            } catch {
+              // Non-fatal: navigation below still leaves this page.
+            }
+            window.location.href = safeReturnTo;
+          })
+          .catch(() => {
+            setNotice("GitHub sign-in failed — please try again or use email.");
+          });
       }
     } catch {
       // Non-browser context or malformed query — no notice.

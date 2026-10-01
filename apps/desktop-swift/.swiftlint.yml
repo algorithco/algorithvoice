@@ -1,0 +1,17 @@
+# SwiftLint — matches the repo's zero-warnings policy (biome / clippy -D warnings).
+# Run: swiftlint --strict (CI fails on any violation).
+disabled_rules:
+  - trailing_whitespace
+opt_in_rules:
+  - force_unwrapping      # quality bar: no `!` outside tests/impossible cases
+  - force_cast
+  - force_try
+  - first_where
+  - empty_count
+line_length:
+  warning: 120
+  error: 140
+  ignores_urls: true
+excluded:
+  - .build
+  - DerivedData

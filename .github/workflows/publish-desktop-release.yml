@@ -21,6 +21,9 @@ permissions:
 
 jobs:
   publish:
+    # Configure this environment with required reviewers and restrict the
+    # fine-grained PUBLIC_REPO_PAT secret to it. Rotate before its expiry.
+    environment: desktop-public-release
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

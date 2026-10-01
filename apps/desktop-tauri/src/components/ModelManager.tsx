@@ -26,6 +26,25 @@ import {
 import { isTauri } from "../lib/session/env.js";
 import type { Prefs } from "./SettingsView.js";
 
+function getErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    if (typeof o.message === "string" && o.message) return o.message;
+    if (typeof o.errorMessage === "string" && o.errorMessage)
+      return o.errorMessage;
+    if (typeof o.error === "string" && o.error) return o.error;
+    if (typeof o.code === "string" && typeof o.message === "string")
+      return o.message;
+    try {
+      const s = JSON.stringify(o);
+      if (s && s !== "{}" && s !== "null") return s;
+    } catch {}
+  }
+  return String(e);
+}
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -77,7 +96,7 @@ function statusTone(s: ModelStatusInfo["status"]): string {
     case "ready":
       return "bg-black text-white dark:bg-white dark:text-black";
     case "downloading":
-      return "bg-black text-white dark:bg-white dark:text-black";
+      return "bg-blue-600 text-white dark:bg-blue-500 dark:text-white motion-safe:animate-pulse";
     case "verifying":
       return "bg-amber-500 text-black";
     case "error":
@@ -85,6 +104,27 @@ function statusTone(s: ModelStatusInfo["status"]): string {
     default:
       return "bg-gray-100 text-gray-700 dark:bg-white/10 dark:text-gray-300";
   }
+}
+
+const languageNames =
+  typeof Intl.DisplayNames === "function"
+    ? new Intl.DisplayNames(["en"], { type: "language" })
+    : null;
+
+function languageLabel(code: string): string {
+  const name = languageNames?.of(code);
+  return name && name.toLowerCase() !== code.toLowerCase()
+    ? `${name} (${code})`
+    : code;
+}
+
+function languageForModel(language: string, model?: LocalModel): string {
+  if (language === "auto" || !model) return "auto";
+  return model.languages.some(
+    (supported) => supported.toLowerCase() === language.toLowerCase(),
+  )
+    ? language.toLowerCase()
+    : "auto";
 }
 
 export function ModelManager({
@@ -109,6 +149,7 @@ export function ModelManager({
   const [loadStage, setLoadStage] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hardwareError, setHardwareError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [langFilter, setLangFilter] = useState("all");
@@ -131,23 +172,30 @@ export function ModelManager({
       const next: Record<string, ModelStatusInfo> = {};
       for (const e of entries) if (e) next[e[0]] = e[1];
       setStatusMap(next);
-      // hardware + compat + worker
       try {
         const hw = await getHardwareInfo();
         setHardware(hw);
-      } catch {}
+        setHardwareError(null);
+      } catch (e) {
+        setHardwareError(getErrorMessage(e));
+        console.warn("algorith-voice: getHardwareInfo failed", e);
+      }
       try {
         const comp = await getModelCompatibilities();
         const cmap: Record<string, ModelCompatibility> = {};
         for (const c of comp) cmap[c.id] = c;
         setCompatMap(cmap);
-      } catch {}
+      } catch (e) {
+        console.warn("algorith-voice: getModelCompatibilities failed", e);
+      }
       try {
         const ws = await getTranscriptionStatus();
         setWorkerStatus(ws);
-      } catch {}
+      } catch (e) {
+        console.warn("algorith-voice: getTranscriptionStatus failed", e);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
     }
   }, []);
 
@@ -201,6 +249,70 @@ export function ModelManager({
   }, []);
 
   const activeId = prefs.activeModelId;
+  const activeModel = useMemo(
+    () => models?.find((model) => model.id === activeId),
+    [models, activeId],
+  );
+
+  // Never send a language retained from another model when the newly active
+  // model cannot recognize it. Reset visibly before the first dictation.
+  useEffect(() => {
+    if (!activeModel || prefs.language === "auto") return;
+    if (languageForModel(prefs.language, activeModel) === "auto") {
+      onPrefs({ ...prefs, language: "auto" });
+    }
+  }, [activeModel, prefs, onPrefs]);
+
+  // Auto-select a ready model when none is active — fixes "No local model
+  // selected" after a fresh download or when switching to Local mode with a
+  // ready model already on disk. Respects compatibility and avoids loops.
+  useEffect(() => {
+    if (!isTauri() || !models || prefs.activeModelId) return;
+    const readyEntry = Object.entries(statusMap).find(
+      ([, s]) => s.status === "ready",
+    );
+    if (!readyEntry) return;
+    const [readyId] = readyEntry;
+    const level = compatMap[readyId]?.level;
+    if (level === "unsupported") return;
+    if (busyId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        setBusyId(readyId);
+        setLoadStage("resolving-files");
+        const s = await selectActiveModel(readyId);
+        if (cancelled) return;
+        setStatusMap((m) => ({ ...m, [readyId]: s }));
+        const readyModel = models.find((model) => model.id === readyId);
+        onPrefs({
+          ...prefs,
+          activeModelId: readyId,
+          language: languageForModel(prefs.language, readyModel),
+        });
+        setNotice(`Auto-selected ${readyId} for local mode.`);
+        const ws = await getTranscriptionStatus().catch(() => null);
+        if (ws && !cancelled) setWorkerStatus(ws);
+      } catch (e) {
+        if (!cancelled) {
+          setError(getErrorMessage(e));
+          // Refresh the worker badge too: without this it keeps showing
+          // the previous lifecycle while the error banner tells another
+          // story (e.g. stale "failed" during a fresh attempt).
+          const ws = await getTranscriptionStatus().catch(() => null);
+          if (ws && !cancelled) setWorkerStatus(ws);
+        }
+      } finally {
+        if (!cancelled) {
+          setBusyId(null);
+          setLoadStage(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [models, statusMap, compatMap, prefs, onPrefs, busyId]);
 
   const hardwareSummary = useMemo(() => {
     if (!hardware) return null;
@@ -221,7 +333,7 @@ export function ModelManager({
       const s = await downloadModel(id);
       setStatusMap((m) => ({ ...m, [id]: s }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
       setBusyId(null);
     }
   };
@@ -232,7 +344,7 @@ export function ModelManager({
       const s = await cancelDownload(id);
       setStatusMap((m) => ({ ...m, [id]: s }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
     } finally {
       setBusyId(null);
     }
@@ -246,12 +358,25 @@ export function ModelManager({
       const s = await deleteModel(id);
       setStatusMap((m) => ({ ...m, [id]: s }));
       if (activeId === id) {
-        const next = { ...prefs, activeModelId: null };
+        const next = { ...prefs, activeModelId: null, language: "auto" };
         onPrefs(next);
+        setNotice(
+          `Deleted active model ${id} — local mode now has no model. Pick another or switch to Cloud in Settings.`,
+        );
+      } else {
+        setNotice(`Deleted ${id}.`);
       }
-      setNotice(`Deleted ${id}.`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
+      // A failed delete can still be partial (some files gone, some not):
+      // re-read the on-disk status so the UI reflects reality instead of
+      // the stale pre-delete state.
+      try {
+        const s = await getModelStatus(id);
+        setStatusMap((m) => ({ ...m, [id]: s }));
+      } catch {
+        // Best-effort: the error banner above already explains the failure.
+      }
     } finally {
       setBusyId(null);
     }
@@ -269,7 +394,7 @@ export function ModelManager({
           : `Verify failed: ${s.errorMessage ?? s.errorCode}`,
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
     } finally {
       setBusyId(null);
     }
@@ -282,17 +407,53 @@ export function ModelManager({
     try {
       const s = await selectActiveModel(id);
       setStatusMap((m) => ({ ...m, [id]: s }));
-      onPrefs({ ...prefs, activeModelId: id });
+      const selectedModel = models?.find((model) => model.id === id);
+      onPrefs({
+        ...prefs,
+        activeModelId: id,
+        language: languageForModel(prefs.language, selectedModel),
+      });
       setNotice(`Active model: ${id} (on-device)`);
       const ws = await getTranscriptionStatus().catch(() => null);
       if (ws) setWorkerStatus(ws);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
+      // Same staleness guard as the auto-select path: the worker badge
+      // must reflect the failed attempt, not whatever it showed before.
+      const ws = await getTranscriptionStatus().catch(() => null);
+      if (ws) setWorkerStatus(ws);
     } finally {
       setBusyId(null);
       setLoadStage(null);
     }
   };
+
+  // NOTE: these memos must stay above the early returns below. Hooks must
+  // run unconditionally on every render — when `models` flips null → loaded,
+  // any hook placed after `if (!models) return` would change the hook count
+  // between renders and crash React (#310).
+  const allLanguages = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of models ?? []) for (const l of m.languages) s.add(l);
+    return ["all", ...Array.from(s).sort()];
+  }, [models]);
+
+  const filteredModels = useMemo(() => {
+    if (!models) return [];
+    const q = query.trim().toLowerCase();
+    const langLower = langFilter.toLowerCase();
+    return models.filter((m) => {
+      if (
+        langFilter !== "all" &&
+        !m.languages.some((l) => l.toLowerCase() === langLower)
+      )
+        return false;
+      if (!q) return true;
+      const hay =
+        `${m.id} ${m.name} ${m.engine} ${m.quantization} ${m.languages.join(" ")} ${m.license}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [models, query, langFilter]);
 
   if (!isTauri()) {
     return (
@@ -307,24 +468,6 @@ export function ModelManager({
     return <p className="text-sm text-gray-500">Loading model catalog…</p>;
   }
 
-  const allLanguages = useMemo(() => {
-    const s = new Set<string>();
-    for (const m of models) for (const l of m.languages) s.add(l);
-    return ["all", ...Array.from(s).sort()];
-  }, [models]);
-
-  const filteredModels = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return models.filter((m) => {
-      if (langFilter !== "all" && !m.languages.includes(langFilter))
-        return false;
-      if (!q) return true;
-      const hay =
-        `${m.id} ${m.name} ${m.engine} ${m.quantization} ${m.languages.join(" ")} ${m.license}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [models, query, langFilter]);
-
   return (
     <div className="flex flex-col gap-6">
       {/* Hardware + active status */}
@@ -333,8 +476,19 @@ export function ModelManager({
           Hardware
         </p>
         <p className="mt-1 text-xs leading-relaxed text-gray-700 dark:text-gray-300">
-          {hardwareSummary ?? "Detecting hardware…"}
+          {hardwareError
+            ? `Hardware detection failed — ${hardwareError}`
+            : (hardwareSummary ?? "Detecting hardware…")}
         </p>
+        {hardwareError ? (
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            className="mt-2 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
+          >
+            Retry
+          </button>
+        ) : null}
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <span className="rounded-full border border-gray-200 bg-white px-3 py-1 dark:border-white/15 dark:bg-black">
             Active: {activeId ?? "none"}
@@ -353,6 +507,36 @@ export function ModelManager({
           Audio stays on this device in local mode — no uploads.
         </p>
       </div>
+
+      {activeModel ? (
+        <label
+          className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-500 dark:border-white/10 dark:bg-black"
+          htmlFor="av-transcription-language"
+        >
+          <span className="font-medium text-black dark:text-white">
+            Transcription language
+          </span>
+          <select
+            id="av-transcription-language"
+            value={languageForModel(prefs.language, activeModel)}
+            onChange={(event) =>
+              onPrefs({ ...prefs, language: event.target.value })
+            }
+            className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-black dark:border-white/15 dark:bg-black dark:text-white sm:max-w-[360px]"
+          >
+            <option value="auto">Auto-detect</option>
+            {activeModel.languages.map((language) => (
+              <option key={language} value={language}>
+                {languageLabel(language)}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs leading-relaxed text-gray-500">
+            Choose the language you speak for more reliable short dictation.
+            Auto-detect asks {activeModel.name} to guess from every recording.
+          </span>
+        </label>
+      ) : null}
 
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
@@ -445,7 +629,7 @@ export function ModelManager({
                 key={m.id}
                 className={`rounded-xl border p-5 transition-colors ${isActive ? "border-black bg-white dark:border-white dark:bg-black" : "border-gray-200 bg-white dark:border-white/10 dark:bg-black"}`}
               >
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-semibold text-black dark:text-white">

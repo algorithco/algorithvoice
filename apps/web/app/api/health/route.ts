@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { getApiUrl } from "@/lib/api-url";
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = getApiUrl();
 
 // Generic BFF proxy: browser -> /api/* (same-origin, httpOnly cookies) -> Fastify.
 async function proxy(req: Request, path: string) {

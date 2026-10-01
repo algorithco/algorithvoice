@@ -9,6 +9,7 @@ export const DEFAULT_PREFS: Prefs = {
   hotkey: "Ctrl+Space",
   mode: "cloud",
   theme: "dark",
+  language: "auto",
   activeModelId: null,
 };
 
@@ -48,11 +49,26 @@ export function sanitizeModelId(value: unknown): string | null {
 export function sanitizeHotkey(value: unknown): string {
   if (typeof value !== "string") return DEFAULT_PREFS.hotkey;
   const trimmed = value.trim();
-  // Aligned with Rust normalize_hotkey (lib.rs): ≤32 chars, charset, and a
-  // modifier + "+" so a stored value can always (re-)register.
   if (trimmed.length === 0 || trimmed.length > 32) return DEFAULT_PREFS.hotkey;
   if (!/^[A-Za-z0-9+_ -]+$/.test(trimmed)) return DEFAULT_PREFS.hotkey;
+  if (
+    trimmed.includes("++") ||
+    trimmed.startsWith("+") ||
+    trimmed.endsWith("+")
+  )
+    return DEFAULT_PREFS.hotkey;
   const lower = trimmed.toLowerCase();
+  const blocked = [
+    "alt+f4",
+    "ctrl+alt+del",
+    "ctrl+alt+delete",
+    "super+l",
+    "meta+l",
+    "ctrl+q",
+    "alt+tab",
+    "super+d",
+  ];
+  if (blocked.some((b) => lower === b)) return DEFAULT_PREFS.hotkey;
   const hasModifier = [
     "ctrl",
     "alt",
@@ -72,6 +88,13 @@ export function sanitizeTheme(value: unknown): Prefs["theme"] {
   return value === "light" || value === "dark" ? value : "dark";
 }
 
+export function sanitizeLanguage(value: unknown): string {
+  if (value === "auto") return "auto";
+  if (typeof value !== "string") return "auto";
+  const normalized = value.trim().toLowerCase().split("-")[0];
+  return /^[a-z]{2,3}$/.test(normalized) ? normalized : "auto";
+}
+
 export function safeJsonParse<T>(raw: string): T | null {
   try {
     return JSON.parse(raw, (key, val) => {
@@ -86,15 +109,25 @@ export function safeJsonParse<T>(raw: string): T | null {
 }
 
 export function buildPrefs(saved: Partial<Prefs> | null | undefined): Prefs {
-  // Never spread untrusted objects (prototype pollution). Pick only known
-  // keys through sanitizers.
   if (!saved || typeof saved !== "object") return DEFAULT_PREFS;
+  // Filter __proto__ at object level before picking (Tauri IPC JSON has no reviver)
+  const filtered = filterProtoKeys(saved);
   return {
-    hotkey: sanitizeHotkey(saved.hotkey),
-    theme: sanitizeTheme(saved.theme),
-    mode: sanitizeMode(saved.mode),
-    activeModelId: sanitizeModelId(saved.activeModelId),
+    hotkey: sanitizeHotkey(filtered.hotkey),
+    theme: sanitizeTheme(filtered.theme),
+    mode: sanitizeMode(filtered.mode),
+    language: sanitizeLanguage(filtered.language),
+    activeModelId: sanitizeModelId(filtered.activeModelId),
   };
+}
+
+function filterProtoKeys<T extends object>(obj: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
+    out[k] = v;
+  }
+  return out as T;
 }
 
 function readLocalPrefs(): Prefs | null {
@@ -122,25 +155,31 @@ function writeLocalPrefs(prefs: Prefs): void {
 //   NEVER written in Tauri (avoids dual-persistence divergence); it is only
 //   read once as a one-time migration when the store is empty.
 // - Browser preview: localStorage is the only store.
-export async function loadPrefs(): Promise<Prefs> {
+export async function loadPrefs(opts?: {
+  allowMigration?: boolean;
+}): Promise<Prefs> {
+  const allowMigration = opts?.allowMigration ?? true;
   if (isTauri()) {
     try {
       const store = await load(KEY);
       const saved = await store.get<Partial<Prefs>>("prefs");
       if (saved && typeof saved === "object" && saved !== null) {
-        return buildPrefs(saved);
+        // IPC JSON has no reviver — filter before build
+        const filtered = filterProtoKeys(saved as Record<string, unknown>);
+        return buildPrefs(filtered as Partial<Prefs>);
       }
-      // One-time migration: adopt a pre-existing browser mirror, then persist
-      // it as the canonical store value so later loads don't diverge.
-      const legacy = readLocalPrefs();
-      if (legacy) {
-        try {
-          await store.set("prefs", legacy);
-          await store.save();
-        } catch {
-          // Best-effort migration; canonical read still succeeds below.
+      if (allowMigration) {
+        const legacy = readLocalPrefs();
+        if (legacy) {
+          try {
+            await store.set("prefs", legacy);
+            await store.save();
+          } catch {
+            // Best-effort migration; canonical read still succeeds below.
+            // Pill window has no store:allow-set, so this will fail there — ignore.
+          }
+          return legacy;
         }
-        return legacy;
       }
     } catch {
       // Fall through to defaults — surface via save verification instead of
@@ -166,6 +205,7 @@ export async function savePrefs(prefs: Prefs): Promise<void> {
       verified.hotkey !== canonical.hotkey ||
       verified.theme !== canonical.theme ||
       verified.mode !== canonical.mode ||
+      verified.language !== canonical.language ||
       verified.activeModelId !== canonical.activeModelId
     ) {
       throw new Error("prefs store verification failed after write");
@@ -182,24 +222,16 @@ export async function loadOnboarded(): Promise<boolean> {
       const saved = await store.get<boolean>("onboarded");
       if (typeof saved === "boolean") return saved;
     } catch {
-      // Fall through to defaults.
+      // store unavailable — treat as not onboarded (force wizard), not true
+      return false;
     }
-    // No localStorage mirror in Tauri: a missing store value means "not yet
-    // onboarded" is unknown — default to true only for browser preview safety?
-    // Keep legacy behavior (true) only outside Tauri; in Tauri default false
-    // would force onboarding on every fresh install, which is correct.
-    // Preserve existing default (true) to avoid behavior change; migration
-    // runs on first saveOnboarded.
-    try {
-      return localStorage.getItem("algorith-voice-onboarded") === "1";
-    } catch {
-      return true;
-    }
+    // In Tauri, missing value means not onboarded — do not fall back to localStorage
+    return false;
   }
   try {
     return localStorage.getItem("algorith-voice-onboarded") === "1";
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -208,6 +240,9 @@ export async function saveOnboarded(): Promise<void> {
     const store = await load(KEY);
     await store.set("onboarded", true);
     await store.save();
+    const roundtrip = await store.get<boolean>("onboarded");
+    if (roundtrip !== true)
+      throw new Error("onboarded store verification failed");
     return;
   }
   try {

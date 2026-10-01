@@ -1,6 +1,6 @@
 {
   "name": "@algorith-voice/desktop",
-  "version": "0.5.5",
+  "version": "0.5.20",
   "private": true,
   "license": "GPL-3.0-or-later",
   "type": "module",
@@ -8,7 +8,7 @@
     "build": "vite build",
     "build:check": "tsc -p tsconfig.json && vite build",
     "dev": "vite",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build": "tauri build",
     "lint": "biome check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",

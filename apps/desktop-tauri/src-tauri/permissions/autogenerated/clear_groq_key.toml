@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-groq-key"
+description = "Enables the clear_groq_key command without any pre-configured scope."
+commands.allow = ["clear_groq_key"]
+
+[[permission]]
+identifier = "deny-clear-groq-key"
+description = "Denies the clear_groq_key command without any pre-configured scope."
+commands.deny = ["clear_groq_key"]

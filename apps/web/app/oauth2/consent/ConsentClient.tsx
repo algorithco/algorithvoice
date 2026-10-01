@@ -1,0 +1,300 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+
+import SlideCommit from "../../../components/SlideCommit";
+import { safeDesktopHandoffUrl } from "./handoff";
+
+export function ConsentClient({
+  requestId,
+  userEmail,
+}: {
+  requestId: string;
+  userEmail: string | null;
+}) {
+  const [loading, setLoading] = useState<"allow" | "deny" | null>(null);
+  const [done, setDone] = useState<"allow" | "deny" | null>(null);
+  const [redirectTo, setRedirectTo] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Tracks terminal state for unload handlers (state closures go stale in
+  // pagehide). Once allow/deny is sent, closing the tab must not re-deny.
+  const doneRef = useRef<"allow" | "deny" | null>(null);
+  const requestRef = useRef(requestId);
+  requestRef.current = requestId;
+  // Deep-link handoff must fire exactly once (StrictMode double-effects).
+  const firedRef = useRef(false);
+
+  // Attempt the handoff whenever we reach done. The desktop deep-link
+  // (algorithvoice://auth-callback?code=&state=) fires as a top-level
+  // navigation — hidden iframes to custom schemes are blocked by Chrome, so
+  // the old iframe approach silently dropped the handoff. Do not auto-close:
+  // closing can cancel Chrome's external-protocol dispatch before Windows
+  // launches/focuses the desktop app. The success view keeps a real link as
+  // a user-gesture fallback when the browser blocks automatic navigation.
+  useEffect(() => {
+    if (!done) return;
+    doneRef.current = done;
+    if (redirectTo && redirectTo !== "/" && !firedRef.current) {
+      firedRef.current = true;
+      try {
+        window.location.assign(redirectTo);
+      } catch {}
+    }
+  }, [done, redirectTo]);
+
+  // Closing the tab without deciding = deny. The website records the
+  // rejection so the desktop app unblocks immediately instead of waiting
+  // for the 5-minute timeout. sendBeacon survives page unload; keepalive
+  // fetch is the fallback. Backend treats a missing (already consumed)
+  // request as a silent no-op for denies. beforeunload covers Chrome cases
+  // where pagehide fires too late; visibilitychange covers tab-switch close.
+  useEffect(() => {
+    const sendDenyBeacon = () => {
+      if (doneRef.current) return;
+      doneRef.current = "deny";
+      const payload = JSON.stringify({
+        request_id: requestRef.current,
+        approved: false,
+        via: "close",
+      });
+      try {
+        if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
+          const blob = new Blob([payload], { type: "application/json" });
+          if (navigator.sendBeacon("/api/oauth2/approve", blob)) return;
+        }
+      } catch {}
+      try {
+        void fetch("/api/oauth2/approve", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: payload,
+          keepalive: true,
+        });
+      } catch {}
+    };
+    const onPageHide = () => sendDenyBeacon();
+    const onBeforeUnload = () => sendDenyBeacon();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") sendDenyBeacon();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  async function actDeny() {
+    setError(null);
+    setLoading("deny");
+    try {
+      const res = await fetch("/api/oauth2/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          request_id: requestId,
+          approved: false,
+          via: "button",
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        redirect_to?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(body.error ?? "Request failed");
+      // Hand the deep-link to the done-effect: it fires as a top-level
+      // navigation (reliable custom-scheme handoff) instead of an iframe.
+      if (body.redirect_to && body.redirect_to !== "/") {
+        const handoff = safeDesktopHandoffUrl(body.redirect_to);
+        if (!handoff) throw new Error("Invalid desktop callback");
+        setRedirectTo(handoff);
+      }
+      setDone("deny");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+      setLoading(null);
+    }
+  }
+
+  async function confirmAllow() {
+    setError(null);
+    // Suppress close-beacon while the approval is in flight; a late deny
+    // must never overwrite an allow (backend also fails deny-safe).
+    doneRef.current = "allow";
+    try {
+      const res = await fetch("/api/oauth2/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ request_id: requestId, approved: true }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        redirect_to?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(body.error ?? "Request failed");
+      // Same top-level handoff as deny (see above).
+      if (body.redirect_to && body.redirect_to !== "/") {
+        const handoff = safeDesktopHandoffUrl(body.redirect_to);
+        if (!handoff) throw new Error("Invalid desktop callback");
+        setRedirectTo(handoff);
+      }
+      setDone("allow");
+      return;
+    } catch (e) {
+      // Allow retry / close-deny after a failed approval.
+      doneRef.current = null;
+      throw e;
+    }
+  }
+
+  function handleAllowDone() {
+    // No-op: redirect is handled by useEffect on done, ensures it fires even after SlideCommit unmount
+  }
+
+  if (done) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-2 text-center">
+        <span className="grid size-12 place-items-center rounded-full bg-ink text-canvas">
+          <svg
+            aria-hidden
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="h-6 w-6"
+          >
+            <path
+              d="M5 13l4 4L19 7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+        <div>
+          <p className="font-mono text-sm font-semibold tracking-tight text-ink">
+            {done === "allow" ? "Access granted" : "Access denied"}
+          </p>
+          <p className="mt-1 font-mono text-xs leading-4 text-faint">
+            Return to the desktop app. You can close this tab after it opens.
+          </p>
+        </div>
+        {redirectTo ? (
+          <a
+            href={redirectTo}
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-ink px-4 font-mono text-xs font-semibold text-canvas transition-opacity hover:opacity-90"
+          >
+            Open Algorith Voice
+          </a>
+        ) : null}
+        <div className="h-1 w-full overflow-hidden rounded-full bg-raised">
+          <div className="h-full w-full animate-[shimmer_1.2s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-ink/20 to-transparent" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* App + user */}
+      <div className="flex items-start gap-3 rounded-xl border border-line bg-canvas p-4">
+        <span
+          className="grid size-10 shrink-0 place-items-center rounded-xl bg-ink text-canvas"
+          aria-hidden
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" className="size-5">
+            <path d="M12 2.2a4.5 4.5 0 0 0-2.3.6A5.2 5.2 0 0 0 6 6.2c0 1.2.4 2.3 1.2 3.2A5.1 5.1 0 0 0 12 12a5.1 5.1 0 0 0 4.8-2.6c.8-.9 1.2-2 1.2-3.2a5.2 5.2 0 0 0-3.7-3.4A4.5 4.5 0 0 0 12 2.2z" />
+          </svg>
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm leading-5">
+            <span className="font-semibold text-ink">
+              Algorith Voice Desktop
+            </span>
+            <span className="text-sub"> wants to access your account</span>
+          </p>
+          {userEmail ? (
+            <p className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-raised px-3 py-1">
+              <span
+                className="h-2 w-2 rounded-full bg-emerald-500"
+                aria-hidden
+              />
+              <span className="truncate font-mono text-xs font-medium text-ink">
+                {userEmail}
+              </span>
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="rounded-xl bg-raised/60 p-4 ring-1 ring-line/50">
+        <p className="font-mono text-xs leading-4 text-sub">
+          This is your{" "}
+          <span className="font-medium text-ink">first-party desktop app</span>.
+          No third party receives your data.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {["profile", "email", "offline_access"].map((s) => (
+            <span
+              key={s}
+              className="rounded-full border border-line bg-canvas px-2.5 py-1 font-mono text-[11px] font-medium tracking-wide text-faint"
+            >
+              {s}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {error ? (
+        <p
+          className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2.5 font-mono text-xs leading-4 text-red-400"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
+
+      <div className="flex flex-col items-center gap-3">
+        <SlideCommit
+          label="Slide to allow"
+          doneLabel="Allowed"
+          errorLabel="Failed — try again"
+          onConfirm={confirmAllow}
+          onDone={handleAllowDone}
+          trackColor="#141414"
+          handleColor="#ffffff"
+          successColor="#ffffff"
+          dangerColor="#e5484d"
+          width={340}
+          height={52}
+          radius={26}
+          className="w-[340px] max-w-full"
+        />
+        <button
+          type="button"
+          disabled={!!loading || !!done}
+          onClick={actDeny}
+          className="inline-flex min-h-[52px] w-[340px] max-w-full items-center justify-center rounded-full border border-red-500/30 bg-red-500/10 px-6 text-sm font-semibold text-red-400 transition-colors hover:bg-red-500/15 hover:border-red-500/40 hover:text-red-300 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {loading === "deny" ? (
+            <>
+              <span
+                className="h-4 w-4 animate-spin rounded-full border-2 border-red-500/30 border-t-red-400"
+                aria-hidden
+              />
+              Denying…
+            </>
+          ) : (
+            "Deny"
+          )}
+        </button>
+      </div>
+
+      <p className="text-center font-mono text-[11px] leading-4 text-faint">
+        Slide to approve · you’ll return to the desktop app automatically.
+      </p>
+    </div>
+  );
+}

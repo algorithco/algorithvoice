@@ -25,12 +25,24 @@ use crate::local_asr::worker::{TranscriptionWorker, WorkerStatus};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 /// Per-attempt deadline for a file download (retries get a fresh budget).
 pub const DOWNLOAD_TIMEOUT_SECS: u64 = 1800;
 /// Bounded retries for transient failures (timeout, reset, 5xx, 429).
 pub const DOWNLOAD_MAX_RETRIES: u32 = 3;
+
+/// Model administration is intentionally unavailable to auxiliary webviews.
+/// A compromised floating pill must not be able to download/delete gigabytes,
+/// rewrite model state, or force expensive engine loads.
+fn require_model_manager_window(window: &WebviewWindow) -> AppResult<()> {
+    match window.label() {
+        "main" | "settings" => Ok(()),
+        _ => Err(AppError::internal(
+            "model management is not allowed from this window",
+        )),
+    }
+}
 
 fn app_data_dir(app: &AppHandle) -> AppResult<PathBuf> {
     app.path()
@@ -38,7 +50,7 @@ fn app_data_dir(app: &AppHandle) -> AppResult<PathBuf> {
         .map_err(|e| AppError::model_download_failed(format!("cannot resolve app data dir: {e}")))
 }
 
-fn load_manifest() -> AppResult<ModelManifest> {
+pub(crate) fn load_manifest() -> AppResult<ModelManifest> {
     let manifest = default_manifest()?;
     validate_manifest(&manifest)?;
     // Fail closed on tampered manifests before trusting URLs/checksums.
@@ -66,16 +78,19 @@ fn emit_status(app: &AppHandle, info: &ModelStatusInfo) {
 }
 
 #[tauri::command]
-pub async fn list_available_models() -> AppResult<Vec<LocalModel>> {
+pub async fn list_available_models(window: WebviewWindow) -> AppResult<Vec<LocalModel>> {
+    require_model_manager_window(&window)?;
     Ok(load_manifest()?.models)
 }
 
 #[tauri::command]
 pub async fn get_model_status(
+    window: WebviewWindow,
     app: AppHandle,
     downloads: State<'_, DownloadManager>,
     id: String,
 ) -> AppResult<ModelStatusInfo> {
+    require_model_manager_window(&window)?;
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
     let data = app_data_dir(&app)?;
@@ -83,7 +98,11 @@ pub async fn get_model_status(
 }
 
 #[tauri::command]
-pub async fn get_installed_models(app: AppHandle) -> AppResult<Vec<InstalledModel>> {
+pub async fn get_installed_models(
+    window: WebviewWindow,
+    app: AppHandle,
+) -> AppResult<Vec<InstalledModel>> {
+    require_model_manager_window(&window)?;
     let manifest = load_manifest()?;
     let data = app_data_dir(&app)?;
     Ok(models::installed_models(&data, &manifest))
@@ -124,10 +143,12 @@ fn record_install(dir: &std::path::Path, model: &LocalModel) -> AppResult<Instal
 
 #[tauri::command]
 pub async fn download_model(
+    window: WebviewWindow,
     app: AppHandle,
     downloads: State<'_, DownloadManager>,
     id: String,
 ) -> AppResult<ModelStatusInfo> {
+    require_model_manager_window(&window)?;
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
     if !is_configured(&model) {
@@ -144,17 +165,12 @@ pub async fn download_model(
     }
     let data = app_data_dir(&app)?;
     let dir = models::model_dir(&data, &model.id)?;
-    let known = model.known_total_bytes();
-    if known > 0 {
-        models::check_free_space(&dir, known)?;
-    }
     models::prune_stale_parts(&data, &manifest);
 
     // Skip files that are already present AND verified. Hashing is async
     // (tokio fs yields per chunk), so the event loop never blocks.
-    let mut fetch: Vec<(&crate::local_asr::manifest::ModelFile, u64)> = Vec::new();
+    let mut fetch: Vec<&crate::local_asr::manifest::ModelFile> = Vec::new();
     let mut skipped_bytes: u64 = 0;
-    let mut offset: u64 = 0;
     for file in &model.files {
         let path = dir.join(&file.filename);
         let present = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
@@ -172,9 +188,15 @@ pub async fn download_model(
         } else {
             // Corrupt or missing: remove so the fetch starts clean.
             let _ = std::fs::remove_file(&path);
-            fetch.push((file, offset));
+            fetch.push(file);
         }
-        offset += file.size_bytes;
+    }
+    // Free-space preflight covers only the bytes still missing, not the
+    // whole model: already-verified files are already on disk, so a 95%
+    // present model must not fail as if starting from zero.
+    let remaining = remaining_fetch_bytes(&fetch);
+    if remaining > 0 {
+        models::check_free_space(&dir, remaining)?;
     }
     let total = model.known_total_bytes();
     if fetch.is_empty() {
@@ -186,21 +208,30 @@ pub async fn download_model(
         return Ok(info);
     }
 
+    // Model-level progress starts with every already-verified file, then
+    // advances monotonically through only the files that still need fetching.
+    // Using the files' original manifest offsets makes progress jump backwards
+    // whenever a later file is already present.
+    let mut completed_offset = skipped_bytes;
     let requests: Vec<ModelFileRequest> = fetch
         .into_iter()
-        .map(|(file, off)| ModelFileRequest {
-            request: DownloadRequest {
-                url: file.url.clone(),
-                fallback_url: file.fallback_url.clone(),
-                dest_final: dir.join(&file.filename),
-                resume_key: models::resume_key_for(&model),
-                expected_sha256: file.sha256.clone(),
-                expected_size: (file.size_bytes != 0).then_some(file.size_bytes),
-                timeout: Duration::from_secs(DOWNLOAD_TIMEOUT_SECS),
-                max_retries: DOWNLOAD_MAX_RETRIES,
-            },
-            completed_offset: off,
-            model_total: total,
+        .map(|file| {
+            let request = ModelFileRequest {
+                request: DownloadRequest {
+                    url: file.url.clone(),
+                    fallback_url: file.fallback_url.clone(),
+                    dest_final: dir.join(&file.filename),
+                    resume_key: models::resume_key_for(&model),
+                    expected_sha256: file.sha256.clone(),
+                    expected_size: (file.size_bytes != 0).then_some(file.size_bytes),
+                    timeout: Duration::from_secs(DOWNLOAD_TIMEOUT_SECS),
+                    max_retries: DOWNLOAD_MAX_RETRIES,
+                },
+                completed_offset,
+                model_total: total,
+            };
+            completed_offset = completed_offset.saturating_add(file.size_bytes);
+            request
         })
         .collect();
 
@@ -269,6 +300,12 @@ pub async fn download_model(
     models::status_info(&data, &model, true)
 }
 
+/// Bytes still missing for a pending fetch list: the free-space preflight
+/// budget. Already-verified files are on disk and cost nothing more.
+fn remaining_fetch_bytes(fetch: &[&crate::local_asr::manifest::ModelFile]) -> u64 {
+    fetch.iter().map(|file| file.size_bytes).sum()
+}
+
 fn error_status(model: &LocalModel, e: &AppError) -> ModelStatusInfo {
     ModelStatusInfo {
         id: model.id.clone(),
@@ -283,15 +320,18 @@ fn error_status(model: &LocalModel, e: &AppError) -> ModelStatusInfo {
 
 #[tauri::command]
 pub async fn cancel_download(
+    window: WebviewWindow,
     app: AppHandle,
     downloads: State<'_, DownloadManager>,
     id: String,
 ) -> AppResult<ModelStatusInfo> {
+    require_model_manager_window(&window)?;
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
     // Cancelling an idle download is a successful no-op; partial bytes stay
-    // on disk for resume either way.
-    downloads.cancel(&model.id);
+    // on disk for resume either way. Awaited so any open file handle is
+    // released before the status read below.
+    downloads.cancel(&model.id).await;
     let data = app_data_dir(&app)?;
     let info = models::status_info(&data, &model, false)?;
     emit_status(&app, &info);
@@ -300,22 +340,50 @@ pub async fn cancel_download(
 
 #[tauri::command]
 pub async fn delete_model(
+    window: WebviewWindow,
     app: AppHandle,
     downloads: State<'_, DownloadManager>,
+    worker: State<'_, Arc<TranscriptionWorker>>,
     id: String,
 ) -> AppResult<ModelStatusInfo> {
+    require_model_manager_window(&window)?;
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
-    downloads.cancel(&model.id);
+    // Awaited: `cancel` only returns once the aborted task has actually
+    // stopped and dropped its open file handles. Deleting while a handle
+    // is open fails outright on Windows (sharing violation) and leaves
+    // the directory partially intact, so disk is never reclaimed.
+    downloads.cancel(&model.id).await;
+    // Drop the in-memory engine when it serves the deleted model. Without
+    // this the worker keeps transcribing with files that no longer exist
+    // (and reports ready for a model that is gone).
+    if worker.is_ready_for(&model.id) {
+        worker.unload();
+    }
     let data = app_data_dir(&app)?;
     let dir = models::model_dir(&data, &model.id)?;
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(AppError::model_download_failed(format!(
-                "cannot delete model files: {e}"
-            )))
+    // Defense in depth: external lockers (antivirus, search indexers) can
+    // hold a file briefly on Windows even with no download running.
+    // Retry with backoff before surfacing a user-visible error.
+    let mut attempt: u32 = 0;
+    loop {
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => break,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(e) => {
+                attempt += 1;
+                if attempt >= 3 {
+                    return Err(AppError::model_download_failed(format!(
+                        "cannot delete model files: {e}"
+                    )));
+                }
+                let delay_ms = match attempt {
+                    1 => 100,
+                    2 => 300,
+                    _ => 800,
+                };
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
         }
     }
     let info = models::status_info(&data, &model, false)?;
@@ -324,7 +392,12 @@ pub async fn delete_model(
 }
 
 #[tauri::command]
-pub async fn verify_model(app: AppHandle, id: String) -> AppResult<ModelStatusInfo> {
+pub async fn verify_model(
+    window: WebviewWindow,
+    app: AppHandle,
+    id: String,
+) -> AppResult<ModelStatusInfo> {
+    require_model_manager_window(&window)?;
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
     let data = app_data_dir(&app)?;
@@ -341,34 +414,21 @@ pub async fn verify_model(app: AppHandle, id: String) -> AppResult<ModelStatusIn
             version: Some(model.version.clone()),
         },
     );
-    // Hash source: the install record when it matches this model, else the
-    // manifest itself (self-healing path for a lost/corrupt record).
-    let record_files: Option<Vec<InstalledFile>> = match &models::read_installed_record(&dir) {
-        Some(record) if record.id == model.id => Some(record.files.clone()),
-        _ => None,
-    };
+    // The signed manifest is the sole verification authority. installed.json
+    // is writable local metadata and must never be allowed to choose paths,
+    // omit required files, or substitute hashes.
     let mut failed: Option<String> = None;
-    if let Some(files) = &record_files {
-        for file in files {
-            if let Err(e) = verify_file(&dir.join(&file.filename), &file.sha256).await {
-                failed = Some(format!("{}: {}", file.filename, e.message));
-                break;
-            }
-        }
-    } else {
-        for file in &model.files {
-            if let Err(e) = verify_file(&dir.join(&file.filename), &file.sha256).await {
-                failed = Some(format!("{}: {}", file.filename, e.message));
-                break;
-            }
+    for file in &model.files {
+        if let Err(e) = verify_file(&dir.join(&file.filename), &file.sha256).await {
+            failed = Some(format!("{}: {}", file.filename, e.message));
+            break;
         }
     }
     let info = match failed {
         None => {
-            // Healthy: ensure a record exists (self-heal when it didn't).
-            if record_files.is_none() {
-                let _ = record_install(&dir, &model);
-            }
+            // Healthy: rewrite metadata from the signed manifest, repairing
+            // missing, stale, or locally modified install records.
+            record_install(&dir, &model)?;
             models::status_info(&data, &model, false)?
         }
         Some(message) => ModelStatusInfo {
@@ -429,10 +489,12 @@ async fn ensure_loaded(
 /// persistence lives in frontend prefs (single source of truth).
 #[tauri::command]
 pub async fn select_active_model(
+    window: WebviewWindow,
     app: AppHandle,
     worker: State<'_, Arc<TranscriptionWorker>>,
     id: String,
 ) -> AppResult<ModelStatusInfo> {
+    require_model_manager_window(&window)?;
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
     let data = app_data_dir(&app)?;
@@ -465,10 +527,12 @@ pub async fn select_active_model(
 /// compatibility gate — that belongs to explicit user selection.
 #[tauri::command]
 pub async fn start_inference_worker(
+    window: WebviewWindow,
     app: AppHandle,
     worker: State<'_, Arc<TranscriptionWorker>>,
     id: String,
 ) -> AppResult<ModelStatusInfo> {
+    require_model_manager_window(&window)?;
     let manifest = load_manifest()?;
     let model = find_model(&manifest, &id)?;
     let data = app_data_dir(&app)?;
@@ -490,8 +554,10 @@ pub async fn start_inference_worker(
 /// Unload the engine and free its memory. Always succeeds.
 #[tauri::command]
 pub async fn stop_inference_worker(
+    window: WebviewWindow,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<WorkerStatus> {
+    require_model_manager_window(&window)?;
     worker.unload();
     Ok(worker.status())
 }
@@ -499,8 +565,10 @@ pub async fn stop_inference_worker(
 /// Worker lifecycle snapshot for status UI and diagnostics.
 #[tauri::command]
 pub async fn get_transcription_status(
+    window: WebviewWindow,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<WorkerStatus> {
+    require_model_manager_window(&window)?;
     Ok(worker.status())
 }
 
@@ -508,7 +576,8 @@ pub async fn get_transcription_status(
 /// Runs off the async executor: sysinfo scans can stall it for hundreds
 /// of milliseconds.
 #[tauri::command]
-pub async fn get_hardware_info() -> AppResult<HardwareInfo> {
+pub async fn get_hardware_info(window: WebviewWindow) -> AppResult<HardwareInfo> {
+    require_model_manager_window(&window)?;
     tokio::task::spawn_blocking(hardware::detect)
         .await
         .map_err(|e| crate::error::AppError::internal(format!("hardware probe failed: {e}")))
@@ -525,7 +594,11 @@ pub struct ModelCompatibility {
 /// Compatibility for every model in the manifest, evaluated against current hardware + free disk.
 /// Cheap (no I/O beyond disk free), so onboarding can call it every time.
 #[tauri::command]
-pub async fn get_model_compatibilities(app: AppHandle) -> AppResult<Vec<ModelCompatibility>> {
+pub async fn get_model_compatibilities(
+    window: WebviewWindow,
+    app: AppHandle,
+) -> AppResult<Vec<ModelCompatibility>> {
+    require_model_manager_window(&window)?;
     let manifest = load_manifest()?;
     let hardware = hardware::detect();
     let data = app_data_dir(&app)?;
@@ -545,4 +618,46 @@ pub async fn get_model_compatibilities(app: AppHandle) -> AppResult<Vec<ModelCom
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::local_asr::manifest::ModelFile;
+
+    fn test_file(name: &str, size: u64) -> ModelFile {
+        ModelFile {
+            filename: name.to_string(),
+            url: "https://cdn.example.com/models/demo/x.onnx".to_string(),
+            fallback_url: None,
+            sha256: "ab".repeat(32),
+            size_bytes: size,
+        }
+    }
+
+    #[test]
+    fn remaining_fetch_bytes_counts_only_missing_files() {
+        // N-1 of N files already verified: the preflight budget is the 1
+        // remaining file, not the whole model.
+        let a = test_file("a.onnx", 1_000);
+        let b = test_file("b.onnx", 2_000);
+        let c = test_file("c.onnx", 4_000);
+        let fetch = vec![&c];
+        assert_eq!(remaining_fetch_bytes(&fetch), 4_000);
+        let _ = (&a, &b); // verified files cost nothing more
+    }
+
+    #[test]
+    fn remaining_fetch_bytes_empty_when_nothing_missing() {
+        let fetch: Vec<&ModelFile> = Vec::new();
+        assert_eq!(remaining_fetch_bytes(&fetch), 0);
+    }
+
+    #[test]
+    fn remaining_fetch_bytes_sums_every_missing_file() {
+        let a = test_file("a.onnx", 1_000);
+        let b = test_file("b.onnx", 2_000);
+        let fetch = vec![&a, &b];
+        assert_eq!(remaining_fetch_bytes(&fetch), 3_000);
+    }
 }

@@ -12,6 +12,7 @@ export const signupSchema = z
     deviceType: z
       .enum(["desktop-macos", "desktop-windows", "desktop-linux"])
       .optional(),
+    deviceFingerprint: z.string().min(8).max(256).optional(),
   })
   .strict();
 export type SignupInput = z.infer<typeof signupSchema>;
@@ -37,6 +38,9 @@ export const authPairSchema = z
   .object({
     user: userSchema,
     accessToken: z.string(),
+    // Opaque sliding refresh token (web sessions). Absent on legacy flows
+    // that have not rotated yet; desktop email login ignores it.
+    refreshToken: z.string().min(1).max(512).optional(),
   })
   .strict();
 export type AuthPair = z.infer<typeof authPairSchema>;

@@ -3,13 +3,63 @@ import { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import pino from "pino";
 import { loadEnv } from "../config/env.js";
+import { safeRedisEndpoint } from "../config/redis-url.js";
 import { getStripe } from "../modules/billing/stripe.js";
-import { QUEUES, redis } from "./connection.js";
-import { processStripeEvent } from "./stripe-events.js";
+import { releaseSttSlot } from "../modules/stt/stt.slots.js";
+import {
+  cleanupSttAudio,
+  deleteSttAudio,
+  readSttAudio,
+} from "../modules/stt/stt.storage.js";
+import {
+  persistMeteringJob,
+  recordAiRequest,
+} from "../modules/usage/metering.js";
+import {
+  enqueueMetering,
+  type MeteringJob,
+  QUEUES,
+  redis,
+} from "./connection.js";
+import { processStripeEvent, syncStaleSubscriptions } from "./stripe-events.js";
+import { processSttJob } from "./stt-worker-processor.js";
 
 // Separate process: `pnpm worker`. Same image, different CMD on Fly.
 const env = loadEnv();
 const log = pino({ level: env.LOG_LEVEL });
+const prisma = new PrismaClient();
+
+const redisMemoryTimer = setInterval(() => {
+  void redis
+    .info("memory")
+    .then((info) => {
+      const used = /^used_memory:(\d+)$/m.exec(info)?.[1];
+      log.info(
+        {
+          event: "redis_memory",
+          ...(used ? { usedMemoryBytes: Number(used) } : {}),
+        },
+        "Redis memory sampled",
+      );
+    })
+    .catch((err: unknown) =>
+      log.warn(
+        { err, event: "redis_memory_error" },
+        "Redis memory sample failed",
+      ),
+    );
+}, 60_000);
+redisMemoryTimer.unref();
+
+const sttAudioCleanupTimer = setInterval(() => {
+  void cleanupSttAudio().catch((err: unknown) =>
+    log.warn(
+      { err, event: "stt_audio_cleanup_error" },
+      "STT audio cleanup failed",
+    ),
+  );
+}, 5 * 60_000);
+sttAudioCleanupTimer.unref();
 
 function makeWorkerRedis() {
   const client = new Redis(env.REDIS_URL, {
@@ -27,7 +77,7 @@ function makeWorkerRedis() {
       log.warn(
         {
           err: (err as Error & { code?: string }).code ?? err.message,
-          url: env.REDIS_URL,
+          url: safeRedisEndpoint(env.REDIS_URL),
         },
         "worker redis unavailable — retrying in background",
       );
@@ -55,10 +105,17 @@ const workers = [
     new Worker(
       "metering",
       async (job) => {
-        // Phase 2 implements 60s batching -> usage_daily -> monthly rollup.
-        // Until then: acknowledge shape, never silently claim work done.
-        log.info({ jobId: job.id, data: job.data }, "metering event received");
-        return { ok: true, id: job.id, processed: false };
+        const idempotencyKey =
+          typeof (job.data as { idempotencyKey?: unknown }).idempotencyKey ===
+          "string"
+            ? (job.data as { idempotencyKey: string }).idempotencyKey
+            : String(job.id);
+        await persistMeteringJob(
+          prisma,
+          job.data as MeteringJob,
+          idempotencyKey,
+        );
+        return { ok: true, id: job.id, processed: true };
       },
       { connection: makeWorkerRedis(), concurrency: 5, lockDuration: 60_000 },
     ),
@@ -70,13 +127,8 @@ const workers = [
       async (job) => {
         const stripe = getStripe();
         if (!stripe) throw new Error("STRIPE_SECRET_KEY not configured");
-        const prisma = new PrismaClient();
-        try {
-          const { eventId } = job.data as { eventId: string };
-          return await processStripeEvent(prisma, stripe, eventId, log);
-        } finally {
-          await prisma.$disconnect();
-        }
+        const { eventId } = job.data as { eventId: string };
+        return processStripeEvent(prisma, stripe, eventId, log);
       },
       {
         connection: makeWorkerRedis(),
@@ -84,6 +136,23 @@ const workers = [
         limiter: { max: 20, duration: 1000 },
         lockDuration: 60_000,
       },
+    ),
+  ),
+  observe(
+    "billing.reconcile",
+    new Worker(
+      "billing.reconcile",
+      async () => {
+        const stripe = getStripe();
+        if (!stripe) {
+          log.warn(
+            "billing reconcile skipped: STRIPE_SECRET_KEY not configured",
+          );
+          return { ok: true, skipped: true };
+        }
+        return syncStaleSubscriptions(prisma, stripe, log);
+      },
+      { connection: makeWorkerRedis(), concurrency: 1, lockDuration: 60_000 },
     ),
   ),
   observe(
@@ -102,95 +171,21 @@ const workers = [
     "stt.transcribe",
     new Worker(
       "stt.transcribe",
-      async (job) => {
-        const {
-          jobId,
-          userId: _userId,
-          format,
-          model,
-          language,
-          audioKey,
-          filename,
-        } = job.data as {
-          jobId: string;
-          userId: string;
-          format: string;
-          model: string;
-          language?: string;
-          audioKey: string;
-          filename?: string;
-        };
-        const b64 = await redis.getBuffer(audioKey);
-        if (!b64)
-          throw Object.assign(new Error("audio expired, re-upload"), {
-            statusCode: 410,
-          });
-        const audio = Buffer.from(b64.toString(), "base64");
-        const { getAppEnv } = await import("../config/env.js");
-        const env = getAppEnv();
-        const apiKey = env.OPENROUTER_API_KEY;
-        if (!apiKey)
-          throw Object.assign(new Error("stt_unavailable"), {
-            statusCode: 503,
-          });
-        // 30s timeout inside worker (not the HTTP handler), retry via BullMQ backoff
-        const started = Date.now();
-        let text = "";
-        try {
-          const { mimeForFormat } = await import("../modules/stt/stt.utils.js");
-          const form = new FormData();
-          form.set(
-            "file",
-            new Blob([new Uint8Array(audio)], { type: mimeForFormat(format) }),
-            filename ?? "audio.wav",
-          );
-          form.set("model", model);
-          if (language && language !== "auto") form.set("language", language);
-          const res = await fetch(
-            "https://openrouter.ai/api/v1/audio/transcriptions",
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "HTTP-Referer": env.APP_URL,
-                "X-Title": "Algorith Voice",
-              },
-              body: form,
-              signal: AbortSignal.timeout(30_000),
-            },
-          );
-          if (!res.ok) {
-            const body = await res.text().catch(() => "");
-            const err = new Error(body.slice(0, 500)) as Error & {
-              statusCode?: number;
-              retryable?: boolean;
-            };
-            err.statusCode = res.status;
-            err.retryable = res.status === 429 || res.status >= 500;
-            if (res.status === 429) {
-              const ra = res.headers.get("retry-after");
-              const delay = ra ? Number.parseInt(ra, 10) * 1000 : 5000;
-              await (
-                job as unknown as { rateLimit: (ms: number) => Promise<void> }
-              ).rateLimit?.(delay);
-            }
-            throw err;
-          }
-          const out = (await res.json()) as { text: string };
-          text = out.text;
-        } finally {
-          await redis.del(audioKey).catch(() => {});
-        }
-        const latencyMs = Date.now() - started;
-        // Persist result for polling (TTL 1h)
-        await redis.set(
-          `stt:result:${jobId}`,
-          JSON.stringify({ text, latencyMs }),
-          "EX",
-          3600,
-        );
-        return { text, latencyMs };
-      },
+      (job) =>
+        processSttJob(job, {
+          apiKey: env.OPENROUTER_API_KEY,
+          appUrl: env.APP_URL,
+          readAudio: readSttAudio,
+          deleteAudio: deleteSttAudio,
+          fetch,
+          recordAi: (record) => recordAiRequest(prisma, record),
+          enqueueMeter: (record) => enqueueMetering(record),
+          storeResult: (jobId, value) =>
+            redis.set(`stt:result:${jobId}`, JSON.stringify(value), "EX", 3600),
+          rateLimit: (delayMs) => QUEUES.stt.rateLimit(delayMs),
+          releaseSlot: releaseSttSlot,
+          logError: (error, message) => log.error({ err: error }, message),
+        }),
       {
         connection: makeWorkerRedis(),
         concurrency: 5,
@@ -210,10 +205,22 @@ void QUEUES.usageRollup
   )
   .catch((err: unknown) => log.error({ err }, "failed to schedule rollup"));
 
+// Hourly billing reconcile (missed-webhook safety net).
+void QUEUES.billingReconcile
+  .add(
+    "reconcile-hourly",
+    {},
+    { repeat: { every: 3600_000 }, jobId: "reconcile-hourly" },
+  )
+  .catch((err: unknown) => log.error({ err }, "failed to schedule reconcile"));
+
 async function shutdown(signal: string) {
+  clearInterval(redisMemoryTimer);
+  clearInterval(sttAudioCleanupTimer);
   log.info({ signal }, "worker shutting down");
   await Promise.all(workers.map((w) => w.close()));
   await Promise.all(Object.values(QUEUES).map((q) => q.close()));
+  await prisma.$disconnect();
   process.exit(0);
 }
 

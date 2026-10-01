@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// Minimal E2E smoke (jsdom): launch → demo auth → onboarding → dashboard.
-// A full tauri-driver + WebDriver harness is deferred (see CHANGELOG — NEEDS
-// PRODUCT INPUT for CI runner with native binary); this proves the critical
-// path boots and composes.
+// Minimal boot smoke (jsdom): the app shell renders (auth gate when signed
+// out, dashboard when a session exists). A full tauri-driver + WebDriver
+// harness is deferred (see CHANGELOG — NEEDS PRODUCT INPUT for CI runner
+// with native binary); this proves the critical path boots and composes.
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +24,8 @@ if (typeof window !== "undefined" && !("IntersectionObserver" in window)) {
     FakeIntersectionObserver;
 }
 
+const shellMocks = vi.hoisted(() => ({ signedIn: false }));
+
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: "main" }),
 }));
@@ -32,8 +34,22 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string) => {
-    if (cmd === "session_status") throw new Error("no session");
+    if (cmd === "session_status") {
+      if (shellMocks.signedIn) {
+        return { loggedIn: true, email: "test@example.com" };
+      }
+      throw new Error("no session");
+    }
     if (cmd === "store_session") return undefined;
+    if (cmd === "license_status") {
+      return {
+        valid: true,
+        status: "active",
+        planTier: "pro",
+        currentPeriodEnd: "2026-10-28T00:00:00.000Z",
+        reason: null,
+      };
+    }
     throw new Error(`tauri unavailable in test: ${cmd}`);
   },
 }));
@@ -42,9 +58,9 @@ vi.mock("@tauri-apps/api/event", () => ({
   emit: async () => {},
 }));
 vi.mock("@tauri-apps/plugin-store", () => ({
-  load: async () => {
-    throw new Error("tauri unavailable in test");
-  },
+  load: async () => ({
+    get: async (key: string) => (key === "onboarded" ? true : null),
+  }),
 }));
 vi.mock("@tauri-apps/plugin-autostart", () => ({
   isEnabled: async () => false,
@@ -54,23 +70,20 @@ vi.mock("@tauri-apps/plugin-autostart", () => ({
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: async () => {},
 }));
+vi.mock("./lib/session/env.js", () => ({ isTauri: () => true }));
 
 import App from "./App.js";
-import { loginDemo } from "./lib/session/demo-account.js";
 
 afterEach(() => {
   vi.useRealTimers();
   document.body.innerHTML = "";
   window.localStorage.clear();
+  shellMocks.signedIn = false;
 });
 
 describe("critical-path smoke", () => {
-  it("demo login persists, onboarding completes, dashboard renders", async () => {
-    // 1. Demo auth works without backend.
-    const session = await loginDemo();
-    expect(session.loggedIn).toBe(true);
-
-    // 2. Full app boots to dashboard when already onboarded.
+  it("signed-out shell renders the auth view", async () => {
+    // No session in a fresh browser preview: the auth gate shows login.
     window.localStorage.setItem(
       "algorith-voice-prefs",
       JSON.stringify({
@@ -97,10 +110,35 @@ describe("critical-path smoke", () => {
     });
 
     const text = div.textContent ?? "";
-    // Signed-in (demo) + onboarded → shell with sidebar/dashboard.
-    expect(text).toContain("Algorith Voice");
+    // Signed out → auth view with the desktop sign-in card.
+    expect(text).toContain("Welcome back");
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it("keeps the signed-in app shell vertically scrollable without horizontal overflow", async () => {
+    shellMocks.signedIn = true;
+    window.localStorage.setItem("algorith-voice-onboarded", "1");
+
+    vi.useFakeTimers();
+    const div = document.createElement("div");
+    document.body.appendChild(div);
+    const root = createRoot(div);
+    await act(async () => {
+      root.render(<App />);
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(4500);
+      await Promise.resolve();
+    });
+
+    const shell = div.querySelector('[data-testid="app-shell"]');
+    const content = div.querySelector('[data-testid="app-content"]');
+    expect(shell?.className).toContain("overflow-hidden");
+    expect(content?.className).toContain("overflow-x-hidden");
+    expect(content?.className).toContain("overflow-y-auto");
+
+    await act(async () => root.unmount());
   });
 });

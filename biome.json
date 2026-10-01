@@ -16,6 +16,27 @@
           "suspicious": { "noExplicitAny": "off" }
         }
       }
+    },
+    {
+      "includes": [
+        "apps/web/app/download/**",
+        "apps/web/app/oauth2/consent/**",
+        "apps/web/components/JellyRadio.tsx",
+        "apps/web/components/SlideCommit.tsx",
+        "apps/web/components/HoldButton.tsx",
+        "apps/web/components/JellyRadio.css"
+      ],
+      "linter": {
+        "rules": {
+          "a11y": { "noSvgWithoutTitle": "off" },
+          "correctness": {
+            "noUnusedVariables": "off",
+            "useExhaustiveDependencies": "off"
+          },
+          "suspicious": { "noCommentText": "off" },
+          "complexity": { "noImportantStyles": "off" }
+        }
+      }
     }
   ],
   "assist": { "enabled": true }

@@ -59,6 +59,8 @@ export interface TranscribeOptions {
   mode?: SttMode;
   /** Manifest id of the local model. Required when mode is "local". */
   modelId?: string | null;
+  /** Paste strategy for Linux terminals or apps that reject synthetic paste. */
+  pasteMode?: "auto" | "ctrl_v" | "ctrl_shift_v" | "type";
 }
 
 export async function transcribeAudio(
@@ -68,11 +70,16 @@ export async function transcribeAudio(
   opts?: TranscribeOptions,
 ): Promise<TranscribeResult> {
   return tauri<TranscribeResult>("transcribe_audio", {
-    audioBase64,
+    audio_base64: audioBase64,
     language: language ?? null,
+    api_key: null,
+    mime_type: mimeType ?? null,
+    mode: opts?.mode ?? null,
+    model_id: opts?.modelId ?? null,
+    // Back-compat: older/newer Rust also accepts camelCase; send both.
+    audioBase64,
     apiKey: null,
     mimeType: mimeType ?? null,
-    mode: opts?.mode ?? null,
     modelId: opts?.modelId ?? null,
   });
 }
@@ -84,18 +91,35 @@ export async function transcribeAndPaste(
   opts?: TranscribeOptions,
 ): Promise<TranscribeResult> {
   return tauri<TranscribeResult>("transcribe_and_paste", {
-    audioBase64,
+    audio_base64: audioBase64,
     language: language ?? null,
+    api_key: null,
+    mime_type: mimeType ?? null,
+    restore_clipboard: true,
+    paste_mode: opts?.pasteMode ?? null,
+    mode: opts?.mode ?? null,
+    model_id: opts?.modelId ?? null,
+    // Back-compat
+    audioBase64,
     apiKey: null,
     mimeType: mimeType ?? null,
     restoreClipboard: true,
-    mode: opts?.mode ?? null,
+    pasteMode: opts?.pasteMode ?? null,
     modelId: opts?.modelId ?? null,
   });
 }
 
-export async function pasteText(text: string): Promise<void> {
-  await tauri("paste_text", { text, restoreClipboard: true });
+export async function pasteText(
+  text: string,
+  pasteMode: TranscribeOptions["pasteMode"] = "auto",
+): Promise<void> {
+  await tauri("paste_text", {
+    text,
+    restore_clipboard: true,
+    restoreClipboard: true,
+    paste_mode: pasteMode,
+    pasteMode,
+  });
 }
 
 // Groq key audit (P3): the key is NEVER persisted in plugin-store or
@@ -105,7 +129,7 @@ export async function pasteText(text: string): Promise<void> {
 // → keyring. `apiKey: null` below is intentional — cloud calls resolve the
 // key server-side in Rust, never from JS memory beyond this call.
 export async function setGroqApiKey(apiKey: string): Promise<void> {
-  await tauri("set_groq_api_key", { apiKey });
+  await tauri("set_groq_api_key", { api_key: apiKey, apiKey });
 }
 
 export async function hasGroqKey(): Promise<boolean> {
@@ -128,12 +152,13 @@ export function pickSupportedMimeType(): string | undefined {
     "audio/webm",
     "audio/mp4",
     "audio/ogg;codecs=opus",
+    "audio/wav",
   ];
   for (const mime of candidates) {
     try {
       if (MediaRecorder.isTypeSupported(mime)) return mime;
-    } catch {
-      // Ignore and try the next candidate.
+    } catch (e) {
+      console.warn("algorith-voice: isTypeSupported check failed for", mime, e);
     }
   }
   return undefined;
@@ -190,7 +215,8 @@ export function encodeWavPCM16(
   view.setUint32(40, dataBytes, true);
   for (let i = 0; i < samples.length; i += 1) {
     const clamped = Math.max(-1, Math.min(1, samples[i] ?? 0));
-    view.setInt16(44 + i * 2, Math.round(clamped * 32767), true);
+    const s = Math.round(clamped * 32768);
+    view.setInt16(44 + i * 2, Math.max(-32768, Math.min(32767, s)), true);
   }
   return new Blob([buffer], { type: "audio/wav" });
 }
@@ -209,9 +235,19 @@ export async function blobToWav16kMono(blob: Blob): Promise<string> {
   if (!AudioContextClass) {
     throw new Error("web audio is unavailable for local transcription");
   }
-  const context = new AudioContextClass();
+  const context = new AudioContextClass({ sampleRate: LOCAL_SAMPLE_RATE });
+  if (context.state === "suspended") {
+    try {
+      await context.resume();
+    } catch (e) {
+      console.warn("algorith-voice: AudioContext resume failed", e);
+    }
+  }
   try {
     const decoded = await context.decodeAudioData(inputBuffer.slice(0));
+    if (!decoded.length || !decoded.numberOfChannels) {
+      throw new Error("decoded audio is empty");
+    }
     const channelData = decoded.getChannelData(0);
     if (decoded.numberOfChannels > 1) {
       // Downmix to mono by averaging all channels.
@@ -230,17 +266,44 @@ export async function blobToWav16kMono(blob: Blob): Promise<string> {
     }
     return wavBase64FromMono(channelData, decoded.sampleRate);
   } finally {
-    void context.close().catch(() => {});
+    void context
+      .close()
+      .catch((e) =>
+        console.warn("algorith-voice: AudioContext close failed", e),
+      );
   }
+}
+
+/** Safely detect shared backing memory when the webview exposes that API. */
+export function isSharedAudioBuffer(buffer: ArrayBufferLike): boolean {
+  return (
+    typeof SharedArrayBuffer !== "undefined" &&
+    buffer instanceof SharedArrayBuffer
+  );
 }
 
 async function wavBase64FromMono(
   samples: Float32Array<ArrayBufferLike>,
   sampleRate: number,
 ): Promise<string> {
-  // Copy into an ArrayBuffer-backed array: decoded channel data may carry
-  // a SharedArrayBuffer typing that copyToChannel/encode reject.
-  let mono: Float32Array<ArrayBuffer> = Float32Array.from(samples);
+  // Avoid copy when already ArrayBuffer-backed; SharedArrayBuffer needs clone.
+  let mono: Float32Array<ArrayBuffer>;
+  if (isSharedAudioBuffer(samples.buffer)) {
+    mono = Float32Array.from(samples) as Float32Array<ArrayBuffer>;
+  } else if (samples.buffer instanceof ArrayBuffer) {
+    // Use view directly if length matches, otherwise slice copy.
+    mono = new Float32Array(
+      samples.buffer,
+      samples.byteOffset,
+      samples.length,
+    ) as Float32Array<ArrayBuffer>;
+    // Ensure we own a clean ArrayBuffer (not a slice of larger buffer)
+    if (mono.buffer.byteLength !== mono.length * 4) {
+      mono = Float32Array.from(samples) as Float32Array<ArrayBuffer>;
+    }
+  } else {
+    mono = Float32Array.from(samples) as Float32Array<ArrayBuffer>;
+  }
   if (sampleRate !== LOCAL_SAMPLE_RATE) {
     const OfflineClass =
       window.OfflineAudioContext ??
@@ -252,13 +315,18 @@ async function wavBase64FromMono(
     if (!OfflineClass) {
       // No offline resampler: pack at original rate and let Rust linear resample.
       // Better than hard failure—audio.rs to_mono_16k handles arbitrary rates.
+      console.warn(
+        "algorith-voice: OfflineAudioContext missing — sending wav at",
+        sampleRate,
+        "Hz for Rust resample",
+      );
       const wav = encodeWavPCM16(mono, sampleRate);
       return blobToBase64(wav);
     }
     try {
       const length = Math.max(
         1,
-        Math.round((samples.length * LOCAL_SAMPLE_RATE) / sampleRate),
+        Math.ceil((samples.length * LOCAL_SAMPLE_RATE) / sampleRate),
       );
       const offline = new OfflineClass(1, length, LOCAL_SAMPLE_RATE);
       const source = offline.createBufferSource();
@@ -269,8 +337,9 @@ async function wavBase64FromMono(
       source.start();
       const rendered = await offline.startRendering();
       mono = Float32Array.from(rendered.getChannelData(0));
-    } catch {
+    } catch (e) {
       // Fallback to original rate on any offline failure (e.g. 1-sample render)
+      console.warn("algorith-voice: OfflineAudioContext rendering failed", e);
       const wav = encodeWavPCM16(mono, sampleRate);
       return blobToBase64(wav);
     }

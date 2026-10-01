@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
+import { getApiUrl } from "./api-url";
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = getApiUrl();
 const COOKIE_NAME = "__Host-av_at";
 
 export interface SessionUser {
@@ -36,8 +37,7 @@ export async function requireUser(): Promise<SessionUser> {
   const session = await getSession();
   if (!session) {
     const { redirect } = await import("next/navigation");
-    redirect("/login");
+    return redirect("/login");
   }
-  // biome-ignore lint/style/noNonNullAssertion: redirect() throws, so session is non-null after check
-  return session!.user;
+  return session.user;
 }

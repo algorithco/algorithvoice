@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-foreground-info"
+description = "Enables the get_foreground_info command without any pre-configured scope."
+commands.allow = ["get_foreground_info"]
+
+[[permission]]
+identifier = "deny-get-foreground-info"
+description = "Denies the get_foreground_info command without any pre-configured scope."
+commands.deny = ["get_foreground_info"]

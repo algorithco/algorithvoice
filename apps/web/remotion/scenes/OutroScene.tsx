@@ -69,7 +69,7 @@ export function OutroScene() {
             color: COLORS.faint,
           }}
         >
-          algorithvoice.com · /download · /docs · /pricing
+          app.trqsh.uz · /download · /docs · /pricing
         </div>
       </Enter>
     </div>

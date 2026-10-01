@@ -1,6 +1,12 @@
+import { Logo } from "@algorith-voice/ui";
+import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Square, X } from "lucide-react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { saveHistory } from "../lib/history.js";
+import { loadPrefs } from "../lib/prefs.js";
 import {
   blobToBase64,
   blobToWav16kMono,
@@ -11,9 +17,13 @@ import {
   saveLastTranscript,
   transcribeAndPaste,
 } from "../lib/ptt.js";
+import {
+  createRecordingCuePlayer,
+  type RecordingCuePlayer,
+} from "../lib/recordingSounds.js";
 import { isTauri } from "../lib/session/env.js";
 import { setTrayState } from "../lib/session/tray.js";
-import { AudioLines } from "./animate-ui/icons/audio-lines.js";
+import type { DesktopEntitlement } from "../lib/subscription.js";
 import { Loader } from "./animate-ui/icons/loader.js";
 import type { Prefs } from "./SettingsView.js";
 
@@ -28,19 +38,109 @@ const MAX_BLOB_BYTES = 15 * 1024 * 1024;
 /** How long pill notices (error / clipboard-fallback) stay visible. */
 const NOTICE_MS = 5000;
 
+/** Must match Rust: PILL_WIDTH_IDLE / PILL_WIDTH_RECORDING / PILL_HEIGHT. */
+const PILL_WIDTH_IDLE = 160;
+const PILL_WIDTH_RECORDING = 224;
+const PILL_HEIGHT = 40;
+const WAVE_BARS = 20;
+/**
+ * Normalized RMS above near-silence for 8-bit Web Audio samples.
+ *
+ * Laptop microphones with OS processing disabled can produce surprisingly
+ * quiet speech, so this deliberately sits just above a one-quantum signal
+ * (1 / 128). Duration filtering below rejects isolated clicks.
+ */
+export const SPEECH_RMS_THRESHOLD = 0.008;
+/** Reject a click, while retaining a single quiet word or a short phrase. */
+export const MIN_SPEECH_ACTIVITY_MS = 90;
+const MAX_SPEECH_FRAME_MS = 50;
+
+/** Normalized root-mean-square energy for unsigned Web Audio time samples. */
+export function audioFrameRms(data: Uint8Array): number {
+  if (data.length === 0) return 0;
+  let sumSquares = 0;
+  for (const sample of data) {
+    const normalized = ((sample as number) - 128) / 128;
+    sumSquares += normalized * normalized;
+  }
+  return Math.sqrt(sumSquares / data.length);
+}
+
+/** Accumulate sustained speech while gently forgetting isolated noise. */
+export function updateSpeechActivityMs(
+  currentMs: number,
+  rms: number,
+  elapsedMs: number,
+): number {
+  const delta = Math.max(0, Math.min(MAX_SPEECH_FRAME_MS, elapsedMs));
+  if (rms >= SPEECH_RMS_THRESHOLD) return currentMs + delta;
+  // Bridge the natural quiet gaps between syllables instead of erasing most
+  // of a short phrase before the next voiced sound arrives.
+  return Math.max(0, currentMs - delta * 0.1);
+}
+
+/** Convert time-domain microphone samples into visibly responsive bar heights. */
+export function waveformBarHeights(
+  data: Uint8Array,
+  height: number,
+  barCount = WAVE_BARS,
+): number[] {
+  const count = Math.max(1, Math.floor(barCount));
+  const usableHeight = Math.max(4, height);
+  const step = Math.max(1, Math.floor(data.length / count));
+
+  return Array.from({ length: count }, (_, index) => {
+    let peak = 0;
+    const start = index * step;
+    for (let offset = 0; offset < step; offset += 1) {
+      const amplitude =
+        Math.abs(((data[start + offset] ?? 128) as number) - 128) / 128;
+      if (amplitude > peak) peak = amplitude;
+    }
+
+    // Remove a tiny mic noise floor, then apply a curved gain so normal speech
+    // remains easy to see without clipping louder input immediately.
+    const audible = Math.max(0, peak - 0.012);
+    const response = Math.min(1, Math.sqrt(audible * 4.5));
+    return 4 + response * (usableHeight - 4);
+  });
+}
+
+/** Ease bar movement over time, with a quick attack and gentler release. */
+export function smoothWaveformBarHeights(
+  previous: number[],
+  target: number[],
+): number[] {
+  return target.map((next, index) => {
+    const current = previous[index] ?? 4;
+    const easing = next >= current ? 0.38 : 0.18;
+    return current + (next - current) * easing;
+  });
+}
+
 /**
  * Floating push-to-talk pill (rendered only in the `floating-pill` window).
  *
- * - Press-and-hold → recording, release → processing → auto-paste.
- * - Presses < 300 ms are discarded as accidental (Superwhisper-style).
- * - Pointer capture keeps the press alive when the cursor slips off the
- *   56 px button; release anywhere still sends.
- * - Global hotkey (`ptt-pressed` / `ptt-released` from Rust, already
- *   deduped against OS key-repeat) drives the same state machine.
- * - The padded frame is the drag region (`deep`); the round button opts
- *   out so press never starts a window move.
+ * Three visual states:
+ * - idle (160x40): [logo | status]. The entire surface moves the window.
+ * - recording (224x40): [logo | live waveform | X cancel | stop & send].
+ * - processing (160x40): [logo | spinner | status].
+ *
+ * Recording starts only from the configured global hotkey. Pointer input is
+ * reserved for moving the pill and for the explicit recording controls, so a
+ * drag can never accidentally open the microphone.
+ *
+ * - Hold the hotkey → recording, release → processing → auto-paste.
+ * - Holds < 300 ms are discarded as accidental (Superwhisper-style).
+ * - Rust dedupes global-hotkey events against OS key-repeat.
  */
-export function FloatingPill({ prefs }: { prefs: Prefs }) {
+export function FloatingPill({
+  prefs,
+  entitlement,
+}: {
+  prefs: Prefs;
+  entitlement: DesktopEntitlement | null;
+}) {
   const [state, setState] = useState<PillState>("idle");
   const [notice, setNotice] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -50,9 +150,13 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const pressTokenRef = useRef(0);
   const discardRef = useRef(false);
   const prefsRef = useRef(prefs);
+  const entitlementRef = useRef(entitlement);
   useEffect(() => {
     prefsRef.current = prefs;
   }, [prefs]);
+  useEffect(() => {
+    entitlementRef.current = entitlement;
+  }, [entitlement]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -60,6 +164,45 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
   const maxTimerRef = useRef(0);
   const noticeTimerRef = useRef(0);
   const tickTimerRef = useRef(0);
+  const recordingCuesRef = useRef<RecordingCuePlayer | null>(null);
+
+  // Preload bundled cues once so global-hotkey playback starts immediately.
+  useEffect(() => {
+    const cues = createRecordingCuePlayer();
+    recordingCuesRef.current = cues;
+    cues.preload();
+    return () => {
+      cues.dispose();
+      if (recordingCuesRef.current === cues) recordingCuesRef.current = null;
+    };
+  }, []);
+
+  const startWindowDrag = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (!event.isPrimary) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!isTauri()) return;
+      void getCurrentWindow()
+        .startDragging()
+        .catch((error) =>
+          console.warn("algorith-voice: pill drag failed", error),
+        );
+    },
+    [],
+  );
+
+  // Live waveform taps the SAME MediaStream used for recording.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const waveRafRef = useRef(0);
+  const waveHeightsRef = useRef<number[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const speechActivityMsRef = useRef(0);
+  const speechFrameAtRef = useRef(0);
+  const speechDetectionAvailableRef = useRef(false);
 
   const setPill = useCallback((next: PillState) => {
     stateRef.current = next;
@@ -75,6 +218,10 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     }
   }, []);
 
+  // Every notice is mirrored to the Dictate view via PTT_ERROR_EVENT.
+  // The pill is compact and can only show a truncated label/tooltip,
+  // so without the mirror, outcomes like "tap too short" vanish without
+  // a trace on the screen the user is watching.
   const showNotice = useCallback((message: string) => {
     if (!mountedRef.current) return;
     setNotice(message);
@@ -82,9 +229,163 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     noticeTimerRef.current = window.setTimeout(() => {
       if (mountedRef.current) setNotice(null);
     }, NOTICE_MS);
+    if (isTauri()) void emit(PTT_ERROR_EVENT, message);
   }, []);
 
+  const teardownWaveform = useCallback(() => {
+    if (waveRafRef.current) {
+      try {
+        cancelAnimationFrame(waveRafRef.current);
+      } catch {
+        // Ignore.
+      }
+      waveRafRef.current = 0;
+    }
+    try {
+      sourceRef.current?.disconnect();
+    } catch {
+      // Already disconnected.
+    }
+    try {
+      analyserRef.current?.disconnect();
+    } catch {
+      // Already disconnected.
+    }
+    sourceRef.current = null;
+    analyserRef.current = null;
+    waveHeightsRef.current = [];
+    const ctx = audioCtxRef.current;
+    audioCtxRef.current = null;
+    if (ctx) {
+      try {
+        void ctx.close().catch(() => {});
+      } catch {
+        // Already closed.
+      }
+    }
+  }, []);
+
+  const attachWaveform = useCallback(
+    (stream: MediaStream) => {
+      teardownWaveform();
+      try {
+        const AudioContextClass =
+          window.AudioContext ??
+          (
+            window as unknown as {
+              webkitAudioContext?: typeof AudioContext;
+            }
+          ).webkitAudioContext;
+        if (!AudioContextClass) return;
+        const ctx = new AudioContextClass();
+        const src = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.55;
+        src.connect(analyser);
+        audioCtxRef.current = ctx;
+        sourceRef.current = src;
+        analyserRef.current = analyser;
+        speechDetectionAvailableRef.current = true;
+        speechFrameAtRef.current = performance.now();
+        if (ctx.state === "suspended") {
+          void ctx.resume().catch(() => {});
+        }
+        const data = new Uint8Array(analyser.fftSize);
+        const tick = () => {
+          if (!mountedRef.current || analyserRef.current !== analyser) return;
+          // React may not have mounted the recording canvas by the first frame.
+          // Keep the analyser alive until the state/render catches up instead of
+          // silently terminating the waveform loop forever.
+          if (stateRef.current !== "recording") {
+            waveRafRef.current = requestAnimationFrame(tick);
+            return;
+          }
+          try {
+            analyser.getByteTimeDomainData(data);
+          } catch {
+            waveRafRef.current = requestAnimationFrame(tick);
+            return;
+          }
+          const frameAt = performance.now();
+          speechActivityMsRef.current = updateSpeechActivityMs(
+            speechActivityMsRef.current,
+            audioFrameRms(data),
+            frameAt - speechFrameAtRef.current,
+          );
+          speechFrameAtRef.current = frameAt;
+          const canvas = canvasRef.current;
+          if (canvas) {
+            const dpr = window.devicePixelRatio || 1;
+            const cssW = canvas.clientWidth || 120;
+            const cssH = canvas.clientHeight || 24;
+            const wantW = Math.max(1, Math.round(cssW * dpr));
+            const wantH = Math.max(1, Math.round(cssH * dpr));
+            if (canvas.width !== wantW || canvas.height !== wantH) {
+              canvas.width = wantW;
+              canvas.height = wantH;
+            }
+            const g = canvas.getContext("2d");
+            if (g) {
+              g.clearRect(0, 0, canvas.width, canvas.height);
+              g.save();
+              g.scale(dpr, dpr);
+              let color = "#ffffff";
+              try {
+                const computed = getComputedStyle(canvas).color;
+                if (computed) color = computed;
+              } catch {
+                // Fall back to white.
+              }
+              g.fillStyle = color;
+              const gap = 2;
+              const barW = Math.max(
+                2,
+                (cssW - gap * (WAVE_BARS - 1)) / WAVE_BARS,
+              );
+              const targets = waveformBarHeights(data, cssH);
+              const heights = smoothWaveformBarHeights(
+                waveHeightsRef.current,
+                targets,
+              );
+              waveHeightsRef.current = heights;
+              for (let i = 0; i < WAVE_BARS; i += 1) {
+                const h = heights[i] ?? 4;
+                const x = i * (barW + gap);
+                const y = (cssH - h) / 2;
+                const r = Math.min(1.5, barW / 2);
+                g.beginPath();
+                const anyG = g as CanvasRenderingContext2D & {
+                  roundRect?: (
+                    x: number,
+                    y: number,
+                    w: number,
+                    h: number,
+                    r: number,
+                  ) => void;
+                };
+                if (typeof anyG.roundRect === "function") {
+                  anyG.roundRect(x, y, barW, h, r);
+                } else {
+                  g.rect(x, y, barW, h);
+                }
+                g.fill();
+              }
+              g.restore();
+            }
+          }
+          waveRafRef.current = requestAnimationFrame(tick);
+        };
+        waveRafRef.current = requestAnimationFrame(tick);
+      } catch {
+        // Waveform is decorative — recording must survive its failure.
+      }
+    },
+    [teardownWaveform],
+  );
+
   const stopTracks = useCallback(() => {
+    teardownWaveform();
     const stream = streamRef.current;
     streamRef.current = null;
     if (stream) {
@@ -96,7 +397,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         }
       }
     }
-  }, []);
+  }, [teardownWaveform]);
 
   const clearTimers = useCallback(() => {
     window.clearTimeout(maxTimerRef.current);
@@ -117,6 +418,15 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         showNotice("Hold a bit longer — tap was too short.");
         return;
       }
+      if (
+        speechDetectionAvailableRef.current &&
+        speechActivityMsRef.current < MIN_SPEECH_ACTIVITY_MS
+      ) {
+        discardRef.current = false;
+        setPill("idle");
+        showNotice("No speech detected — nothing was sent.");
+        return;
+      }
       if (blob.size < MIN_BLOB_BYTES) {
         discardRef.current = false;
         setPill("idle");
@@ -132,6 +442,20 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       if (!mountedRef.current) return;
       setPill("processing");
       try {
+        try {
+          const fresh = await loadPrefs({ allowMigration: false });
+          if (
+            !(
+              prefsRef.current.mode === "local" &&
+              fresh.mode === "cloud" &&
+              prefsRef.current.activeModelId
+            )
+          ) {
+            prefsRef.current = fresh;
+          }
+        } catch {
+          // Keep last known prefs if store unreadable
+        }
         // Local mode re-encodes through Web Audio (decode + 16 kHz mono
         // WAV) because MediaRecorder cannot emit WAV anywhere; the Rust
         // side validates it with the same parser the worker tests cover.
@@ -143,14 +467,27 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           setPill("idle");
           return;
         }
+        if (
+          !useLocal &&
+          typeof navigator !== "undefined" &&
+          navigator.onLine === false
+        ) {
+          showNotice(
+            "Offline — switch to Local (offline) in Settings to transcribe without internet.",
+          );
+          setPill("idle");
+          return;
+        }
         const base64 = useLocal
           ? await blobToWav16kMono(blob)
           : await blobToBase64(blob);
         if (!mountedRef.current) return;
+        const language =
+          curPrefs.language === "auto" ? undefined : curPrefs.language;
         const result = await transcribeAndPaste(
           base64,
           useLocal ? "audio/wav" : mimeType,
-          undefined,
+          language,
           useLocal
             ? { mode: "local", modelId: curPrefs.activeModelId }
             : undefined,
@@ -174,19 +511,40 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         }
         setPill("idle");
       } catch (e) {
-        const raw =
-          e instanceof Error
-            ? e.message
-            : typeof e === "string"
-              ? e
-              : JSON.stringify(e);
-        // Surface actionable guidance for known classes
+        // Tauri serializes Rust `AppError` as `{code, message}`, which
+        // `invoke` rejects with as a plain object — extract the message so
+        // users never see raw JSON like `{"code":"transcribe",...}`.
+        let raw: string;
+        if (e instanceof Error) {
+          raw = e.message;
+        } else if (typeof e === "string") {
+          raw = e;
+        } else if (
+          e !== null &&
+          typeof e === "object" &&
+          typeof (e as { message?: unknown }).message === "string"
+        ) {
+          raw = (e as { message: string }).message;
+        } else {
+          raw = JSON.stringify(e);
+        }
         let message = raw;
+        const lower = raw.toLowerCase();
         if (
+          raw.includes("model-not-loaded") ||
           raw.includes("model_not_loaded") ||
-          raw.includes("no local model")
+          raw.includes("no local model") ||
+          lower.includes("model_not_loaded") ||
+          lower.includes("model-not-loaded")
         ) {
           message = "No local model — download one in Settings → Local.";
+        } else if (
+          lower.includes("groq api key") ||
+          lower.includes("groq") ||
+          raw.includes("Groq API key")
+        ) {
+          message =
+            "Cloud mode needs a Groq key — paste one in Dictate, or switch to Local (offline) in Settings.";
         } else if (
           raw.includes("web audio") ||
           raw.includes("offline resampling")
@@ -200,7 +558,6 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
           message = "Transcription failed — check microphone and try again.";
         }
         showNotice(message);
-        if (isTauri()) void emit(PTT_ERROR_EVENT, message);
         setPill("idle");
       }
     },
@@ -211,7 +568,13 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     // Invalidate a still-pending `getUserMedia` so it aborts cleanly.
     pressTokenRef.current++;
     startingRef.current = false;
-    if (stateRef.current !== "recording") return;
+    if (stateRef.current !== "recording") {
+      // A tap or an early release is not a recording lifecycle event. Stop a
+      // pending start cue silently and never answer it with the stop cue.
+      recordingCuesRef.current?.cancel();
+      stopTracks();
+      return;
+    }
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") {
       try {
@@ -220,6 +583,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
         recorderRef.current = null;
         stopTracks();
         clearTimers();
+        recordingCuesRef.current?.playStop();
         setPill("idle");
       }
       // `onstop` continues the pipeline (discard vs. transcribe).
@@ -227,6 +591,7 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     }
     stopTracks();
     clearTimers();
+    recordingCuesRef.current?.playStop();
     setPill("idle");
   }, [clearTimers, setPill, stopTracks]);
 
@@ -235,20 +600,77 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     // touch-emulation, hotkey repeat or double binding must be rejected
     // here, before any async work starts.
     if (stateRef.current !== "idle" || startingRef.current) return;
+    if (entitlementRef.current === null) {
+      showNotice("Checking Pro access…");
+      return;
+    }
+    if (!entitlementRef.current.valid) {
+      showNotice("Pro required — subscribe in the desktop app.");
+      return;
+    }
     startingRef.current = true;
     const token = ++pressTokenRef.current;
     discardRef.current = false;
-    pressStartRef.current = Date.now();
     chunksRef.current = [];
+    speechActivityMsRef.current = 0;
+    speechFrameAtRef.current = 0;
+    speechDetectionAvailableRef.current = false;
+    const holdStartedAt = performance.now();
+
+    // Prepare preferences and the microphone silently. A quick click should
+    // neither record nor make a cue; only a deliberate hold enters the audible
+    // recording lifecycle.
+    try {
+      const fresh = await loadPrefs({ allowMigration: false });
+      if (
+        !(
+          prefsRef.current.mode === "local" &&
+          fresh.mode === "cloud" &&
+          prefsRef.current.activeModelId
+        )
+      ) {
+        prefsRef.current = fresh;
+      }
+    } catch {
+      // Store unreadable — fall back to last known prefs.
+    }
+    if (token !== pressTokenRef.current || !mountedRef.current) {
+      startingRef.current = false;
+      return;
+    }
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true },
+            channelCount: { ideal: 1 },
+            sampleRate: { ideal: 16000 },
+            sampleSize: { ideal: 16 },
+          } as MediaTrackConstraints,
+        });
+        // Speech-oriented processing raises quiet voices and reduces steady
+        // room noise for both local and cloud transcription.
+      } catch (e) {
+        const name = e instanceof DOMException ? e.name : "";
+        if (name === "OverconstrainedError" || name === "NotSupportedError") {
+          console.warn(
+            "algorith-voice: ideal audio constraints failed, retrying defaults",
+            e,
+          );
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: { ideal: true },
+              noiseSuppression: { ideal: true },
+              autoGainControl: { ideal: true },
+            },
+          });
+        } else {
+          throw e;
+        }
+      }
     } catch (e) {
       startingRef.current = false;
       if (token !== pressTokenRef.current || !mountedRef.current) return;
@@ -265,7 +687,17 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       setPill("idle");
       return;
     }
-    // Aborted while permission prompt was open (release / Esc / unmount).
+    streamRef.current = stream;
+    const remainingHoldMs = Math.max(
+      0,
+      MIN_PRESS_MS - (performance.now() - holdStartedAt),
+    );
+    if (remainingHoldMs > 0) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, remainingHoldMs);
+      });
+    }
+    // Aborted before the deliberate-hold threshold was reached.
     if (token !== pressTokenRef.current || !mountedRef.current) {
       for (const track of stream.getTracks()) {
         try {
@@ -277,7 +709,20 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       startingRef.current = false;
       return;
     }
-    streamRef.current = stream;
+    // The start cue now means exactly one thing: a valid hold is transitioning
+    // into recording. Wait for it so speaker audio is never transcribed.
+    await recordingCuesRef.current?.playStart();
+    if (token !== pressTokenRef.current || !mountedRef.current) {
+      for (const track of stream.getTracks()) {
+        try {
+          track.stop();
+        } catch {
+          // Ignore.
+        }
+      }
+      startingRef.current = false;
+      return;
+    }
     const mimeType = pickSupportedMimeType();
     let recorder: MediaRecorder;
     try {
@@ -300,17 +745,26 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       chunksRef.current = [];
       recorderRef.current = null;
       stopTracks();
+      // The microphone is fully closed before speaker audio begins, so the
+      // stop cue can never be included in the captured transcription.
+      recordingCuesRef.current?.playStop();
       void finishWithBlob(blob, pressedMs, mime);
     };
     recorder.onerror = () => {
       recorderRef.current = null;
+      chunksRef.current = [];
       stopTracks();
       showNotice("Microphone error — hold again to retry.");
       setPill("idle");
     };
+    // Measure duration from actual capture start, excluding cue playback,
+    // preference loading, and any microphone permission UI.
+    pressStartRef.current = Date.now();
     recorder.start();
     startingRef.current = false;
     setPill("recording");
+    // Tap the SAME stream for the live waveform — no second mic request.
+    attachWaveform(stream);
     setElapsedMs(0);
     tickTimerRef.current = window.setInterval(() => {
       if (mountedRef.current) setElapsedMs(Date.now() - pressStartRef.current);
@@ -320,7 +774,14 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       showNotice("Max length reached — sending.");
       stopPress();
     }, MAX_RECORD_MS);
-  }, [finishWithBlob, setPill, showNotice, stopPress, stopTracks]);
+  }, [
+    attachWaveform,
+    finishWithBlob,
+    setPill,
+    showNotice,
+    stopPress,
+    stopTracks,
+  ]);
 
   const cancelPress = useCallback(() => {
     if (stateRef.current !== "recording") return;
@@ -339,19 +800,35 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
       .then((fn) => {
         unPressed = fn;
       })
-      .catch(() => {});
+      .catch((e) =>
+        console.warn("algorith-voice: pill ptt-pressed listen failed", e),
+      );
     void listen("ptt-released", () => {
       stopPress();
     })
       .then((fn) => {
         unReleased = fn;
       })
-      .catch(() => {});
+      .catch((e) =>
+        console.warn("algorith-voice: pill ptt-released listen failed", e),
+      );
     return () => {
       unPressed?.();
       unReleased?.();
     };
   }, [startPress, stopPress]);
+
+  // Resize the native window to match the active layout (idle 160px vs
+  // recording 224px). Rust preserves the current right edge, so a pill the
+  // user moved stays where they put it while it grows leftward.
+  // No-op in browser preview.
+  useEffect(() => {
+    if (!isTauri()) return;
+    const expanded = state === "recording";
+    void invoke("set_floating_pill_expanded", { expanded }).catch(() => {
+      // Window may not exist yet in tests / preview — ignore.
+    });
+  }, [state]);
 
   // Ensure pill window is transparent on Windows/WebView2
   useEffect(() => {
@@ -360,10 +837,14 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     document.documentElement.style.background = "transparent";
     document.body.style.background = "transparent";
     document.body.style.overflow = "hidden";
+    document.body.style.margin = "0";
+    document.body.style.padding = "0";
     return () => {
       document.documentElement.style.background = prevHtml;
       document.body.style.background = prevBody;
       document.body.style.overflow = "";
+      document.body.style.margin = "";
+      document.body.style.padding = "";
     };
   }, []);
 
@@ -390,18 +871,43 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
     };
   }, [cancelPress, clearTimers, stopTracks]);
 
+  const pillWidth =
+    state === "recording" ? PILL_WIDTH_RECORDING : PILL_WIDTH_IDLE;
+  const checkingAccess = entitlement === null;
+  const accessUnavailable = entitlement?.status === "unavailable";
+  const proRequired = entitlement !== null && !entitlement.valid;
+  const accessIssue = proRequired;
+  const idleLabel =
+    notice ??
+    (checkingAccess
+      ? "Checking Pro…"
+      : accessUnavailable
+        ? "Verify Pro"
+        : proRequired
+          ? "Pro required"
+          : "Algorith Voice");
+  const idleTitle =
+    notice ??
+    (checkingAccess
+      ? "Checking Pro access — drag to move"
+      : accessUnavailable
+        ? "Subscription could not be verified — open the desktop app"
+        : proRequired
+          ? "Pro subscription required — open the desktop app"
+          : `Hold ${prefs.hotkey} to talk — drag anywhere to move`);
+  const recTitle = `Recording ${formatElapsed(elapsedMs)} — release to transcribe`;
   const label =
     state === "recording"
-      ? `Recording ${formatElapsed(elapsedMs)} — release to transcribe`
+      ? recTitle
       : state === "processing"
         ? "Transcribing…"
-        : (notice ?? "Hold to talk — drag edges to move");
+        : idleTitle;
 
   return (
     <div
-      data-tauri-drag-region="deep"
-      className="grid h-screen w-screen cursor-grab place-items-center bg-transparent active:cursor-grabbing"
-      style={{ background: "transparent" }}
+      data-tauri-drag-region="false"
+      className="grid h-screen w-screen place-items-center overflow-hidden bg-transparent"
+      style={{ background: "transparent", margin: 0, padding: 0 }}
     >
       <span aria-live="polite" className="sr-only">
         {state === "recording"
@@ -410,69 +916,125 @@ export function FloatingPill({ prefs }: { prefs: Prefs }) {
             ? "Transcribing."
             : (notice ?? "Idle.")}
       </span>
-      <span className="relative grid place-items-center">
-        <button
-          type="button"
-          aria-label={label}
-          aria-pressed={state === "recording"}
-          title={label}
-          data-tauri-drag-region="false"
-          onPointerDown={(e) => {
-            if (!e.isPrimary) return;
-            if (e.pointerType === "mouse" && e.button !== 0) return;
-            e.preventDefault();
-            try {
-              e.currentTarget.setPointerCapture(e.pointerId);
-            } catch {
-              // Capture unsupported — pointerup outside may be missed
-              // (MAX_RECORD_MS still bounds the take).
-            }
-            if (notice) setNotice(null);
-            void startPress();
-          }}
-          onPointerUp={stopPress}
-          onPointerCancel={stopPress}
-          onKeyDown={(e) => {
-            // Keyboard hold-to-talk: Space/Enter starts, keyup sends.
-            if (e.repeat) return;
-            if (e.key === " " || e.key === "Enter") {
-              e.preventDefault();
-              void startPress();
-            }
-          }}
-          onKeyUp={(e) => {
-            if (e.key === " " || e.key === "Enter") {
-              e.preventDefault();
-              stopPress();
-            }
-          }}
-          onContextMenu={(e) => e.preventDefault()}
-          className={[
-            "grid size-14 cursor-pointer place-items-center rounded-full border shadow-lg transition-all duration-150 select-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black focus-visible:outline-none",
-            state === "recording"
-              ? "scale-110 border-red-300 bg-red-500 text-white motion-safe:animate-pulse"
-              : state === "processing"
-                ? "border-gray-300 bg-gray-400 text-white motion-safe:animate-pulse dark:border-gray-600"
-                : notice
-                  ? "border-amber-300 bg-black text-white dark:bg-white dark:text-black"
-                  : "border-gray-200 bg-black text-white hover:scale-105 active:scale-95 dark:border-white/15 dark:bg-white dark:text-black",
-          ].join(" ")}
-        >
-          {state === "processing" ? (
-            <Loader size={22} animation="spin" animate />
-          ) : (
-            <AudioLines size={22} animate={state === "recording"} />
-          )}
-        </button>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: this frameless Tauri window surface is its native drag handle. */}
+      <div
+        data-testid="floating-pill"
+        data-state={state}
+        data-access={
+          checkingAccess ? "checking" : proRequired ? "required" : "ready"
+        }
+        title={state === "idle" ? idleTitle : "Drag to move"}
+        onPointerDown={startWindowDrag}
+        onContextMenu={(event) => event.preventDefault()}
+        style={{ width: pillWidth, height: PILL_HEIGHT }}
+        className={[
+          "flex cursor-grab items-center overflow-hidden rounded-full border shadow-lg transition-[width,background-color,border-color] duration-200 ease-out select-none active:cursor-grabbing",
+          state === "recording"
+            ? "border-red-300 bg-red-500 text-white"
+            : state === "processing"
+              ? "border-gray-300 bg-gray-400 text-white dark:border-gray-600"
+              : notice || accessIssue
+                ? "border-amber-300 bg-black text-white dark:bg-white dark:text-black"
+                : "border-gray-200 bg-black text-white dark:border-white/15 dark:bg-white dark:text-black",
+        ].join(" ")}
+      >
         {state === "recording" ? (
-          <span
-            aria-hidden="true"
-            className="absolute -bottom-1 rounded-full bg-black/80 px-1.5 py-px font-mono text-[10px] leading-4 text-white tabular-nums dark:bg-white/90 dark:text-black"
+          <div
+            data-tauri-drag-region="false"
+            className="flex h-full w-full items-center gap-1.5 px-2"
           >
-            {formatElapsed(elapsedMs)}
-          </span>
-        ) : null}
-      </span>
+            <div
+              aria-hidden="true"
+              className="flex h-8 w-8 shrink-0 items-center justify-center"
+            >
+              <Logo className="h-4 w-auto" />
+            </div>
+            <canvas
+              ref={canvasRef}
+              data-tauri-drag-region="false"
+              data-testid="pill-waveform"
+              className="h-7 min-w-0 flex-1 text-white"
+              style={{ width: 72, height: 28 }}
+            />
+            <span
+              aria-hidden="true"
+              data-tauri-drag-region="false"
+              className="shrink-0 font-mono text-[10px] leading-4 tabular-nums opacity-90"
+            >
+              {formatElapsed(elapsedMs)}
+            </span>
+            <button
+              type="button"
+              aria-label="Cancel recording"
+              title="Cancel (Esc)"
+              data-tauri-drag-region="false"
+              data-testid="pill-cancel"
+              onClick={(e) => {
+                e.stopPropagation();
+                cancelPress();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+              className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-full text-white/90 transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none active:bg-white/30"
+            >
+              <X size={14} />
+            </button>
+            <button
+              type="button"
+              aria-label="Stop and send"
+              title="Stop and send"
+              data-tauri-drag-region="false"
+              data-testid="pill-stop"
+              onClick={(e) => {
+                e.stopPropagation();
+                stopPress();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+              className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-full bg-white text-red-600 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-1 focus-visible:ring-offset-red-500 focus-visible:outline-none active:scale-95"
+            >
+              <Square size={12} fill="currentColor" />
+            </button>
+          </div>
+        ) : state === "processing" ? (
+          <output
+            data-tauri-drag-region="false"
+            className="flex h-full w-full items-center gap-2 px-3"
+            aria-label="Transcribing…"
+          >
+            <div
+              aria-hidden="true"
+              className="flex h-8 w-8 shrink-0 items-center justify-center"
+            >
+              <Logo className="h-4 w-auto" />
+            </div>
+            <Loader size={16} animation="spin" animate />
+            <span className="truncate text-xs font-medium">Transcribing…</span>
+          </output>
+        ) : (
+          <div
+            data-testid="pill-idle"
+            className="flex h-full w-full items-center gap-2 px-3"
+          >
+            <div
+              aria-hidden="true"
+              className="grid size-5 shrink-0 place-items-center"
+            >
+              <Logo className="h-4 w-auto" />
+            </div>
+            <span className="min-w-0 flex-1 truncate text-xs font-semibold tracking-wide">
+              {idleLabel}
+            </span>
+            {accessIssue && !notice ? (
+              <span
+                aria-hidden="true"
+                className="size-1.5 shrink-0 rounded-full bg-amber-300"
+              />
+            ) : null}
+          </div>
+        )}
+      </div>
+      <span className="sr-only">{label}</span>
     </div>
   );
 }

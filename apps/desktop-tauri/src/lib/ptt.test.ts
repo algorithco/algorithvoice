@@ -33,6 +33,6 @@ describe("encodeWavPCM16", () => {
     const blob = encodeWavPCM16(new Float32Array([2, -2]), 16000);
     const view = new DataView(await blob.arrayBuffer());
     expect(view.getInt16(44, true)).toBe(32767);
-    expect(view.getInt16(46, true)).toBe(-32767);
+    expect(view.getInt16(46, true)).toBe(-32768);
   });
 });

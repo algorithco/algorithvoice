@@ -16,3 +16,23 @@ updates:
     ignore:
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
+  - package-ecosystem: "cargo"
+    directory: "/apps/desktop-tauri/src-tauri"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/apps/backend"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/apps/web"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/infra"
+    schedule:
+      interval: "weekly"

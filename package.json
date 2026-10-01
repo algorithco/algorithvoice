@@ -1,6 +1,6 @@
 {
   "name": "algorith-voice",
-  "version": "0.5.5",
+  "version": "0.5.20",
   "private": true,
   "license": "GPL-3.0-or-later",
   "packageManager": "pnpm@10.29.3",
@@ -11,6 +11,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "check:versions": "node scripts/check-versions.mjs",
     "format": "biome check --write .",
     "db:generate": "pnpm --filter @algorith-voice/backend db:generate",
     "db:migrate": "pnpm --filter @algorith-voice/backend db:migrate",
@@ -29,7 +30,10 @@
   },
   "pnpm": {
     "overrides": {
-      "deepmerge-ts": "^8.0.2"
+      "deepmerge-ts": "^8.0.2",
+      "fast-uri@>=3.0.0 <3.1.8": "3.1.8",
+      "fast-uri@>=4.0.0 <4.1.5": "4.1.5",
+      "ip-address@<=10.7.0": "10.7.1"
     }
   }
 }

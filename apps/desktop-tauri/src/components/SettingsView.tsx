@@ -3,11 +3,8 @@ import { Button, Input } from "@algorith-voice/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { login, logout, sessionStatus, signup } from "../lib/session/auth.js";
-import { DEMO_EMAIL, loginDemo } from "../lib/session/demo-account.js";
 import { isTauri } from "../lib/session/env.js";
-import type { SessionInfo } from "../lib/session/types.js";
-import { OAuthButtons } from "./OAuthButtons.js";
+import { LocalUsageSection } from "./LocalUsageSection.js";
 import { triggerUpdateCheck } from "./UpdateAnnouncement.js";
 
 const ModelManager = lazy(() =>
@@ -18,96 +15,10 @@ export interface Prefs {
   hotkey: string;
   mode: SttMode;
   theme: "dark" | "light";
+  /** ISO language code to force during recognition, or "auto" to detect. */
+  language: string;
   /** Manifest id of the local model to transcribe with (null = none). */
   activeModelId: string | null;
-}
-
-function LoginForm({ onDone }: { onDone: (s: SessionInfo) => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isSignup, setIsSignup] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const s = isSignup
-        ? await signup(email, password, "Desktop")
-        : await login(email, password);
-      onDone(s);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
-      <OAuthButtons onDone={onDone} />
-      <div className="my-6 flex items-center gap-3" aria-hidden="true">
-        <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
-        <span className="text-xs uppercase tracking-wide text-gray-500">
-          or with email
-        </span>
-        <span className="h-px flex-1 bg-gray-200 dark:bg-white/10" />
-      </div>
-      <div className="flex flex-col gap-4">
-        <label className="text-sm text-gray-500" htmlFor="av-login-email">
-          Email
-          <Input
-            id="av-login-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            className="mt-2"
-          />
-        </label>
-        <label className="text-sm text-gray-500" htmlFor="av-login-password">
-          Password
-          <Input
-            id="av-login-password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={isSignup ? "new-password" : "current-password"}
-            className="mt-2"
-          />
-        </label>
-      </div>
-      {error ? <p className="mt-3 text-sm text-red-500">{error}</p> : null}
-      <div className="mt-6 flex flex-wrap gap-2">
-        <Button onClick={submit} disabled={busy || !email || !password}>
-          {busy ? "Please wait" : isSignup ? "Create account" : "Log in"}
-        </Button>
-        <Button variant="secondary" onClick={() => setIsSignup(!isSignup)}>
-          {isSignup ? "Have an account?" : "New here?"}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            setError(null);
-            void loginDemo()
-              .then(onDone)
-              .catch((e: unknown) =>
-                setError(
-                  e instanceof Error ? e.message : "Demo sign-in failed.",
-                ),
-              );
-          }}
-          disabled={busy}
-        >
-          Demo
-        </Button>
-      </div>
-      <p className="mt-3 text-xs text-gray-500">
-        Demo uses {DEMO_EMAIL} locally — no backend required.
-      </p>
-    </div>
-  );
 }
 
 export function SettingsView({
@@ -117,7 +28,6 @@ export function SettingsView({
   prefs: Prefs;
   onPrefs: (p: Prefs) => void;
 }) {
-  const [session, setSession] = useState<SessionInfo>({ loggedIn: false });
   const [autostart, setAutostart] = useState(false);
   const [hotkeyError, setHotkeyError] = useState<string | null>(null);
   const [hotkeyInput, setHotkeyInput] = useState(prefs.hotkey);
@@ -136,9 +46,6 @@ export function SettingsView({
   }, []);
 
   useEffect(() => {
-    void sessionStatus()
-      .then(setSession)
-      .catch(() => {});
     if (isTauri()) {
       void isEnabled()
         .then(setAutostart)
@@ -151,9 +58,6 @@ export function SettingsView({
     if (isTauri()) {
       void import("@tauri-apps/api/event").then(({ listen }) =>
         listen("settings-refresh", () => {
-          void sessionStatus()
-            .then(setSession)
-            .catch(() => {});
           void isEnabled()
             .then(setAutostart)
             .catch(() => {});
@@ -257,50 +161,15 @@ export function SettingsView({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[900px] p-8 lg:p-10 2xl:max-w-[1060px]">
+    <div className="desktop-page desktop-settings">
       <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-white">
         Settings
       </h1>
       <p className="mt-2 text-sm text-gray-500 lg:text-[15px]">
-        Manage your account and preferences. Changes save automatically.
+        Manage your preferences. Changes save automatically.
       </p>
 
-      <section className="mt-8 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
-          Account
-        </h2>
-        <div className="mt-4">
-          {session.loggedIn ? (
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
-                <div>
-                  <p className="text-sm font-medium text-black dark:text-white">
-                    {session.email}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Signed in • Plan: free
-                  </p>
-                </div>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    void logout().then(() => setSession({ loggedIn: false }));
-                  }}
-                >
-                  Log out
-                </Button>
-              </div>
-              <p className="text-xs text-gray-500">
-                Session stored securely in OS keyring. Tokens never touch disk.
-              </p>
-            </div>
-          ) : (
-            <LoginForm onDone={setSession} />
-          )}
-        </div>
-      </section>
-
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Dictation
         </h2>
@@ -310,7 +179,7 @@ export function SettingsView({
             htmlFor="av-hotkey"
           >
             Push-to-talk hotkey
-            <div className="flex gap-2">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
               <Input
                 id="av-hotkey"
                 value={hotkeyInput}
@@ -322,7 +191,7 @@ export function SettingsView({
                   if (e.key === "Enter") void handleHotkeySave();
                 }}
                 onBlur={() => void handleHotkeySave()}
-                className="flex-1 font-mono"
+                className="min-w-0 flex-1 font-mono"
                 spellCheck={false}
                 placeholder="Ctrl+Space"
               />
@@ -345,7 +214,7 @@ export function SettingsView({
 
           <div>
             <p className="text-sm text-gray-500">Transcription mode</p>
-            <div className="mt-2 flex gap-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               <Button
                 variant={prefs.mode === "cloud" ? "primary" : "secondary"}
                 onClick={() => onPrefs({ ...prefs, mode: "cloud" })}
@@ -361,32 +230,43 @@ export function SettingsView({
               </Button>
             </div>
             {prefs.mode === "local" ? (
-              <div className="mt-4">
-                <Suspense
-                  fallback={
-                    <p className="text-xs text-gray-500">
-                      Loading model manager…
-                    </p>
-                  }
-                >
-                  <ModelManager prefs={prefs} onPrefs={onPrefs} />
-                </Suspense>
-              </div>
+              <>
+                <div className="mt-4">
+                  <Suspense
+                    fallback={
+                      <p className="text-xs text-gray-500">
+                        Loading model manager…
+                      </p>
+                    }
+                  >
+                    <ModelManager prefs={prefs} onPrefs={onPrefs} />
+                  </Suspense>
+                </div>
+                {prefs.activeModelId ? (
+                  <p className="mt-2 text-xs text-gray-500">
+                    Audio is processed locally on this computer — no audio or
+                    transcripts are uploaded.
+                  </p>
+                ) : (
+                  <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                    No local model selected — download one below and click “Use
+                    this model” to enable offline transcription.
+                  </p>
+                )}
+              </>
             ) : (
               <p className="mt-2 text-xs text-gray-500">
                 Cloud uses Groq Whisper (whisper-large-v3-turbo). Audio is sent
                 securely; transcripts are stored only locally.
               </p>
             )}
-            <p className="mt-2 text-xs text-gray-500">
-              Audio is processed locally on this computer in local mode — no
-              audio or transcripts are uploaded.
-            </p>
           </div>
         </div>
       </section>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+      <LocalUsageSection />
+
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Appearance
         </h2>
@@ -406,7 +286,7 @@ export function SettingsView({
         </p>
       </section>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           System
         </h2>
@@ -424,13 +304,13 @@ export function SettingsView({
         </p>
       </section>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Updates
         </h2>
         <div className="mt-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
-            <div>
+          <div className="flex flex-col items-stretch gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-white/10 dark:bg-white/[0.03]">
+            <div className="min-w-0">
               <p className="text-sm font-medium text-black dark:text-white">
                 {appVersion ? `v${appVersion}` : "Algorith Voice"}
               </p>
@@ -470,7 +350,7 @@ export function SettingsView({
         </div>
       </section>
 
-      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 dark:border-white/10 dark:bg-black">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-black dark:text-white">
           Diagnostics
         </h2>

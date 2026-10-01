@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import type { Prefs } from "../components/SettingsView.js";
 import {
+  buildPrefs,
   DEFAULT_PREFS,
   loadOnboarded,
   loadPrefs,
@@ -19,66 +20,137 @@ export function useSplashSequence(opts: {
   const isSecondary = isSettingsWindow || isFloatingPill;
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [onboarded, setOnboarded] = useState(true);
-  const [ready, setReady] = useState(isSecondary);
-  const [session, setSession] = useState<SessionInfo | null>(
-    isSecondary ? { loggedIn: false } : null,
-  );
+  const [ready, setReady] = useState(false);
+  const [session, setSession] = useState<SessionInfo | null>(null);
   const [splashDone, setSplashDone] = useState(isSecondary);
 
   useEffect(() => {
+    let cancelled = false;
     if (isSecondary) {
+      void withTimeout(sessionStatus(), 3000, { loggedIn: false })
+        .then((nextSession) => {
+          if (!cancelled) setSession(nextSession);
+        })
+        .catch(() => {
+          if (!cancelled) setSession({ loggedIn: false });
+        });
       void withTimeout(
         Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
+          if (cancelled) return;
           setPrefs(p);
           setOnboarded(o);
         }),
         3000,
         undefined,
       )
-        .catch(() => {})
-        .finally(() => setReady(true));
+        .catch((e) =>
+          console.warn("algorith-voice: secondary prefs load failed", e),
+        )
+        .finally(() => {
+          if (!cancelled) setReady(true);
+        });
       let unlisten: (() => void) | undefined;
-      void listen("settings-refresh", () => {
-        void loadPrefs().then(setPrefs);
+      let listenCancelled = false;
+      void listen<Prefs>("settings-refresh", (event) => {
+        const payload = event.payload as unknown as Partial<Prefs> | undefined;
+        if (
+          payload &&
+          typeof payload === "object" &&
+          payload !== null &&
+          "mode" in payload
+        ) {
+          if (!listenCancelled) setPrefs(buildPrefs(payload));
+          return;
+        }
+        void loadPrefs({ allowMigration: false })
+          .then((p) => {
+            if (!listenCancelled) setPrefs(p);
+          })
+          .catch((e) =>
+            console.warn("algorith-voice: settings-refresh reload failed", e),
+          );
       })
         .then((fn) => {
-          unlisten = fn;
+          if (listenCancelled) fn();
+          else unlisten = fn;
         })
-        .catch(() => {});
+        .catch((e) =>
+          console.warn("algorith-voice: settings-refresh listen failed", e),
+        );
       return () => {
+        cancelled = true;
+        listenCancelled = true;
         if (unlisten) unlisten();
       };
     }
-    // Prefs must never block first paint: 3s deadline, then defaults.
-    // (Session already had its own 3s fallback below.)
     void withTimeout(
       Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
+        if (cancelled) return;
         setPrefs(p);
         setOnboarded(o);
       }),
       3000,
       undefined,
     )
-      .catch(() => {})
-      .finally(() => setReady(true));
-    // Session must never block splash forever — 3s fallback to logged-out
+      .catch((e) => console.warn("algorith-voice: prefs load failed", e))
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
     let settled = false;
     void sessionStatus()
       .then((s) => {
+        if (cancelled) return;
         settled = true;
         setSession(s);
       })
       .catch(() => {
+        if (cancelled) return;
         settled = true;
         setSession({ loggedIn: false });
       });
     const fallback = window.setTimeout(() => {
-      if (!settled) setSession({ loggedIn: false });
+      if (!cancelled && !settled) setSession({ loggedIn: false });
     }, 3000);
-    const t = setTimeout(() => setSplashDone(true), 3800);
+    const t = setTimeout(() => {
+      if (!cancelled) setSplashDone(true);
+    }, 3800);
+    // Cross-window prefs sync: the standalone settings window persists via
+    // savePrefs and emits settings-refresh — reload here so the main window
+    // (sidebar theme, dictate hotkey/mode) reflects changes without restart.
+    let unlistenMain: (() => void) | undefined;
+    let listenCancelledMain = false;
+    void listen<Prefs>("settings-refresh", (event) => {
+      const payload = event.payload as unknown as Partial<Prefs> | undefined;
+      if (
+        payload &&
+        typeof payload === "object" &&
+        payload !== null &&
+        "mode" in payload
+      ) {
+        if (!listenCancelledMain && !cancelled) setPrefs(buildPrefs(payload));
+        return;
+      }
+      void loadPrefs({ allowMigration: false })
+        .then((p) => {
+          if (!listenCancelledMain && !cancelled) setPrefs(p);
+        })
+        .catch((e) =>
+          console.warn("algorith-voice: settings-refresh reload failed", e),
+        );
+    })
+      .then((fn) => {
+        if (listenCancelledMain || cancelled) fn();
+        else unlistenMain = fn;
+      })
+      .catch((e) =>
+        console.warn("algorith-voice: settings-refresh listen failed", e),
+      );
     return () => {
+      cancelled = true;
+      listenCancelledMain = true;
       clearTimeout(t);
       clearTimeout(fallback);
+      if (unlistenMain) unlistenMain();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- boot once; secondary flags are initial-only
   }, []);

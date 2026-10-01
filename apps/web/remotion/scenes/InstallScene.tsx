@@ -3,9 +3,9 @@ import { BigTitle, Caption, Card, Code, Enter, Sub } from "../ui";
 
 const OS = [
   {
-    name: "macOS 13+",
-    cmd: "open Algorith.Voice_0.4.0_aarch64.dmg",
-    note: "Then allow Microphone + Accessibility",
+    name: "macOS 13+ (Swift, soon)",
+    cmd: "Native Swift app — coming soon",
+    note: "No download yet; Windows & Linux today",
   },
   {
     name: "Windows 10+",

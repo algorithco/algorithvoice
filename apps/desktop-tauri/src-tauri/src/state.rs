@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::sync::{atomic::AtomicBool, Mutex, RwLock};
+use std::time::Instant;
 
 /// Tray icon state. Deserializes from the same lowercase strings the
 /// frontend already sends (`"idle" | "recording" | "processing"`), so
@@ -69,6 +70,20 @@ pub struct AppState {
     /// requests are allowed through so the runtime can exit fully instead
     /// of hiding windows back into the tray.
     pub exiting: AtomicBool,
+    /// Last server-verified subscription. Starts invalid and is refreshed by
+    /// `license_status`; native transcription also refreshes it when stale.
+    pub entitlement: Mutex<EntitlementCache>,
+    /// Serializes access-token refresh across main/settings/pill webviews.
+    pub entitlement_refresh: tokio::sync::Mutex<()>,
+    /// Process-local copy of the session written by `store_session`.
+    ///
+    /// Some Windows credential providers acknowledge a write before the new
+    /// credential is readable from another command. Without this bridge the
+    /// auth event marks the renderer signed in, then the entitlement request
+    /// immediately reports "Sign in to verify Pro". The OS keyring remains
+    /// the durable source; this cache only keeps commands in the same process
+    /// consistent and is cleared on logout.
+    pub session_payload: Mutex<Option<serde_json::Value>>,
 }
 
 impl AppState {
@@ -77,6 +92,9 @@ impl AppState {
             tray_state: Mutex::new(TrayState::Idle),
             hotkey: RwLock::new(hotkey.into()),
             exiting: AtomicBool::new(false),
+            entitlement: Mutex::new(EntitlementCache::default()),
+            entitlement_refresh: tokio::sync::Mutex::new(()),
+            session_payload: Mutex::new(None),
         }
     }
 }
@@ -115,11 +133,45 @@ impl SessionStatus {
     }
 }
 
-/// Matches the previous stub JSON `{ valid, next }`.
+#[derive(Debug, Clone)]
+pub struct EntitlementCache {
+    pub status: LicenseStatus,
+    pub checked_at: Option<Instant>,
+    pub api_base: String,
+}
+
+impl Default for EntitlementCache {
+    fn default() -> Self {
+        Self {
+            status: LicenseStatus::unverified(),
+            checked_at: None,
+            api_base: String::new(),
+        }
+    }
+}
+
+/// Server-verified desktop entitlement shown by the renderer and enforced by
+/// native commands. Unknown/network failure is always invalid (fail closed).
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LicenseStatus {
     pub valid: bool,
-    pub next: &'static str,
+    pub status: String,
+    pub plan_tier: String,
+    pub current_period_end: Option<String>,
+    pub reason: Option<String>,
+}
+
+impl LicenseStatus {
+    pub fn unverified() -> Self {
+        Self {
+            valid: false,
+            status: "unverified".to_string(),
+            plan_tier: "free".to_string(),
+            current_period_end: None,
+            reason: Some("Subscription has not been verified".to_string()),
+        }
+    }
 }
 
 #[cfg(test)]

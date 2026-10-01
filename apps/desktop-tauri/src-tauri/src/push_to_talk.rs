@@ -4,8 +4,9 @@
 //! untouched — this file only *adds* new commands which `lib.rs` wires
 //! into `invoke_handler`. Frontend drives the flow:
 //!
-//! 1. `ensure_floating_pill` creates the 72x72 frameless always-on-top
-//!    window (`focus: false` so the previously active app keeps focus).
+//! 1. `ensure_floating_pill` creates the 160x40 (idle) / 224x40
+//!    (recording) frameless always-on-top window (`focus: false` so the
+//!    previously active app keeps focus).
 //! 2. Frontend records with `MediaRecorder` (Variant A — no native audio
 //!    dep needed) and sends base64 audio to `transcribe_audio`.
 //! 3. `paste_text` (or the `transcribe_and_paste` convenience combo)
@@ -17,7 +18,9 @@
 
 use crate::error::{AppError, AppResult};
 use crate::local_asr::worker::TranscriptionWorker;
+use crate::state::Db;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State, WebviewUrl};
 
@@ -28,6 +31,8 @@ const GROQ_ENDPOINT: &str = "https://api.groq.com/openai/v1/audio/transcriptions
 const GROQ_MODEL: &str = "whisper-large-v3-turbo";
 /// Groq `multipart/form-data` upload cap.
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
+/// Local WAV cap (from audio.rs) — offline path can handle larger files.
+const MAX_LOCAL_AUDIO_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TranscribeResult {
@@ -91,8 +96,12 @@ fn resolve_groq_key(explicit: Option<String>) -> AppResult<String> {
 }
 
 #[tauri::command]
-pub fn set_groq_api_key(api_key: String) -> AppResult<()> {
-    let key = api_key.trim().to_owned();
+#[allow(non_snake_case)]
+pub fn set_groq_api_key(api_key: Option<String>, apiKey: Option<String>) -> AppResult<()> {
+    let key = api_key
+        .or(apiKey)
+        .ok_or_else(|| AppError::new("transcribe", "missing Groq API key"))?;
+    let key = key.trim().to_owned();
     if key.is_empty() {
         return Err(AppError::new(
             "transcribe",
@@ -135,11 +144,22 @@ pub fn clear_groq_key() -> AppResult<()> {
 // ---- Audio → Groq Whisper (Rust backend, multipart) ----
 
 fn decode_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
+    decode_audio_payload_with_limit(audio_base64, MAX_AUDIO_BYTES, "Groq limit is 25 MB")
+}
+
+fn decode_local_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
+    decode_audio_payload_with_limit(audio_base64, MAX_LOCAL_AUDIO_BYTES, "local limit is 128 MB")
+}
+
+fn decode_audio_payload_with_limit(
+    audio_base64: &str,
+    max_bytes: usize,
+    limit_label: &str,
+) -> AppResult<Vec<u8>> {
     let trimmed = audio_base64.trim();
     if trimmed.is_empty() {
         return Err(AppError::new("transcribe", "empty audio payload"));
     }
-    // Accept raw base64 as well as `data:audio/webm;base64,...` URLs.
     let b64 = if trimmed.starts_with("data:") {
         match trimmed.split_once(',') {
             Some((_, payload)) => payload.trim(),
@@ -148,19 +168,14 @@ fn decode_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
     } else {
         trimmed
     };
-    // Pre-check estimated decoded size to avoid large allocation before
-    // base64 decode (DoS via 250MB b64 -> 187MB Vec).
-    // Base64 expands by 4/3, so decoded ≈ b64_len * 3 / 4.
-    // Add small headroom for padding, reject early.
     let est = b64.len().saturating_mul(3) / 4;
-    if est > MAX_AUDIO_BYTES.saturating_add(1024 * 1024) {
+    if est > max_bytes.saturating_add(1024 * 1024) {
         return Err(AppError::new(
             "transcribe",
-            "audio too large (Groq limit is 25 MB)",
+            format!("audio too large ({limit_label})"),
         ));
     }
-    // Also reject obviously huge payloads (100MB b64 string itself)
-    if b64.len() > 40 * 1024 * 1024 {
+    if b64.len() > 180 * 1024 * 1024 {
         return Err(AppError::new("transcribe", "audio too large"));
     }
     use base64::Engine as _;
@@ -170,10 +185,10 @@ fn decode_audio_payload(audio_base64: &str) -> AppResult<Vec<u8>> {
     if bytes.is_empty() {
         return Err(AppError::new("transcribe", "decoded audio is empty"));
     }
-    if bytes.len() > MAX_AUDIO_BYTES {
+    if bytes.len() > max_bytes {
         return Err(AppError::new(
             "transcribe",
-            "audio too large (Groq limit is 25 MB)",
+            format!("audio too large ({limit_label})"),
         ));
     }
     Ok(bytes)
@@ -291,8 +306,9 @@ pub(crate) async fn transcribe_local(
     model: &crate::local_asr::manifest::LocalModel,
     audio_base64: &str,
     language: Option<&str>,
+    db: Option<&Db>,
 ) -> AppResult<TranscribeResult> {
-    let audio = decode_audio_payload(audio_base64)?;
+    let audio = decode_local_audio_payload(audio_base64)?;
     let decoded = crate::local_asr::audio::decode_wav(&audio)?;
     if decoded.samples.is_empty() {
         return Err(AppError::audio_unsupported_format(
@@ -323,6 +339,19 @@ pub(crate) async fn transcribe_local(
     let transcript = worker
         .transcribe(&decoded.samples, language.unwrap_or("auto"))
         .await?;
+    // Local usage ledger (numbers only, best-effort): a ledger write must
+    // never fail the transcription — log and keep the transcript instead.
+    if let Some(db) = db {
+        if let Err(e) = crate::local_usage::record_local_usage(
+            db,
+            &model.id,
+            model.engine,
+            decoded.duration_secs(),
+            &transcript.text,
+        ) {
+            eprintln!("algorith-voice: local usage record failed: {e}");
+        }
+    }
     Ok(TranscribeResult {
         text: transcript.text,
         pasted: false,
@@ -338,16 +367,30 @@ pub(crate) async fn transcribe_local(
 /// picks the local model and is required when mode is local.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn transcribe_audio(
-    audio_base64: String,
+    audio_base64: Option<String>,
+    #[allow(non_snake_case)] audioBase64: Option<String>,
     language: Option<String>,
     api_key: Option<String>,
+    #[allow(non_snake_case)] apiKey: Option<String>,
     mime_type: Option<String>,
+    #[allow(non_snake_case)] mimeType: Option<String>,
     mode: Option<String>,
     model_id: Option<String>,
+    #[allow(non_snake_case)] modelId: Option<String>,
     app: AppHandle,
+    app_state: State<'_, crate::state::AppState>,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
+    crate::require_pro_entitlement(&app, &app_state).await?;
+    // Accept both snake_case and camelCase (frontend sends both for back-compat)
+    let audio_base64 = audio_base64
+        .or(audioBase64)
+        .ok_or_else(|| AppError::new("transcribe", "missing audio_base64"))?;
+    let api_key = api_key.or(apiKey);
+    let mime_type = mime_type.or(mimeType);
+    let model_id = model_id.or(modelId);
     match resolve_transcribe_path(mode.as_deref())? {
         TranscribePath::Cloud => {
             let key = resolve_groq_key(api_key)?;
@@ -368,13 +411,26 @@ pub async fn transcribe_audio(
                         "no local model selected; download and select one in Settings",
                     )
                 })?;
-            let manifest = crate::local_asr::manifest::default_manifest()?;
-            crate::local_asr::manifest::validate_manifest(&manifest)?;
+            // Use the same fail-closed signature validation as every model
+            // management command. Loading a tampered ONNX manifest is a code
+            // execution boundary and must not have a weaker lazy-load path.
+            let manifest = crate::local_asr::commands::load_manifest()?;
             let model = crate::local_asr::commands::find_model(&manifest, mid)?;
             let data = app.path().app_data_dir().map_err(|e| {
                 AppError::model_not_loaded(format!("cannot resolve app data dir: {e}"))
             })?;
-            transcribe_local(&worker, &data, &model, &audio_base64, language.as_deref()).await
+            // Usage ledger is best-effort: no managed Db (fresh installs
+            // where init failed) simply means no row, never an error.
+            let db = app.try_state::<Db>();
+            transcribe_local(
+                &worker,
+                &data,
+                &model,
+                &audio_base64,
+                language.as_deref(),
+                db.as_deref(),
+            )
+            .await
         }
     }
 }
@@ -385,22 +441,35 @@ pub async fn transcribe_audio(
 /// (Ctrl+V on Windows).
 ///
 /// When `restore_clipboard` is true (default), the previous clipboard
-/// text — if any — is restored ~350 ms after pasting so the user's
+/// text or image — if any — is restored ~350 ms after pasting so the user's
 /// earlier copy is not lost. The delay is generous on purpose: target
 /// apps consume the paste asynchronously on their own message pump, and
 /// restoring too early pastes stale text (notably in Office/Electron
 /// apps and over RDP). Restore also runs when the keystroke itself
 /// fails, so the original clipboard is never left clobbered.
 #[tauri::command]
-pub async fn paste_text(text: String, restore_clipboard: Option<bool>) -> AppResult<()> {
+#[allow(non_snake_case)]
+pub async fn paste_text(
+    text: String,
+    restore_clipboard: Option<bool>,
+    #[allow(non_snake_case)] restoreClipboard: Option<bool>,
+    paste_mode: Option<String>,
+    #[allow(non_snake_case)] pasteMode: Option<String>,
+) -> AppResult<()> {
+    let restore_clipboard = restore_clipboard.or(restoreClipboard);
+    let paste_mode = paste_mode.or(pasteMode);
     // Off the async executor like the combo path: ~470ms of sleeps must
     // never saturate Tauri's sync worker pool (see transcribe_and_paste).
-    tokio::task::spawn_blocking(move || paste_text_blocking(text, restore_clipboard))
+    tokio::task::spawn_blocking(move || paste_text_blocking(text, restore_clipboard, paste_mode))
         .await
         .map_err(|e| AppError::new("paste", format!("paste worker: {e}")))?
 }
 
-fn paste_text_blocking(text: String, restore_clipboard: Option<bool>) -> AppResult<()> {
+fn paste_text_blocking(
+    text: String,
+    restore_clipboard: Option<bool>,
+    paste_mode: Option<String>,
+) -> AppResult<()> {
     let text = text.trim().to_owned();
     if text.is_empty() {
         return Err(AppError::new("paste", "nothing to paste"));
@@ -412,43 +481,64 @@ fn paste_text_blocking(text: String, restore_clipboard: Option<bool>) -> AppResu
 
     let mut clipboard =
         arboard::Clipboard::new().map_err(|e| AppError::new("paste", format!("clipboard: {e}")))?;
-    let previous = clipboard.get_text().ok();
+    let previous_text = clipboard.get_text().ok();
+    let previous_image = if previous_text.is_none() {
+        clipboard.get_image().ok().map(|image| arboard::ImageData {
+            width: image.width,
+            height: image.height,
+            bytes: Cow::Owned(image.bytes.into_owned()),
+        })
+    } else {
+        None
+    };
     clipboard
-        .set_text(text)
+        .set_text(text.clone())
         .map_err(|e| AppError::new("paste", format!("clipboard write: {e}")))?;
-    // Give the OS a tick to publish the new clipboard owner before the
-    // synthetic keystroke lands.
     std::thread::sleep(std::time::Duration::from_millis(120));
 
-    let keystroke = paste_keystroke();
-    // Wait for the focused app to consume the paste before restoring.
+    let keystroke = paste_keystroke(&text, paste_mode.as_deref());
     std::thread::sleep(std::time::Duration::from_millis(350));
 
-    if restore {
-        if let Some(old) = previous {
-            // Best effort: restoring must never turn a successful paste
-            // into an error.
+    if restore && keystroke.is_ok() {
+        if let Some(old) = previous_text {
             let _ = clipboard.set_text(old);
+        } else if let Some(old) = previous_image {
+            let _ = clipboard.set_image(old);
         }
     }
-    // Report the keystroke error *after* restoring, so a failed paste
-    // never costs the user their original clipboard.
+    // On failure keep transcript on clipboard — frontend will also
+    // do navigator.clipboard.writeText as fallback.
     keystroke?;
     Ok(())
 }
 
-fn paste_keystroke() -> AppResult<()> {
+fn paste_keystroke(text: &str, mode: Option<&str>) -> AppResult<()> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| AppError::new("paste", format!("enigo: {e}")))?;
-    // Windows-only: Ctrl+V. (macOS Cmd+V lives in the Swift app.)
+    if mode == Some("type") {
+        return enigo
+            .text(text)
+            .map_err(|e| AppError::new("paste", format!("type text: {e}")));
+    }
     let modifier = Key::Control;
     enigo
         .key(modifier, Direction::Press)
         .map_err(|e| AppError::new("paste", format!("paste key press: {e}")))?;
-    enigo
-        .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| AppError::new("paste", format!("paste key click: {e}")))?;
+    let shift = mode == Some("ctrl_shift_v")
+        || ((mode.is_none() || mode == Some("auto"))
+            && cfg!(target_os = "linux")
+            && std::env::var("TERM").is_ok_and(|term| term != "dumb"));
+    if shift {
+        enigo
+            .key(Key::Shift, Direction::Press)
+            .map_err(|e| AppError::new("paste", format!("shift press: {e}")))?;
+    }
+    let click = enigo.key(Key::Unicode('v'), Direction::Click);
+    if shift {
+        let _ = enigo.key(Key::Shift, Direction::Release);
+    }
+    click.map_err(|e| AppError::new("paste", format!("paste key click: {e}")))?;
     enigo
         .key(modifier, Direction::Release)
         .map_err(|e| AppError::new("paste", format!("paste key release: {e}")))?;
@@ -463,33 +553,56 @@ fn paste_keystroke() -> AppResult<()> {
 /// Returns the transcript for preview / history.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn transcribe_and_paste(
-    audio_base64: String,
+    audio_base64: Option<String>,
+    #[allow(non_snake_case)] audioBase64: Option<String>,
     language: Option<String>,
     api_key: Option<String>,
+    #[allow(non_snake_case)] apiKey: Option<String>,
     mime_type: Option<String>,
+    #[allow(non_snake_case)] mimeType: Option<String>,
     restore_clipboard: Option<bool>,
+    #[allow(non_snake_case)] restoreClipboard: Option<bool>,
+    paste_mode: Option<String>,
+    #[allow(non_snake_case)] pasteMode: Option<String>,
     mode: Option<String>,
     model_id: Option<String>,
+    #[allow(non_snake_case)] modelId: Option<String>,
     app: AppHandle,
+    app_state: State<'_, crate::state::AppState>,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
+    let audio_base64 = audio_base64
+        .or(audioBase64)
+        .ok_or_else(|| AppError::new("transcribe", "missing audio_base64"))?;
+    let api_key = api_key.or(apiKey);
+    let mime_type = mime_type.or(mimeType);
+    let restore_clipboard = restore_clipboard.or(restoreClipboard);
+    let paste_mode = paste_mode.or(pasteMode);
+    let model_id = model_id.or(modelId);
     let result = transcribe_audio(
-        audio_base64,
+        Some(audio_base64),
+        None,
         language,
         api_key,
+        None,
         mime_type,
+        None,
         mode,
         model_id,
+        None,
         app,
+        app_state,
         worker,
     )
     .await?;
     let text = result.text.clone();
-    let paste_outcome =
-        tokio::task::spawn_blocking(move || paste_text_blocking(text, restore_clipboard))
-            .await
-            .map_err(|e| AppError::new("paste", format!("paste worker: {e}")))?;
+    let paste_outcome = tokio::task::spawn_blocking(move || {
+        paste_text_blocking(text, restore_clipboard, paste_mode)
+    })
+    .await
+    .map_err(|e| AppError::new("paste", format!("paste worker: {e}")))?;
     match paste_outcome {
         Ok(()) => Ok(TranscribeResult {
             text: result.text,
@@ -558,29 +671,56 @@ pub fn get_foreground_info() -> AppResult<ForegroundInfo> {
 /// Create (or reveal) the frameless always-on-top pill.
 ///
 /// Properties per spec: decorations=false, transparent, always_on_top,
-/// skip_taskbar, non-resizable 72x72, `focused(false)` + `focusable(false)`
-/// so it never steals focus, `visible_on_all_workspaces` where supported.
+/// skip_taskbar, non-resizable short-wide pill (160x40 idle, 224x40
+/// recording), `focused(false)` + `focusable(false)` so it never steals
+/// focus, `visible_on_all_workspaces` where supported.
 ///
 /// NOTE: Windows needs no private-API opt-in for `.transparent()` — the
 /// old `macos-private-api` Cargo feature / `macOSPrivateApi` config were
 /// macOS-only and have been removed (macOS lives in the Swift app).
-pub(crate) const PILL_SIZE: f64 = 72.0;
+pub(crate) const PILL_WIDTH_IDLE: f64 = 160.0;
+pub(crate) const PILL_HEIGHT: f64 = 40.0;
+pub(crate) const PILL_WIDTH_RECORDING: f64 = 224.0;
 pub(crate) const PILL_MARGIN_RIGHT: f64 = 24.0;
 pub(crate) const PILL_MARGIN_BOTTOM: f64 = 96.0;
 
-/// Bottom-right pill position for a monitor's logical geometry.
-/// Pure so unit tests and the WebDriver E2E suite (`apps/desktop-tauri/e2e`)
-/// assert the same numbers the builder uses.
-pub(crate) fn pill_position(
+/// Bottom-right pill position for a monitor's logical geometry, for an
+/// explicit pill width. Pure so unit tests and the WebDriver E2E suite
+/// (`apps/desktop-tauri/e2e`) assert the same numbers the builder uses.
+pub(crate) fn pill_position_for_width(
+    width: f64,
     logical_x: f64,
     logical_y: f64,
     logical_w: f64,
     logical_h: f64,
 ) -> (f64, f64) {
     (
-        logical_x + logical_w - PILL_SIZE - PILL_MARGIN_RIGHT,
-        logical_y + logical_h - PILL_SIZE - PILL_MARGIN_BOTTOM,
+        logical_x + logical_w - width - PILL_MARGIN_RIGHT,
+        logical_y + logical_h - PILL_HEIGHT - PILL_MARGIN_BOTTOM,
     )
+}
+
+/// Bottom-right pill position for the idle width. Kept as the default
+/// entry point so existing callers (window creation) stay anchored.
+pub(crate) fn pill_position(
+    logical_x: f64,
+    logical_y: f64,
+    logical_w: f64,
+    logical_h: f64,
+) -> (f64, f64) {
+    pill_position_for_width(PILL_WIDTH_IDLE, logical_x, logical_y, logical_w, logical_h)
+}
+
+/// Keep the pill's right edge fixed while changing widths. This preserves a
+/// user-moved position instead of snapping the window back to the primary
+/// monitor whenever recording starts or stops.
+pub(crate) fn pill_position_after_resize(
+    logical_x: f64,
+    logical_y: f64,
+    current_width: f64,
+    next_width: f64,
+) -> (f64, f64) {
+    (logical_x + current_width - next_width, logical_y)
 }
 
 #[tauri::command]
@@ -599,9 +739,9 @@ pub async fn ensure_floating_pill(app: AppHandle) -> AppResult<()> {
             WebviewUrl::App("index.html".into()),
         )
         .title("Algorith Voice — Talk")
-        .inner_size(72.0, 72.0)
-        .min_inner_size(60.0, 60.0)
-        .max_inner_size(160.0, 160.0)
+        .inner_size(PILL_WIDTH_IDLE, PILL_HEIGHT)
+        .min_inner_size(PILL_WIDTH_IDLE, PILL_HEIGHT)
+        .max_inner_size(PILL_WIDTH_RECORDING, PILL_HEIGHT)
         .resizable(false)
         .decorations(false)
         .transparent(true)
@@ -658,6 +798,55 @@ pub fn floating_pill_visible(app: AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+/// Resize the pill window when the frontend switches between idle and
+/// recording layouts, keeping its current right edge anchored so a
+/// user-moved pill stays put and grows leftward.
+///
+/// Called from the frontend on `state` change: `expanded=true` selects
+/// `PILL_WIDTH_RECORDING`, `false` selects `PILL_WIDTH_IDLE`. Height and
+/// margins are constant. No-op when the window does not exist yet.
+#[tauri::command]
+pub async fn set_floating_pill_expanded(app: AppHandle, expanded: bool) -> AppResult<()> {
+    let Some(win) = app.get_webview_window(FLOATING_LABEL) else {
+        return Ok(());
+    };
+    let width = if expanded {
+        PILL_WIDTH_RECORDING
+    } else {
+        PILL_WIDTH_IDLE
+    };
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let preserved_position =
+        win.outer_position()
+            .ok()
+            .zip(win.inner_size().ok())
+            .map(|(position, size)| {
+                pill_position_after_resize(
+                    position.x as f64 / scale,
+                    position.y as f64 / scale,
+                    size.width as f64 / scale,
+                    width,
+                )
+            });
+    let _ = win.set_size(tauri::LogicalSize::new(width, PILL_HEIGHT));
+    if let Some((x, y)) = preserved_position {
+        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+    } else if let Ok(Some(monitor)) = app.primary_monitor() {
+        // Defensive fallback for platforms that cannot report the current
+        // window rectangle. Initial placement still uses the primary monitor.
+        let scale = monitor.scale_factor();
+        let m_pos = monitor.position();
+        let m_size = monitor.size();
+        let logical_x = m_pos.x as f64 / scale;
+        let logical_y = m_pos.y as f64 / scale;
+        let logical_w = m_size.width as f64 / scale;
+        let logical_h = m_size.height as f64 / scale;
+        let (x, y) = pill_position_for_width(width, logical_x, logical_y, logical_w, logical_h);
+        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,13 +854,41 @@ mod tests {
 
     #[test]
     fn pill_sits_bottom_right_clear_of_taskbar() {
-        // 1920x1080 primary monitor at origin (scale 1).
+        // 1920x1080 primary monitor at origin (scale 1). Idle pill is
+        // 160x40 with 24px right / 96px bottom margins.
         let (x, y) = pill_position(0.0, 0.0, 1920.0, 1080.0);
-        assert_eq!((x, y), (1920.0 - 72.0 - 24.0, 1080.0 - 72.0 - 96.0));
-        assert_eq!((x, y), (1824.0, 912.0));
+        assert_eq!((x, y), (1920.0 - 160.0 - 24.0, 1080.0 - 40.0 - 96.0));
+        assert_eq!((x, y), (1736.0, 944.0));
         // Offset secondary monitor: position follows the monitor origin.
         let (x2, y2) = pill_position(1920.0, 0.0, 1920.0, 1080.0);
-        assert_eq!((x2, y2), (3744.0, 912.0));
+        assert_eq!((x2, y2), (3656.0, 944.0));
+    }
+
+    #[test]
+    fn pill_recording_grows_leftward_same_bottom_right_anchor() {
+        // Recording pill is 224x40: same bottom edge, leftward growth.
+        let (x, y) = pill_position_for_width(PILL_WIDTH_RECORDING, 0.0, 0.0, 1920.0, 1080.0);
+        assert_eq!((x, y), (1920.0 - 224.0 - 24.0, 1080.0 - 40.0 - 96.0));
+        assert_eq!((x, y), (1672.0, 944.0));
+        // Idle wrapper agrees with explicit idle width.
+        let (xi, yi) = pill_position(0.0, 0.0, 1920.0, 1080.0);
+        let (xe, ye) = pill_position_for_width(PILL_WIDTH_IDLE, 0.0, 0.0, 1920.0, 1080.0);
+        assert_eq!((xi, yi), (xe, ye));
+    }
+
+    #[test]
+    fn pill_resize_preserves_user_moved_right_edge() {
+        let (expanded_x, expanded_y) =
+            pill_position_after_resize(640.0, 320.0, PILL_WIDTH_IDLE, PILL_WIDTH_RECORDING);
+        assert_eq!((expanded_x, expanded_y), (576.0, 320.0));
+
+        let (idle_x, idle_y) = pill_position_after_resize(
+            expanded_x,
+            expanded_y,
+            PILL_WIDTH_RECORDING,
+            PILL_WIDTH_IDLE,
+        );
+        assert_eq!((idle_x, idle_y), (640.0, 320.0));
     }
 
     #[test]
@@ -834,11 +1051,39 @@ mod tests {
         let worker = Arc::new(worker);
         let dir = fixture_dir("x");
         let audio = wav_base64(&[1000i16; 1600]);
-        let result = transcribe_local(&worker, &dir, &model, &audio, Some("en"))
+        // No ledger DB: path works, nothing recorded.
+        let result = transcribe_local(&worker, &dir, &model, &audio, Some("en"), None)
             .await
             .unwrap();
         assert_eq!(result.text, "hello local");
         assert!(!result.pasted);
+    }
+
+    #[tokio::test]
+    async fn local_path_records_usage_ledger() {
+        let worker = TranscriptionWorker::new();
+        let model = load_stub(&worker, Some("hello local"));
+        let worker = Arc::new(worker);
+        let dir = fixture_dir("ledger");
+        let audio = wav_base64(&[1000i16; 1600]); // 1600 samples = 0.1 s @16k
+        let mut conn = rusqlite::Connection::open_in_memory().expect("mem db");
+        crate::db::run_migrations(&mut conn).expect("migrate");
+        let db = crate::state::Db(std::sync::Mutex::new(conn));
+        let result = transcribe_local(&worker, &dir, &model, &audio, Some("en"), Some(&db))
+            .await
+            .unwrap();
+        assert_eq!(result.text, "hello local");
+        let conn = db.0.lock().expect("lock");
+        let (model_id, audio_seconds, text_words): (String, f64, i64) = conn
+            .query_row(
+                "SELECT model_id, audio_seconds, text_words FROM local_ai_usage",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("ledger row");
+        assert_eq!(model_id, "test-model");
+        assert!((audio_seconds - 0.1).abs() < 1e-9);
+        assert_eq!(text_words, 2);
     }
 
     #[tokio::test]
@@ -848,7 +1093,7 @@ mod tests {
         let worker = Arc::new(worker);
         let dir = fixture_dir("x");
         // Valid base64, not a WAV file.
-        let err = transcribe_local(&worker, &dir, &model, "bm90LWEtd2F2", None)
+        let err = transcribe_local(&worker, &dir, &model, "bm90LWEtd2F2", None, None)
             .await
             .unwrap_err();
         assert_eq!(err.code, "audio-unsupported-format");
@@ -861,7 +1106,7 @@ mod tests {
         let worker = Arc::new(worker);
         let dir = fixture_dir("x");
         let audio = wav_base64(&[1000i16; 1600]);
-        let err = transcribe_local(&worker, &dir, &model, &audio, None)
+        let err = transcribe_local(&worker, &dir, &model, &audio, None, None)
             .await
             .unwrap_err();
         assert_eq!(err.code, "engine-init-failed");

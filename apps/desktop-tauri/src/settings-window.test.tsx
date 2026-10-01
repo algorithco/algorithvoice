@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 
 // The settings window runs this same bundle with the webview label
 // "settings". There is no Tauri runtime under vitest, so stub the shell
-// APIs and let every invoke fall through to the localStorage/demo
-// fallbacks the same way a denied capability would.
+// APIs and let every invoke fall through the same way a denied capability
+// would.
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: "settings" }),
 }));
@@ -44,16 +44,17 @@ describe("settings window (white-screen regression)", () => {
       <SettingsView prefs={DEFAULT_PREFS} onPrefs={() => {}} />,
     );
     expect(html).toContain("Settings");
-    expect(html).toContain("Account");
     expect(html).toContain("Dictation");
     expect(html).toContain("Appearance");
     expect(html).toContain("System");
+    expect(html).toContain("Local usage");
   });
 
-  it("boots the app bundle in a settings-labelled webview", () => {
-    // Settings must render instantly without splash (no black flash).
+  it("boots the settings bundle behind the auth and subscription gate", () => {
+    // A secondary settings webview must not bypass the desktop entitlement
+    // check before its session has loaded.
     const html = renderToString(<App />);
-    expect(html).toContain("Settings");
-    expect(html).not.toContain("Loading");
+    expect(html).toContain("Loading");
+    expect(html).not.toContain("Dictation");
   });
 });

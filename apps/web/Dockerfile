@@ -42,12 +42,20 @@ COPY apps/web ./apps/web
 ARG NEXT_PUBLIC_APP_URL=http://127.0.0.1:3000
 ARG NEXT_PUBLIC_API_URL=http://127.0.0.1:3001
 ARG NEXT_PUBLIC_STRIPE_PRICE_PRO=""
+ARG NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY=""
+ARG NEXT_PUBLIC_STRIPE_PRICE_PRO_YEARLY=""
 ARG NEXT_PUBLIC_GITHUB_REPO=algorithco/algorithvoice
+ARG BUILD_API_URL=http://127.0.0.1:3001
 ENV NEXT_TELEMETRY_DISABLED=1 \
+    API_URL=${BUILD_API_URL} \
     NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL} \
     NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NEXT_PUBLIC_STRIPE_PRICE_PRO=${NEXT_PUBLIC_STRIPE_PRICE_PRO} \
+    NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY=${NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY} \
+    NEXT_PUBLIC_STRIPE_PRICE_PRO_YEARLY=${NEXT_PUBLIC_STRIPE_PRICE_PRO_YEARLY} \
     NEXT_PUBLIC_GITHUB_REPO=${NEXT_PUBLIC_GITHUB_REPO}
+# Route modules validate API_URL when Next collects them. This value exists only
+# for the build process; the runner still requires API_URL at deployment time.
 RUN pnpm --filter @algorith-voice/shared-types build \
   && pnpm --filter @algorith-voice/ui build \
   && pnpm --filter @algorith-voice/web build \

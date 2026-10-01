@@ -5,12 +5,16 @@ import {
   listHistory,
 } from "../lib/history.js";
 import { ensureFloatingPill } from "../lib/ptt.js";
+import type { DesktopEntitlement } from "../lib/subscription.js";
 import { CirclePlus } from "./animate-ui/icons/circle-plus.js";
 import { ClipboardList } from "./animate-ui/icons/clipboard-list.js";
 
 type Props = {
   hotkey: string;
+  mode?: "local" | "cloud" | "byok";
+  activeModelId?: string | null;
   email?: string | null;
+  entitlement?: DesktopEntitlement | null;
   onNavigate: (view: "dashboard" | "dictate" | "history" | "settings") => void;
 };
 
@@ -51,7 +55,16 @@ function formatTime(iso: string): string {
   }
 }
 
-export function DashboardView({ hotkey, email, onNavigate }: Props) {
+export function DashboardView({
+  hotkey,
+  mode,
+  activeModelId,
+  email,
+  entitlement,
+  onNavigate,
+}: Props) {
+  const isLocal = mode === "local";
+  const needsSetup = isLocal && !activeModelId;
   const [stats, setStats] = useState<{
     total: number;
     today: number;
@@ -88,11 +101,11 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
       : 0;
 
   return (
-    <div className="mx-auto w-full max-w-[1100px] p-8 lg:p-10 2xl:max-w-[1280px]">
+    <div className="desktop-page desktop-dashboard">
       {/* Header — status lives here so the hero holds the only CTA */}
-      <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-black md:text-4xl dark:text-white 2xl:text-[44px]">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-black sm:text-3xl md:text-4xl dark:text-white 2xl:text-[44px]">
             {greeting()}
             {email ? `, ${email.split("@")[0]}` : ""}
           </h1>
@@ -100,18 +113,38 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
             Your voice workspace
           </p>
         </div>
-        <div className="inline-flex h-10 shrink-0 items-center gap-2.5 rounded-full border border-gray-200 bg-white px-5 text-sm text-gray-500 dark:border-white/10 dark:bg-black">
-          <span className="size-2 rounded-full bg-black dark:bg-white" />
-          <span className="font-medium text-black dark:text-white">Ready</span>
-          <span className="text-gray-300 dark:text-white/20">•</span>
-          <span className="font-mono text-[13px]">{hotkey}</span>
-          <span className="text-gray-300 dark:text-white/20">•</span>
-          <span>Cloud</span>
+        <div className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-2 text-xs sm:h-10 sm:gap-2.5 sm:px-5 sm:py-0 sm:text-sm text-gray-500 dark:border-white/10 dark:bg-black">
+          <span
+            role="img"
+            aria-label={needsSetup ? "Local mode — no model" : "Ready"}
+            className={`size-2 shrink-0 rounded-full ${needsSetup ? "bg-amber-500" : "bg-black dark:bg-white"}`}
+          />
+          <span className="font-medium text-black dark:text-white">
+            {needsSetup ? "Setup needed" : "Ready"}
+          </span>
+          <span className="hidden text-gray-300 dark:text-white/20 sm:inline">
+            •
+          </span>
+          <span className="min-w-0 max-w-[140px] truncate font-mono text-[11px] sm:max-w-none sm:text-[13px]">
+            {hotkey}
+          </span>
+          <span className="hidden text-gray-300 dark:text-white/20 sm:inline">
+            •
+          </span>
+          <span>
+            {mode === "local" ? "Local" : mode === "byok" ? "BYOK" : "Cloud"}
+          </span>
+          <span className="hidden text-gray-300 dark:text-white/20 sm:inline">
+            •
+          </span>
+          <span className="font-semibold capitalize">
+            Pro · {entitlement?.status ?? "active"}
+          </span>
         </div>
       </div>
 
       {/* Main dictation card */}
-      <div className="relative mt-8 overflow-hidden rounded-2xl border border-gray-200 bg-white p-8 dark:border-white/10 dark:bg-black md:p-10">
+      <div className="relative mt-6 overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black sm:mt-8 sm:p-8 md:p-10">
         <div className="pointer-events-none absolute -top-24 left-1/2 h-64 w-[720px] -translate-x-1/2 rounded-full bg-black/5 blur-[80px] dark:bg-white/5" />
         <div className="relative flex flex-col items-center text-center">
           <div className="grid size-20 place-items-center rounded-full border border-gray-300 bg-gray-100 dark:border-white/20 dark:bg-white/5">
@@ -142,8 +175,8 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
       </div>
 
       {/* Stats */}
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:border-black/20 dark:border-white/10 dark:bg-black dark:hover:border-white/20">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="group relative overflow-hidden rounded-xl border border-gray-200 bg-white p-5 transition-colors hover:border-black/20 sm:col-span-2 xl:col-span-1 dark:border-white/10 dark:bg-black dark:hover:border-white/20">
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-black/30 to-transparent opacity-0 transition-opacity group-hover:opacity-100 dark:via-white/30" />
           <p className="text-xs uppercase tracking-wide text-gray-500">
             Dictations today
@@ -189,7 +222,7 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
       </div>
 
       {/* Recent + Quick actions */}
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1.7fr_1fr]">
+      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-gray-200 bg-white p-6 dark:border-white/10 dark:bg-black">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-black dark:text-white">
@@ -259,7 +292,7 @@ export function DashboardView({ hotkey, email, onNavigate }: Props) {
                   Hold {hotkey}
                 </p>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Press and hold anywhere to start listening
+                  Works from any app; the pill is for status and movement
                 </p>
               </div>
             </li>

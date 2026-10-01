@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 
 // Local dev: load .env files via Node's native loader (Node >= 20.12).
@@ -15,12 +17,36 @@ try {
   // Optional fallback — root .env may not exist.
 }
 
-const PLACEHOLDER = /change-me|example|test|password/i;
+const EXAMPLE_SECRETS = new Set([
+  "change-me-32-chars-minimum-access",
+  "change-me-32-chars-minimum-refresh",
+  "dev-only-change-me-access-secret-32chars",
+  "dev-only-change-me-refresh-pepper-32chars",
+]);
+
+function hasReasonableEntropy(value: string): boolean {
+  return new Set(value).size >= 12;
+}
+
+function isLoopbackUrl(value: string): boolean {
+  const hostname = new URL(value).hostname;
+  return (
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
+  );
+}
 
 // .env files conventionally contain KEY= (empty) for unset secrets —
 // treat those as undefined so .optional() behaves.
 const optStr = () =>
   z.preprocess((v) => (v === "" ? undefined : v), z.string().min(1).optional());
+
+const envBool = (defaultValue: boolean) =>
+  z.preprocess((value) => {
+    if (value === undefined || value === "") return defaultValue;
+    if (value === "true" || value === true) return true;
+    if (value === "false" || value === false) return false;
+    return value;
+  }, z.boolean());
 
 const envSchema = z
   .object({
@@ -31,32 +57,39 @@ const envSchema = z
     DATABASE_URL: z.string().min(1),
     REDIS_URL: z.string().min(1),
     JWT_ACCESS_SECRET: z.string().min(32),
-    JWT_REFRESH_PEPPER: z.string().min(16),
-    ENCRYPTION_KEK: z
-      .string()
-      .min(16)
-      .refine(
-        (s) => {
-          try {
-            return Buffer.from(s, "base64").length >= 32;
-          } catch {
-            return false;
-          }
-        },
-        { message: "ENCRYPTION_KEK must be base64 of >= 32 bytes" },
-      ),
+    JWT_REFRESH_PEPPER: z.string().min(32),
+    AUDIT_HASH_KEY: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.string().min(32).optional(),
+    ),
+    ENCRYPTION_KEK: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z
+        .string()
+        .min(16)
+        .refine((value) => Buffer.from(value, "base64").length >= 32, {
+          message: "ENCRYPTION_KEK must be base64 of >= 32 bytes",
+        })
+        .optional(),
+    ),
     APP_URL: z.string().url().default("http://localhost:3000"),
     API_URL: z.preprocess(
       (v) => (v === "" ? undefined : v),
-      z.string().url().optional(),
+      z.string().url().default("http://localhost:3001"),
     ),
     OPENROUTER_API_KEY: optStr(),
     MISTRAL_API_KEY: optStr(),
+    GROQ_API_KEY: optStr(),
     STT_PRIMARY: z.string().default("nvidia/parakeet-tdt-0.6b-v3"),
     STT_FALLBACK: z.string().default("openai/whisper-large-v3"),
+    STT_STORAGE_BACKEND: z.enum(["local", "r2"]).default("local"),
+    STT_TEMP_DIR: z.string().default(join(tmpdir(), "algorith-voice-stt")),
     STRIPE_SECRET_KEY: optStr(),
     STRIPE_WEBHOOK_SECRET: optStr(),
     STRIPE_PRICE_PRO: optStr(),
+    STRIPE_PRICE_PRO_MONTHLY: optStr(),
+    STRIPE_PRICE_PRO_YEARLY: optStr(),
+    STRIPE_PORTAL_CONFIG: optStr(),
     R2_ACCOUNT_ID: optStr(),
     R2_ACCESS_KEY_ID: optStr(),
     R2_SECRET_ACCESS_KEY: optStr(),
@@ -65,22 +98,57 @@ const envSchema = z
     OAUTH_GOOGLE_CLIENT_SECRET: optStr(),
     OAUTH_GITHUB_CLIENT_ID: optStr(),
     OAUTH_GITHUB_CLIENT_SECRET: optStr(),
+    LEGACY_DESKTOP_OAUTH_TOKEN_IN_URL: envBool(true),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
+    READINESS_TOKEN: optStr(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === "production") {
       for (const key of ["JWT_ACCESS_SECRET", "JWT_REFRESH_PEPPER"] as const) {
-        if (PLACEHOLDER.test(env[key])) {
+        if (EXAMPLE_SECRETS.has(env[key]) || !hasReasonableEntropy(env[key])) {
           ctx.addIssue({
             code: "custom",
             message: `${key} must not be a placeholder in production`,
           });
         }
       }
-      if (env.APP_URL.includes("localhost")) {
+      const kek = env.ENCRYPTION_KEK
+        ? Buffer.from(env.ENCRYPTION_KEK, "base64")
+        : null;
+      if (kek && (kek.every((byte) => byte === 0) || new Set(kek).size < 12)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "ENCRYPTION_KEK must have sufficient entropy in production",
+        });
+      }
+      if (isLoopbackUrl(env.APP_URL)) {
         ctx.addIssue({
           code: "custom",
           message: "APP_URL must not be localhost in production",
+        });
+      }
+      if (isLoopbackUrl(env.API_URL)) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "API_URL is required and must not be localhost in production",
+        });
+      }
+      if (!env.AUDIT_HASH_KEY) {
+        ctx.addIssue({
+          code: "custom",
+          message: "AUDIT_HASH_KEY is required in production",
+        });
+      }
+      if (
+        env.STRIPE_SECRET_KEY &&
+        (!env.STRIPE_PRICE_PRO_MONTHLY || !env.STRIPE_PRICE_PRO_YEARLY)
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "Stripe monthly and yearly price IDs are required in production",
         });
       }
     }
@@ -91,6 +159,17 @@ const envSchema = z
         code: "custom",
         message:
           "STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET must be set together",
+      });
+    }
+    if (
+      env.STRIPE_PRICE_PRO_MONTHLY !== undefined &&
+      env.STRIPE_PRICE_PRO_YEARLY !== undefined &&
+      env.STRIPE_PRICE_PRO_MONTHLY === env.STRIPE_PRICE_PRO_YEARLY
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "STRIPE_PRICE_PRO_MONTHLY and STRIPE_PRICE_PRO_YEARLY must differ",
       });
     }
     const r2Keys = [
@@ -106,6 +185,12 @@ const envSchema = z
           "R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY must be set together",
       });
     }
+    if (env.STT_STORAGE_BACKEND === "r2" && r2Set.length !== 3) {
+      ctx.addIssue({
+        code: "custom",
+        message: "R2 credentials are required when STT_STORAGE_BACKEND is r2",
+      });
+    }
   });
 
 export type Env = z.infer<typeof envSchema>;
@@ -113,8 +198,10 @@ export type Env = z.infer<typeof envSchema>;
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const parsed = envSchema.safeParse(source);
   if (!parsed.success) {
-    const fields = parsed.error.flatten().fieldErrors;
-    throw new Error(`Invalid env: ${JSON.stringify(fields)}`);
+    const flattened = parsed.error.flatten();
+    throw new Error(
+      `Invalid env: ${JSON.stringify({ fieldErrors: flattened.fieldErrors, formErrors: flattened.formErrors })}`,
+    );
   }
   const env = parsed.data;
   // loadEnv runs once per importing module (server, app, queues…) — warn

@@ -34,8 +34,20 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
   getCurrentWebviewWindow: () => ({ label: "settings" }),
 }));
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: async () => {
-    throw new Error("tauri unavailable in test");
+  invoke: async (cmd: string) => {
+    if (cmd === "session_status") {
+      return { loggedIn: true, email: "pro@example.com" };
+    }
+    if (cmd === "license_status") {
+      return {
+        valid: true,
+        status: "active",
+        planTier: "pro",
+        currentPeriodEnd: "2026-10-28T00:00:00.000Z",
+        reason: null,
+      };
+    }
+    throw new Error(`unexpected command: ${cmd}`);
   },
 }));
 vi.mock("@tauri-apps/api/event", () => ({
@@ -55,6 +67,7 @@ vi.mock("@tauri-apps/plugin-autostart", () => ({
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: async () => {},
 }));
+vi.mock("./lib/session/env.js", () => ({ isTauri: () => true }));
 
 import App from "./App.js";
 
@@ -65,7 +78,7 @@ afterEach(() => {
 });
 
 describe("settings window boot", () => {
-  it("reaches the real settings UI after the splash gate", async () => {
+  it("loads the stored desktop session and entitlement before showing settings", async () => {
     vi.useFakeTimers();
     const div = document.createElement("div");
     document.body.appendChild(div);
@@ -74,7 +87,8 @@ describe("settings window boot", () => {
     await act(async () => {
       root.render(<App />);
     });
-    // Splash gate (3.8s) + async prefs/session loads.
+    // Secondary windows skip the animated splash but still resolve prefs,
+    // session, and entitlement before exposing protected settings.
     await act(async () => {
       vi.advanceTimersByTime(4000);
     });
@@ -84,7 +98,8 @@ describe("settings window boot", () => {
 
     const text = div.textContent ?? "";
     expect(text).toContain("Settings");
-    expect(text).toContain("Account");
+    expect(text).toContain("Dictation");
+    expect(text).not.toContain("Welcome back");
     expect(text).not.toContain("Loading");
 
     await act(async () => {

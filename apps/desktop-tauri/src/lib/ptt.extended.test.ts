@@ -10,9 +10,11 @@ import {
   blobToBase64,
   encodeWavPCM16,
   hasGroqKey,
+  isSharedAudioBuffer,
   LOCAL_SAMPLE_RATE,
   pickSupportedMimeType,
   setGroqApiKey,
+  transcribeAndPaste,
 } from "./ptt.js";
 
 const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
@@ -54,6 +56,39 @@ describe("encodeWavPCM16 edge cases", () => {
   });
 });
 
+describe("local audio buffer compatibility", () => {
+  it("does not reference SharedArrayBuffer when the webview omits it", () => {
+    vi.stubGlobal("SharedArrayBuffer", undefined);
+    try {
+      expect(isSharedAudioBuffer(new ArrayBuffer(8))).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("explicit transcription language", () => {
+  it("forwards the selected language to the desktop command", async () => {
+    // @ts-expect-error - test flag
+    window.__TAURI__ = {};
+    mockInvoke.mockResolvedValue({ text: "Привет", pasted: true });
+    await transcribeAndPaste("audio", "audio/wav", "ru", {
+      mode: "local",
+      modelId: "whisper-small",
+    });
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "transcribe_and_paste",
+      expect.objectContaining({
+        language: "ru",
+        mode: "local",
+        model_id: "whisper-small",
+      }),
+    );
+    // @ts-expect-error - cleanup
+    delete window.__TAURI__;
+  });
+});
+
 describe("groq key path (keyring, never localStorage)", () => {
   it("forwards set/has to Tauri commands", async () => {
     // @ts-expect-error - test flag
@@ -61,6 +96,7 @@ describe("groq key path (keyring, never localStorage)", () => {
     mockInvoke.mockResolvedValue(undefined);
     await setGroqApiKey("sk-test");
     expect(mockInvoke).toHaveBeenCalledWith("set_groq_api_key", {
+      api_key: "sk-test",
       apiKey: "sk-test",
     });
     mockInvoke.mockResolvedValue(true);

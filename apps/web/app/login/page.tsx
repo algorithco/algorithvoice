@@ -2,7 +2,7 @@
 
 import { loginSchema } from "@algorith-voice/shared-types";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import {
   AuthShell,
@@ -26,7 +26,6 @@ function safeReturnTo(raw: string | null): string | null {
 }
 
 function LoginInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = safeReturnTo(searchParams.get("returnTo"));
   const [email, setEmail] = useState("");
@@ -60,12 +59,13 @@ function LoginInner() {
         );
         return;
       }
-      router.push(
-        (returnTo ?? "/dashboard") as unknown as Parameters<
-          typeof router.push
-        >[0],
-      );
-      router.refresh();
+      // Hard navigation (not router.push): guarantees the next page — e.g.
+      // /oauth2/consent?request=… for desktop auth — loads fresh with the
+      // just-set httpOnly session cookies. Client-side push could render the
+      // consent page with stale unauthenticated state, forcing the user back
+      // to the desktop app to click Log in again.
+      window.location.href = returnTo ?? "/dashboard";
+      return;
     } catch {
       setErr("Network error.");
     } finally {
@@ -83,7 +83,11 @@ function LoginInner() {
           <>
             No account?{" "}
             <Link
-              href={"/register" as never}
+              href={
+                (returnTo
+                  ? `/register?returnTo=${encodeURIComponent(returnTo)}`
+                  : "/register") as never
+              }
               className="text-ink underline decoration-line underline-offset-4 transition-colors hover:decoration-ink"
             >
               Create one

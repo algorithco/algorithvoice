@@ -53,11 +53,8 @@ export function SiteFooter() {
             </nav>
           ))}
         </div>
-        <div className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6">
-          <span className="t-body text-faint">© 2026 Algorith Voice</span>
-          <span className="font-mono text-xs leading-4 font-normal text-faint">
-            v1.0.0
-          </span>
+        <div className="mt-12 flex border-t border-line pt-6">
+          <span className="t-body text-faint">© 2026 Algorithco</span>
         </div>
       </div>
       {/* Oversized watermark signature: cropped at the bottom edge, subtle. */}
