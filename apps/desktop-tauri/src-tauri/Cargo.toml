@@ -55,7 +55,7 @@ libloading = "0.7"
 # default_manifest.json before trusting URLs/checksums; fails closed when a
 # signature is present and invalid. See manifest.rs.
 # NEEDS PRODUCT INPUT: signing key provisioning + release pipeline.
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 hex = "0.4"
 
 # keyring 3 intentionally has no platform backend enabled by default. Without
