@@ -347,23 +347,22 @@ test(
     );
     await shot("02-floating-pill");
 
-    // Drag the pill by its dedicated idle logo handle. Hold-to-talk is a
-    // separate target, so moving the window cannot start a recording. The
-    // pill is `focusable:false` so
+    // The full pill surface is the drag target. Recording starts only from
+    // the global hotkey, so moving the window cannot open the microphone.
+    // The pill is `focusable:false`, so
     // WebDriver pointer actions are best-effort: some drivers ignore
     // unfocused windows. We attempt a drag and soft-check the result — the
-    // hard guarantee is the dedicated handle + `allow-start-dragging`
-    // capability. Regression: no parent is a native drag region (which used
-    // to capture transparent corners and conflict with hold-to-talk).
-    const hasDragHandle = await driver.executeScript(
-      "return !!document.querySelector('[data-testid=\"pill-drag-handle\"]') && !!document.querySelector('[data-testid=\"pill-talk\"]') && !document.querySelector('[data-tauri-drag-region=\"true\"]');",
+    // hard guarantee is the surface handler + `allow-start-dragging`
+    // capability. There must be no pointer-based talk target left behind.
+    const hasFullSurfaceDrag = await driver.executeScript(
+      "return !!document.querySelector('[data-testid=\"floating-pill\"]') && !!document.querySelector('[data-testid=\"pill-idle\"]') && !document.querySelector('[data-testid=\"pill-talk\"]') && !document.querySelector('[data-testid=\"pill-drag-handle\"]') && !document.querySelector('[data-tauri-drag-region=\"true\"]');",
     );
     assert.ok(
-      hasDragHandle,
-      "pill drag handle missing or native drag-region conflict regressed",
+      hasFullSurfaceDrag,
+      "full-surface pill drag or keyboard-only recording regressed",
     );
     const root = await driver.executeScript(
-      "return document.querySelector('[data-testid=\"pill-drag-handle\"]');",
+      "return document.querySelector('[data-testid=\"floating-pill\"]');",
     );
     const DX = 24,
       DY = 16;

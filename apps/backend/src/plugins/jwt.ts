@@ -9,16 +9,30 @@ declare module "fastify" {
   }
 }
 
+export function getUserId(req: FastifyRequest): string {
+  const user = req.user as { sub?: unknown; typ?: unknown } | undefined;
+  if (
+    typeof user?.sub !== "string" ||
+    user.sub === "" ||
+    user.typ === "oauth_state"
+  ) {
+    throw Object.assign(new Error("unauthorized"), { statusCode: 401 });
+  }
+  return user.sub;
+}
+
 export default fp(async (app: FastifyInstance) => {
   app.decorate(
     "authenticate",
     async (req: FastifyRequest, reply: FastifyReply) => {
       try {
         await req.jwtVerify();
+        getUserId(req);
       } catch {
         // Must return the reply: otherwise Fastify continues into the
         // route handler with req.user unset (auth bypass + double-send).
-        return reply.code(401).send({ error: "unauthorized" });
+        reply.code(401).send({ error: "unauthorized" });
+        return;
       }
       // Enforce access-token revocation (POST /oauth2/revoke writes
       // oauth2:deny:{jti}). Previously written but never checked, so revoke
@@ -36,6 +50,14 @@ export default fp(async (app: FastifyInstance) => {
       } catch {
         // Redis down: allow the request (15m JWT bounds risk); /ready already
         // reports redis down for operators.
+      }
+      const sub = getUserId(req);
+      const account = await app.prisma.user.findUnique({
+        where: { id: sub },
+        select: { blockedAt: true },
+      });
+      if (!account || account.blockedAt) {
+        return reply.code(401).send({ error: "account_blocked" });
       }
     },
   );

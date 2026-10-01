@@ -88,7 +88,12 @@ fn detect_nvidia_gpu() -> Option<GpuInfo> {
     #[cfg(target_os = "windows")]
     const CANDIDATES: &[&str] = &["C:\\Windows\\System32\\nvml.dll"];
     #[cfg(target_os = "linux")]
-    const CANDIDATES: &[&str] = &["libnvidia-ml.so.1", "libnvidia-ml.so"];
+    const CANDIDATES: &[&str] = &[
+        "/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1",
+        "/usr/lib64/libnvidia-ml.so.1",
+        "/usr/lib/libnvidia-ml.so.1",
+        "/usr/lib/wsl/lib/libnvidia-ml.so.1",
+    ];
 
     // NVML C ABI, stable for over a decade. Signatures mirror nvml.h:
     // nvmlReturn_t f(void/args...), NVML_SUCCESS == 0.

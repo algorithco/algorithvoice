@@ -10,11 +10,12 @@ import {
 } from "@algorith-voice/shared-types";
 import type { FastifyInstance } from "fastify";
 import { getAppEnv } from "../../config/env.js";
+import { getUserId } from "../../plugins/jwt.js";
 import { QUEUES } from "../../queues/connection.js";
 import {
   billingIntervalForPrice,
+  configuredPriceForInterval,
   getStripe,
-  isAllowedPrice,
   isAllowedReturnUrl,
   resolvePlanTier,
 } from "./stripe.js";
@@ -74,6 +75,7 @@ export async function billingRoutes(app: FastifyInstance) {
         response: {
           200: checkoutResponseSchema,
           400: errorSchema,
+          409: errorSchema,
           404: errorSchema,
           502: errorSchema,
           503: errorSchema,
@@ -85,15 +87,24 @@ export async function billingRoutes(app: FastifyInstance) {
       const stripe = getStripe();
       if (!stripe)
         return reply.code(503).send({ error: "billing_unavailable" });
-      const { sub } = req.user as { sub: string };
-      const { priceId, successUrl, cancelUrl } = req.body as {
-        priceId: string;
+      const sub = getUserId(req);
+      const {
+        interval: intervalSlug,
+        successUrl,
+        cancelUrl,
+      } = req.body as {
+        interval: "monthly" | "yearly";
         successUrl: string;
         cancelUrl: string;
       };
 
-      if (!isAllowedPrice(priceId)) {
-        return reply.code(400).send({ error: "unknown_price" });
+      const priceId = configuredPriceForInterval(intervalSlug);
+      if (!priceId) {
+        req.log.error(
+          { interval: intervalSlug },
+          "Stripe price is not configured",
+        );
+        return reply.code(503).send({ error: "billing_unavailable" });
       }
       if (!isAllowedReturnUrl(successUrl) || !isAllowedReturnUrl(cancelUrl)) {
         return reply.code(400).send({ error: "bad_return_url" });
@@ -103,6 +114,19 @@ export async function billingRoutes(app: FastifyInstance) {
         where: { id: sub },
       });
       if (!user) return reply.code(404).send({ error: "user_not_found" });
+
+      // Never create parallel subscriptions. Existing active/past-due users
+      // must change or repair their plan through the Stripe portal.
+      const existingSubscription = await app.prisma.subscription.findFirst({
+        where: {
+          userId: sub,
+          status: { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
+        },
+        select: { stripeSubscriptionId: true, status: true },
+      });
+      if (existingSubscription) {
+        return reply.code(409).send({ error: "already_subscribed" });
+      }
 
       let customerId = user.stripeCustomerId;
       if (!customerId) {
@@ -138,6 +162,7 @@ export async function billingRoutes(app: FastifyInstance) {
         const session = await stripe.checkout.sessions.create(
           {
             customer: customerId,
+            client_reference_id: sub,
             mode: "subscription",
             line_items: [{ price: priceId, quantity: 1 }],
             success_url: successUrl,
@@ -151,8 +176,11 @@ export async function billingRoutes(app: FastifyInstance) {
             },
             allow_promotion_codes: true,
           },
-          // Per-request key: same-day replays must not return an expired URL.
-          { idempotencyKey: `checkout:${sub}:${priceId}:${randomUUID()}` },
+          // Collapse double-clicks/retries into one session while allowing a
+          // fresh URL after the 30-minute checkout window.
+          {
+            idempotencyKey: `checkout:${sub}:${priceId}:${Math.floor(Date.now() / 1_800_000)}`,
+          },
         );
         if (!session.url) {
           req.log.error({ userId: sub }, "stripe checkout session has no url");
@@ -198,7 +226,7 @@ export async function billingRoutes(app: FastifyInstance) {
       const stripe = getStripe();
       if (!stripe)
         return reply.code(503).send({ error: "billing_unavailable" });
-      const { sub } = req.user as { sub: string };
+      const sub = getUserId(req);
       const { returnUrl } = req.body as { returnUrl: string };
 
       if (!isAllowedReturnUrl(returnUrl)) {
@@ -244,6 +272,7 @@ export async function billingRoutes(app: FastifyInstance) {
   app.post(
     "/webhook",
     {
+      config: { rateLimit: false },
       // Capture the raw body for signature verification, then re-emit it
       // so the JSON parser still works downstream.
       preParsing: async (req, _reply, payload) => {
@@ -287,7 +316,10 @@ export async function billingRoutes(app: FastifyInstance) {
           webhookSecret,
         );
       } catch (err) {
-        req.log.warn({ err }, "stripe webhook signature invalid");
+        req.log.warn(
+          { err, event: "stripe_webhook_failure", reason: "invalid_signature" },
+          "stripe webhook signature invalid",
+        );
         return reply.code(400).send({ error: "invalid_signature" });
       }
 
@@ -305,10 +337,18 @@ export async function billingRoutes(app: FastifyInstance) {
           attempts: { increment: 1 },
         },
       });
+      // A terminally failed event may be delivered again after the worker has
+      // exhausted its attempts. Reuse the stable ID while the event is
+      // received/processing (so concurrent deliveries collapse), but give a
+      // failed redelivery a new ID so BullMQ does not deduplicate it against
+      // the old failed job.
+      const retrySuffix =
+        existing?.status === "failed" ? `-${(existing.attempts ?? 0) + 1}` : "";
       await QUEUES.stripeWebhook.add(
         "webhook",
         { eventId: event.id },
-        { jobId: `stripe:${event.id}` },
+        // BullMQ 5 rejects `:` in custom job ids.
+        { jobId: `stripe-${event.id}${retrySuffix}` },
       );
       return { received: true };
     },
@@ -321,7 +361,7 @@ export async function billingRoutes(app: FastifyInstance) {
       schema: { response: { 200: subscriptionSchema, 404: errorSchema } },
     },
     async (req, reply) => {
-      const { sub } = req.user as { sub: string };
+      const sub = getUserId(req);
       const user = await app.prisma.user.findUnique({
         where: { id: sub },
       });
@@ -338,14 +378,19 @@ export async function billingRoutes(app: FastifyInstance) {
       if (!sub2) {
         return {
           status: "free" as const,
-          planTier: user.planTier,
+          // Subscription rows are authoritative. The denormalized user tier can
+          // lag a webhook and must never resurrect a stale Pro entitlement.
+          planTier: "free" as const,
           priceId: null,
           billingInterval: null,
           currentPeriodEnd: null,
           cancelAtPeriodEnd: false,
         };
       }
-      const strictTier = resolvePlanTier(sub2.status);
+      const strictTier =
+        sub2.currentPeriodEnd > new Date()
+          ? resolvePlanTier(sub2.status)
+          : ("free" as const);
       return {
         status: STATUS_MAP[sub2.status] ?? "incomplete",
         planTier: strictTier,

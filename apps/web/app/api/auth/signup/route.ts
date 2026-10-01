@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { getApiUrl } from "@/lib/api-url";
 
-const API = process.env.API_URL ?? "https://api.trqsh.uz";
+const API = getApiUrl();
 const COOKIE_NAME = "__Host-av_at";
 const REFRESH_COOKIE_NAME = "__Host-av_rt";
 const COOKIE_MAX_AGE = 60 * 15;
@@ -17,22 +18,21 @@ export async function POST(req: Request) {
   const headers = new Headers({
     "content-type": res.headers.get("content-type") ?? "application/json",
   });
-  const setCookie = res.headers.get("set-cookie");
-  if (setCookie) headers.set("set-cookie", setCookie);
 
   if (res.ok) {
     try {
       const data = JSON.parse(text) as {
         accessToken?: string;
         refreshToken?: string;
+        user?: unknown;
       };
       const token = data.accessToken;
       if (token) {
         // __Host- requires Secure (see login route) — same fix applies here.
-        const response = new NextResponse(text, {
-          status: res.status,
-          headers,
-        });
+        const response = NextResponse.json(
+          { user: data.user },
+          { status: res.status },
+        );
         response.cookies.set(COOKIE_NAME, token, {
           httpOnly: true,
           secure: true,

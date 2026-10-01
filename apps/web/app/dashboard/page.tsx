@@ -117,7 +117,9 @@ export default async function DashboardPage() {
     : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
   const remaining = isUnlimited ? null : Math.max(0, limit - used);
   const renewIn = daysLeft(sub?.currentPeriodEnd ?? null);
-  const isPro = sub?.planTier === "pro" || session.user.planTier === "pro";
+  // Subscription API is authoritative. Never revive Pro from the denormalized
+  // session field when the live subscription is past-due or expired.
+  const isPro = sub?.planTier === "pro";
   const planLabel = isPro ? "Pro" : "Free";
   const isPastDue = sub?.status === "past_due";
   const intervalLabel =
@@ -193,7 +195,7 @@ export default async function DashboardPage() {
       email={session.user.email}
       name={session.user.name}
       planLabel={planLabel}
-      status={sub?.status ?? "active"}
+      status={sub?.status ?? "free"}
       isPro={isPro}
       dateLabel={dateLabel}
       logoutSlot={<LogoutHold />}
@@ -375,7 +377,7 @@ export default async function DashboardPage() {
               <span
                 className={`rounded-full px-2.5 py-1 font-mono text-[11px] font-medium ${isPro ? "bg-ink text-canvas" : "border border-line bg-canvas text-faint"}`}
               >
-                {sub?.status ?? "active"} · {planLabel}
+                {sub?.status ?? "free"} · {planLabel}
               </span>
             </div>
             <p className="mt-3 font-mono text-2xl font-semibold leading-none text-ink">
@@ -574,7 +576,7 @@ export default async function DashboardPage() {
               <span
                 className={`rounded-full px-2.5 py-1 font-mono text-[11px] font-medium ${isPro ? "bg-ink text-canvas" : "border border-line bg-canvas text-faint"}`}
               >
-                {sub?.status ?? "active"} · {planLabel}
+                {sub?.status ?? "free"} · {planLabel}
               </span>
             </div>
             {isPastDue ? (
@@ -598,7 +600,11 @@ export default async function DashboardPage() {
                 : "Free · 60 min cloud, 2 devices"}
             </p>
             <div className="mt-5 grid gap-2">
-              <BillingActions isPro={isPro} />
+              <BillingActions
+                isPro={isPro}
+                hasBillingAccount={Boolean(session.user.stripeCustomerId)}
+                isPastDue={isPastDue}
+              />
               <span className="text-center font-mono text-xs text-faint">
                 {renewIn !== null
                   ? `${renewIn} days left`

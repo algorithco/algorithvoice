@@ -1,5 +1,6 @@
+import { createHmac } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
-import { sha256Hex } from "./oauth2.store.js";
+import { getAppEnv } from "../../config/env.js";
 
 // Audit action names for the /oauth2/* namespace. Every step of the
 // authorization-code flow leaves a row; raw codes, verifiers and tokens
@@ -21,6 +22,14 @@ export const OAuth2Audit = {
 
 export type OAuth2AuditAction = (typeof OAuth2Audit)[keyof typeof OAuth2Audit];
 
+export function hashAuditValue(value: string, now = new Date()): string {
+  const env = getAppEnv();
+  const bucket = now.toISOString().slice(0, 7);
+  return createHmac("sha256", env.AUDIT_HASH_KEY ?? env.JWT_ACCESS_SECRET)
+    .update(`${bucket}\0${value}`)
+    .digest("hex");
+}
+
 interface AuditFields {
   action: OAuth2AuditAction;
   actorUserId?: string;
@@ -41,12 +50,12 @@ export async function writeOAuthAudit(
     await prisma.auditLog.create({
       data: {
         action: fields.action,
-        actorUserId: fields.actorUserId,
-        ipHash: fields.ip ? sha256Hex(fields.ip) : undefined,
-        userAgentHash: fields.userAgent
-          ? sha256Hex(fields.userAgent)
-          : undefined,
-        metadata: fields.metadata ?? undefined,
+        ...(fields.actorUserId ? { actorUserId: fields.actorUserId } : {}),
+        ...(fields.ip ? { ipHash: hashAuditValue(fields.ip) } : {}),
+        ...(fields.userAgent
+          ? { userAgentHash: hashAuditValue(fields.userAgent) }
+          : {}),
+        ...(fields.metadata ? { metadata: fields.metadata } : {}),
       },
     });
   } catch {

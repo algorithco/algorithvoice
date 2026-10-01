@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { getApiUrl } from "@/lib/api-url";
 
-const API = process.env.API_URL ?? "https://api.trqsh.uz";
+const API = getApiUrl();
 const COOKIE_NAME = "__Host-av_at";
 const REFRESH_COOKIE_NAME = "__Host-av_rt";
 

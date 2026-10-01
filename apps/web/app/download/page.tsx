@@ -6,7 +6,7 @@ import { SiteFooter } from "../../components/SiteFooter";
 import { SiteNav } from "../../components/SiteNav";
 import DownloadInteractive from "./DownloadInteractive";
 
-export const revalidate = 3600;
+export const revalidate = 21_600;
 
 type GithubAsset = {
   name: string;
@@ -60,7 +60,8 @@ async function getLatest(): Promise<GithubRelease | null> {
       `https://api.github.com/repos/${repo}/releases/latest`,
       {
         headers,
-        next: { revalidate: 3600 },
+        next: { revalidate: 21_600 },
+        signal: AbortSignal.timeout(10_000),
       },
     );
     if (!res.ok) return null;
@@ -304,6 +305,10 @@ export default async function DownloadPage() {
               </h3>
               <p className="mt-1 font-mono text-xs leading-4 text-faint">
                 Windows 10 1809+ · WebView2 auto-installed
+              </p>
+              <p className="mt-2 font-mono text-[11px] leading-4 text-faint">
+                Authenticode signing is pending; Windows SmartScreen may show a
+                warning during the transition.
               </p>
               {primaryWindows ? (
                 <>

@@ -19,6 +19,7 @@ import { FloatingPill } from "./components/FloatingPill.js";
 import { HistoryView } from "./components/HistoryView.js";
 import ParticleLogoLoader from "./components/ParticleLogoLoader.js";
 import { type Prefs, SettingsView } from "./components/SettingsView.js";
+import { SubscriptionRequiredView } from "./components/SubscriptionRequiredView.js";
 import { UpdateAnnouncement } from "./components/UpdateAnnouncement.js";
 import { useAuthGate } from "./hooks/useAuthGate.js";
 import { useOnboardingGate } from "./hooks/useOnboardingGate.js";
@@ -29,6 +30,7 @@ import { ensureFloatingPill } from "./lib/ptt.js";
 import { logout } from "./lib/session/auth.js";
 import { isTauri } from "./lib/session/env.js";
 import type { SessionInfo } from "./lib/session/types.js";
+import { useDesktopEntitlement } from "./lib/subscription.js";
 
 // Code-split heavy, rarely-needed bundles so the floating-pill and settings
 // windows don't pay for onboarding/model-management on first paint.
@@ -59,6 +61,11 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const { showAuth, loggedIn } = useAuthGate(session);
+  const {
+    entitlement,
+    refreshing,
+    refresh: refreshEntitlement,
+  } = useDesktopEntitlement(loggedIn || isPill);
   const showOnboarding = useOnboardingGate({ loggedIn, onboarded });
 
   // Auto-collapse while the desktop content pane is narrow. Below md the
@@ -175,22 +182,12 @@ export default function App() {
   if (isPill) {
     return (
       <ErrorBoundary>
-        <FloatingPill prefs={prefs} />
+        <FloatingPill prefs={prefs} entitlement={entitlement} />
       </ErrorBoundary>
     );
   }
 
   const updateBanner = !isSettings && !isPill ? <UpdateAnnouncement /> : null;
-
-  if (isSettings) {
-    return (
-      <ErrorBoundary>
-        <main className={shell}>
-          <SettingsView prefs={prefs} onPrefs={updatePrefs} />
-        </main>
-      </ErrorBoundary>
-    );
-  }
 
   if (!ready || !splashDone || session === null) {
     return (
@@ -261,6 +258,40 @@ export default function App() {
     );
   }
 
+  if (loggedIn && entitlement === null) {
+    return (
+      <ErrorBoundary>
+        <main className="grid min-h-screen place-items-center bg-white text-sm text-gray-500 dark:bg-black">
+          Verifying Pro subscription…
+        </main>
+      </ErrorBoundary>
+    );
+  }
+
+  if (loggedIn && entitlement && !entitlement.valid) {
+    return (
+      <ErrorBoundary>
+        <SubscriptionRequiredView
+          entitlement={entitlement}
+          email={session?.email}
+          refreshing={refreshing}
+          onRefresh={() => void refreshEntitlement()}
+          onLogout={handleLogout}
+        />
+      </ErrorBoundary>
+    );
+  }
+
+  if (isSettings) {
+    return (
+      <ErrorBoundary>
+        <main className={shell}>
+          <SettingsView prefs={prefs} onPrefs={updatePrefs} />
+        </main>
+      </ErrorBoundary>
+    );
+  }
+
   if (showOnboarding) {
     return (
       <ErrorBoundary>
@@ -296,6 +327,7 @@ export default function App() {
               collapsed={collapsed}
               onCollapsedChange={setCollapsed}
               email={session?.email ?? null}
+              planTier={entitlement?.planTier ?? null}
               onLogout={handleLogout}
             />
           </div>
@@ -322,6 +354,7 @@ export default function App() {
               collapsed={false}
               onCollapsedChange={() => {}}
               email={session?.email ?? null}
+              planTier={entitlement?.planTier ?? null}
               onLogout={handleLogout}
             />
           </div>
@@ -358,6 +391,7 @@ export default function App() {
                 mode={prefs.mode}
                 activeModelId={prefs.activeModelId}
                 email={session?.email ?? null}
+                entitlement={entitlement}
                 onNavigate={setView}
               />
             ) : null}

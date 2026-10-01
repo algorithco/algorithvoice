@@ -3,6 +3,7 @@ import {
   usageSummarySchema,
 } from "@algorith-voice/shared-types";
 import type { FastifyInstance } from "fastify";
+import { getUserId } from "../../plugins/jwt.js";
 import { getActiveSubscription } from "../billing/guard.js";
 
 export function monthWindowUTC(now = new Date()) {
@@ -23,7 +24,7 @@ export async function usageRoutes(app: FastifyInstance) {
       schema: { response: { 200: usageSummarySchema } },
     },
     async (req) => {
-      const { sub } = req.user as { sub: string };
+      const sub = getUserId(req);
       const { periodStart, periodEnd } = monthWindowUTC();
       const [agg, activeSub] = await Promise.all([
         app.prisma.usageRecord.aggregate({
@@ -54,7 +55,7 @@ export async function usageRoutes(app: FastifyInstance) {
 
   // Real daily breakdown for last N days (default 7) — no mocks
   app.get("/daily", { onRequest: [app.authenticate] }, async (req) => {
-    const { sub } = req.user as { sub: string };
+    const sub = getUserId(req);
     const q = req.query as { days?: string };
     const days = Math.min(
       30,
@@ -112,7 +113,7 @@ export async function usageRoutes(app: FastifyInstance) {
 
   // Real recent activity — last N usage records
   app.get("/recent", { onRequest: [app.authenticate] }, async (req) => {
-    const { sub } = req.user as { sub: string };
+    const sub = getUserId(req);
     const q = req.query as { limit?: string };
     const limit = Math.min(
       20,

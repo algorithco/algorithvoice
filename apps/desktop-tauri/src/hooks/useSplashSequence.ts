@@ -21,14 +21,19 @@ export function useSplashSequence(opts: {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [onboarded, setOnboarded] = useState(true);
   const [ready, setReady] = useState(false);
-  const [session, setSession] = useState<SessionInfo | null>(
-    isSecondary ? { loggedIn: false } : null,
-  );
+  const [session, setSession] = useState<SessionInfo | null>(null);
   const [splashDone, setSplashDone] = useState(isSecondary);
 
   useEffect(() => {
     let cancelled = false;
     if (isSecondary) {
+      void withTimeout(sessionStatus(), 3000, { loggedIn: false })
+        .then((nextSession) => {
+          if (!cancelled) setSession(nextSession);
+        })
+        .catch(() => {
+          if (!cancelled) setSession({ loggedIn: false });
+        });
       void withTimeout(
         Promise.all([loadPrefs(), loadOnboarded()]).then(([p, o]) => {
           if (cancelled) return;

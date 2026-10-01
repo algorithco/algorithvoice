@@ -290,8 +290,9 @@ export default function DocsPage() {
                     Cloud (Groq Whisper)
                   </p>
                   <p className="t-body mt-2 text-sub">
-                    whisper-large-v3-turbo via Groq, streamed only while you
-                    hold the hotkey. Groq key in OS keyring or BYOK.
+                    whisper-large-v3-turbo via Groq. The completed recording is
+                    uploaded after you release the hotkey. Groq key in the OS
+                    keyring (BYOK).
                   </p>
                   <p className="mt-3 font-mono text-xs text-faint">
                     prefs.mode = cloud
@@ -352,11 +353,10 @@ export default function DocsPage() {
               <h2 className="t-h2">Hotkey & floating pill</h2>
               <p className="t-body mt-3 text-sub">
                 Default Ctrl+Space (change in Onboarding or Settings). The pill
-                is a 160×40 (idle) / 260×40 (recording) frameless always-on-top
-                pill — drag the pill (or the logo while recording), hold to
-                talk; recording shows a live waveform with cancel / stop &amp;
-                send. Global hotkey (Rust dedupes OS repeat) drives the same
-                state machine.
+                is a 160×40 (idle) / 224×40 (recording) frameless always-on-top
+                status pill. Hold the hotkey to talk, and drag anywhere on the
+                pill to move it; recording shows a live waveform with cancel /
+                stop &amp; send. Rust dedupes global-hotkey OS repeat.
               </p>
               <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-sub">
                 <li>

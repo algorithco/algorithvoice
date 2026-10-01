@@ -1,11 +1,11 @@
-// @ts-nocheck — ZodTypeProvider inference for this additive module is
-// intentionally relaxed; runtime validation is via explicit zod parses
-// and manual RFC checks. Tightening the provider types is a follow-up.
 import formbody from "@fastify/formbody";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
+import { z } from "zod";
 import { getAppEnv } from "../../config/env.js";
+import { getUserId } from "../../plugins/jwt.js";
 import { redis } from "../../queues/connection.js";
+import { rotateRefreshSession } from "../auth/refresh-rotation.js";
 import { OAuth2Audit, writeOAuthAudit } from "./oauth2.audit.js";
 import {
   approveBodySchema,
@@ -22,8 +22,6 @@ import {
   CODE_TTL_SEC,
   codeKey,
   denyKey,
-  FAMILY_LOCK_SEC,
-  familyLockKey,
   hashRefreshToken,
   isRegisteredClient,
   isValidS256Challenge,
@@ -59,14 +57,12 @@ import {
 // envelope — documented, intentional, and confined to new routes.
 
 function tokenError(
-  reply: { code: (n: number) => { send: (b: unknown) => unknown } },
-  status: 400 | 401,
+  reply: FastifyReply,
+  status: 400 | 401 | 409,
   error: string,
   description: string,
 ) {
-  return (reply as { code: (n: number) => { send: (b: unknown) => unknown } })
-    .code(status)
-    .send({ error, error_description: description });
+  return reply.code(status).send({ error, error_description: description });
 }
 
 function authorizeRedirect(
@@ -110,17 +106,14 @@ export async function oauth2Routes(
     async (_req, reply) => {
       reply.header("Cache-Control", "public, max-age=300");
       const env = getAppEnv();
-      const apiUrl = (env.API_URL ?? `http://localhost:${env.PORT}`).replace(
-        /\/$/,
-        "",
-      );
+      const apiUrl = env.API_URL.replace(/\/$/, "");
       return {
         authorization_endpoint: `${apiUrl}/oauth2/authorize`,
         token_endpoint: `${apiUrl}/oauth2/token`,
         code_challenge_methods_supported: ["S256"] as const,
         redirect_uris_supported: [
-          CUSTOM_SCHEME_REDIRECT,
           LEGACY_CUSTOM_SCHEME_REDIRECT,
+          CUSTOM_SCHEME_REDIRECT,
         ],
       };
     },
@@ -255,7 +248,10 @@ export async function oauth2Routes(
       onRequest: [app.authenticate],
       schema: {
         body: approveBodySchema,
-        response: { 200: approveResponseSchema },
+        response: {
+          200: approveResponseSchema,
+          400: z.object({ error: z.string() }),
+        },
       },
       config: { rateLimit: { max: 30, timeWindow: "10 minutes" } },
     },
@@ -269,7 +265,7 @@ export async function oauth2Routes(
         approved: boolean;
         via?: "button" | "close";
       };
-      const { sub } = req.user as { sub: string };
+      const sub = getUserId(req);
       const ip = req.ip;
       const ua = req.headers["user-agent"];
 
@@ -407,7 +403,14 @@ export async function oauth2Routes(
   api.post(
     "/token",
     {
-      schema: { response: { 200: tokenResponseSchema } },
+      schema: {
+        response: {
+          200: tokenResponseSchema,
+          400: z.object({ error: z.string(), error_description: z.string() }),
+          401: z.object({ error: z.string(), error_description: z.string() }),
+          409: z.object({ error: z.string(), error_description: z.string() }),
+        },
+      },
       config: { rateLimit: { max: 20, timeWindow: "10 minutes" } },
     },
     async (req, reply) => {
@@ -519,7 +522,7 @@ async function mintAccessToken(
 
 async function exchangeCode(
   app: Parameters<typeof oauth2Routes>[0],
-  reply: Parameters<Parameters<FastifyInstance["post"]>[1]>[1],
+  reply: FastifyReply,
   body: Record<string, unknown>,
   ip: string | undefined,
   ua: string | undefined,
@@ -562,6 +565,12 @@ async function exchangeCode(
     return fail("pkce_mismatch");
   }
 
+  const tokenUser = await app.prisma.user.findUnique({
+    where: { id: stored.userId },
+    select: { blockedAt: true },
+  });
+  if (!tokenUser || tokenUser.blockedAt) return fail("account_blocked");
+
   const env = getAppEnv();
   const { token: accessToken, jti } = await mintAccessToken(
     app,
@@ -578,9 +587,10 @@ async function exchangeCode(
         refreshHash: hashRefreshToken(refreshToken, env.JWT_REFRESH_PEPPER),
         familyId: stored.familyId,
         deviceInfo: stored.deviceInfo,
-        ip,
+        ...(ip ? { ip } : {}),
         expiresAt: new Date(now.getTime() + REFRESH_SLIDING_SEC * 1000),
         absoluteLimitAt: new Date(now.getTime() + REFRESH_ABSOLUTE_SEC * 1000),
+        scopes: stored.scopes,
       },
     });
   }
@@ -602,7 +612,7 @@ async function exchangeCode(
 
 async function rotateRefresh(
   app: Parameters<typeof oauth2Routes>[0],
-  reply: Parameters<Parameters<FastifyInstance["post"]>[1]>[1],
+  reply: FastifyReply,
   body: Record<string, unknown>,
   ip: string | undefined,
   ua: string | undefined,
@@ -612,113 +622,46 @@ async function rotateRefresh(
     return tokenError(reply, 400, "invalid_grant", "Invalid grant.");
   }
   const env = getAppEnv();
-  const row = await app.prisma.session.findUnique({
-    where: { refreshHash: hashRefreshToken(presented, env.JWT_REFRESH_PEPPER) },
-  });
-  const now = new Date();
-  if (!row) {
-    return tokenError(reply, 400, "invalid_grant", "Invalid grant.");
-  }
-  // Expired or already-consumed token presented again: possible theft.
-  // Kill the whole family (RFC 9700 §4.14 reuse detection).
-  if (row.revokedAt !== null || row.expiresAt <= now) {
-    await app.prisma.session.updateMany({
-      where: { familyId: row.familyId, revokedAt: null },
-      data: { revokedAt: now },
-    });
-    await writeOAuthAudit(app.prisma, {
-      action: OAuth2Audit.REFRESH_REUSE,
-      actorUserId: row.userId,
-      ip,
-      userAgent: ua,
-      metadata: auditMeta({ family_id: row.familyId }),
-    });
-    return tokenError(reply, 400, "invalid_grant", "Invalid grant.");
-  }
-  if (row.absoluteLimitAt <= now) {
-    await app.prisma.session.updateMany({
-      where: { familyId: row.familyId, revokedAt: null },
-      data: { revokedAt: now },
-    });
-    return tokenError(reply, 400, "invalid_grant", "Invalid grant.");
-  }
-
-  // Family lock: concurrent double-spend of one refresh must serialize.
-  const locked = await redis.set(
-    familyLockKey(row.familyId),
-    "1",
-    "EX",
-    FAMILY_LOCK_SEC,
-    "NX",
+  const rotation = await rotateRefreshSession(
+    app.prisma,
+    presented,
+    env.JWT_REFRESH_PEPPER,
+    ip,
   );
-  if (locked !== "OK") {
-    return tokenError(
-      reply,
-      400,
-      "invalid_request",
-      "Concurrent request; retry.",
-    );
+  if (rotation.status === "retry") {
+    return tokenError(reply, 409, "invalid_request", "Retry refresh.");
   }
-  try {
-    // Re-read inside the lock: a racing request may have rotated first.
-    const fresh = await app.prisma.session.findUnique({
-      where: {
-        refreshHash: hashRefreshToken(presented, env.JWT_REFRESH_PEPPER),
-      },
-    });
-    if (!fresh || fresh.revokedAt !== null || fresh.expiresAt <= new Date()) {
-      await app.prisma.session.updateMany({
-        where: { familyId: row.familyId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
+  if (rotation.status === "invalid") {
+    if (rotation.reuse && rotation.userId) {
       await writeOAuthAudit(app.prisma, {
         action: OAuth2Audit.REFRESH_REUSE,
-        actorUserId: row.userId,
+        actorUserId: rotation.userId,
         ip,
         userAgent: ua,
-        metadata: auditMeta({ family_id: row.familyId }),
+        metadata: auditMeta({
+          ...(rotation.familyId ? { family_id: rotation.familyId } : {}),
+        }),
       });
-      return tokenError(reply, 400, "invalid_grant", "Invalid grant.");
     }
-    const next = newOpaqueToken();
-    const at = new Date();
-    await app.prisma.$transaction([
-      app.prisma.session.update({
-        where: { id: fresh.id },
-        data: { revokedAt: at },
-      }),
-      app.prisma.session.create({
-        data: {
-          userId: fresh.userId,
-          refreshHash: hashRefreshToken(next, env.JWT_REFRESH_PEPPER),
-          familyId: fresh.familyId,
-          deviceInfo: fresh.deviceInfo,
-          ip,
-          expiresAt: new Date(at.getTime() + REFRESH_SLIDING_SEC * 1000),
-          absoluteLimitAt: fresh.absoluteLimitAt,
-        },
-      }),
-    ]);
-    const { token: accessToken, jti } = await mintAccessToken(
-      app,
-      fresh.userId,
-      [],
-    );
-    await writeOAuthAudit(app.prisma, {
-      action: OAuth2Audit.TOKEN_REFRESHED,
-      actorUserId: fresh.userId,
-      ip,
-      userAgent: ua,
-      metadata: auditMeta({ family_id: fresh.familyId, jti }),
-    });
-    return {
-      access_token: accessToken,
-      token_type: "Bearer" as const,
-      expires_in: ACCESS_TTL_SEC,
-      refresh_token: next,
-      scope: "",
-    };
-  } finally {
-    await redis.del(familyLockKey(row.familyId));
+    return tokenError(reply, 400, "invalid_grant", "Invalid grant.");
   }
+  const { token: accessToken, jti } = await mintAccessToken(
+    app,
+    rotation.userId,
+    rotation.scopes,
+  );
+  await writeOAuthAudit(app.prisma, {
+    action: OAuth2Audit.TOKEN_REFRESHED,
+    actorUserId: rotation.userId,
+    ip,
+    userAgent: ua,
+    metadata: auditMeta({ family_id: rotation.familyId, jti }),
+  });
+  return {
+    access_token: accessToken,
+    token_type: "Bearer" as const,
+    expires_in: ACCESS_TTL_SEC,
+    refresh_token: rotation.refreshToken,
+    scope: scopeString(rotation.scopes),
+  };
 }

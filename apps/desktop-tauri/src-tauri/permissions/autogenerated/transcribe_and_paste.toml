@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-transcribe-and-paste"
+description = "Enables the transcribe_and_paste command without any pre-configured scope."
+commands.allow = ["transcribe_and_paste"]
+
+[[permission]]
+identifier = "deny-transcribe-and-paste"
+description = "Denies the transcribe_and_paste command without any pre-configured scope."
+commands.deny = ["transcribe_and_paste"]

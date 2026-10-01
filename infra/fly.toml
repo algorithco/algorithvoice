@@ -39,6 +39,12 @@ primary_region = "fra"
 [env]
   PORT = "3001"
   NODE_ENV = "production"
+  APP_URL = "https://app.trqsh.uz"
+  API_URL = "https://api.trqsh.uz"
+  # API and worker run on separate Machines, so async audio must use R2.
+  STT_STORAGE_BACKEND = "r2"
+  # Fly adds one trusted proxy hop before the app.
+  TRUST_PROXY_HOPS = "1"
 
 [processes]
   app = "node apps/backend/dist/server.js"
@@ -46,5 +52,6 @@ primary_region = "fra"
 
 # Required secrets (fly secrets set ...):
 #   DATABASE_URL, REDIS_URL, JWT_ACCESS_SECRET, JWT_REFRESH_PEPPER,
-#   ENCRYPTION_KEK, OPENROUTER_API_KEY, STRIPE_SECRET_KEY,
-#   STRIPE_WEBHOOK_SECRET
+#   AUDIT_HASH_KEY, OPENROUTER_API_KEY, STRIPE_SECRET_KEY,
+#   STRIPE_WEBHOOK_SECRET, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID,
+#   R2_SECRET_ACCESS_KEY

@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["strictUndefinedChecks"]
 }
 
 datasource db {
@@ -52,6 +53,8 @@ enum UserRole {
 model User {
   id               String         @id @default(cuid())
   email            String         @unique
+  emailVerifiedAt  DateTime?
+  blockedAt        DateTime?
   passwordHash     String?
   name             String?
   stripeCustomerId String?        @unique
@@ -96,6 +99,7 @@ model Session {
   expiresAt       DateTime
   absoluteLimitAt DateTime
   revokedAt       DateTime?
+  scopes          String[]  @default([])
   createdAt       DateTime  @default(now())
 
   @@index([userId, familyId])
@@ -130,16 +134,20 @@ model Subscription {
   currentPeriodStart   DateTime
   currentPeriodEnd     DateTime
   cancelAtPeriodEnd    Boolean          @default(false)
+  lastSyncAttemptAt    DateTime?
+  syncFailureCount     Int              @default(0)
   usageRecords         UsageRecord[]
   createdAt            DateTime   @default(now())
   updatedAt            DateTime   @updatedAt
 
   @@index([userId, status])
   @@index([status, currentPeriodEnd])
+  @@index([status, lastSyncAttemptAt])
 }
 
 model UsageRecord {
   id             String       @id @default(cuid())
+  idempotencyKey String?      @unique
   userId         String
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   subscriptionId String?

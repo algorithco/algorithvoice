@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const checkoutRequestSchema = z
   .object({
-    priceId: z.string().min(1),
+    interval: z.enum(["monthly", "yearly"]),
     successUrl: z.string().url(),
     cancelUrl: z.string().url(),
   })

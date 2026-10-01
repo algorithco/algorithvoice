@@ -17,15 +17,20 @@ describe("isAllowedOpenUrl", () => {
     expect(isAllowedOpenUrl("https://github.com.evil.com/")).toBe(false);
     expect(isAllowedOpenUrl("https://github.com/a/b")).toBe(false);
     expect(isAllowedOpenUrl("https://huggingface.co/models")).toBe(false);
+    expect(isAllowedOpenUrl("https://algorithvoice.com/")).toBe(false);
+    expect(isAllowedOpenUrl("https://www.algorithvoice.com/docs")).toBe(false);
     expect(isAllowedOpenUrl("not a url")).toBe(false);
     expect(isAllowedOpenUrl("javascript:alert(1)")).toBe(false);
     expect(isAllowedOpenUrl("data:text/plain,hi")).toBe(false);
   });
 
-  it("blocks loopback outside DEV (vitest runs with DEV=true, so assert shape only)", () => {
-    // import.meta.env.DEV is true under vitest; loopback is allowed there by
-    // design (local API). The important invariant is non-DEV parity, which is
-    // covered by the https-only branch above.
-    expect(typeof isAllowedOpenUrl("http://localhost:3001/")).toBe("boolean");
+  it("blocks loopback hosts in desktop builds", () => {
+    expect(isAllowedOpenUrl("http://localhost:3001/oauth2/authorize")).toBe(
+      false,
+    );
+    expect(isAllowedOpenUrl("http://127.0.0.1:3000/login")).toBe(false);
+    expect(isAllowedOpenUrl("https://localhost:3001/oauth2/authorize")).toBe(
+      false,
+    );
   });
 });

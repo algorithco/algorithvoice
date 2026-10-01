@@ -36,8 +36,13 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("FloatingPill drag handle", () => {
-  it("starts a native window drag without using the talk target", async () => {
+describe("FloatingPill pointer interaction", () => {
+  it("uses the entire idle pill for dragging and exposes no pointer recording target", async () => {
+    const getUserMedia = vi.fn();
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -52,19 +57,29 @@ describe("FloatingPill drag handle", () => {
             language: "auto",
             activeModelId: null,
           }}
+          entitlement={{
+            valid: true,
+            status: "active",
+            planTier: "pro",
+            currentPeriodEnd: "2026-10-28T00:00:00.000Z",
+            reason: null,
+          }}
         />,
       );
     });
 
-    const handle = container.querySelector<HTMLElement>(
-      '[data-testid="pill-drag-handle"]',
+    const pill = container.querySelector<HTMLElement>(
+      '[data-testid="floating-pill"]',
     );
-    const talk = container.querySelector<HTMLElement>(
-      '[data-testid="pill-talk"]',
+    const idleBody = container.querySelector<HTMLElement>(
+      '[data-testid="pill-idle"]',
     );
-    expect(handle).not.toBeNull();
-    expect(talk).not.toBeNull();
-    expect(handle).not.toBe(talk);
+    expect(pill).not.toBeNull();
+    expect(idleBody).not.toBeNull();
+    expect(container.querySelector('[data-testid="pill-talk"]')).toBeNull();
+    expect(
+      container.querySelector('[data-testid="pill-drag-handle"]'),
+    ).toBeNull();
 
     const pointerDown = new MouseEvent("pointerdown", {
       bubbles: true,
@@ -75,11 +90,79 @@ describe("FloatingPill drag handle", () => {
       pointerType: { value: "mouse" },
     });
     await act(async () => {
-      handle?.dispatchEvent(pointerDown);
+      idleBody?.dispatchEvent(pointerDown);
       await Promise.resolve();
     });
 
     expect(windowMocks.startDragging).toHaveBeenCalledOnce();
+    expect(getUserMedia).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it("does not show Pro required while entitlement is still loading", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <FloatingPill
+          prefs={{
+            hotkey: "Ctrl+Space",
+            mode: "cloud",
+            theme: "dark",
+            language: "auto",
+            activeModelId: null,
+          }}
+          entitlement={null}
+        />,
+      );
+    });
+
+    const pill = container.querySelector<HTMLElement>(
+      '[data-testid="floating-pill"]',
+    );
+    expect(pill?.dataset.access).toBe("checking");
+    expect(pill?.textContent).toContain("Checking Pro");
+    expect(pill?.textContent).not.toContain("Pro required");
+
+    await act(async () => root.unmount());
+  });
+
+  it("renders a compact, explicit Pro-required state after verification", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <FloatingPill
+          prefs={{
+            hotkey: "Ctrl+Space",
+            mode: "cloud",
+            theme: "dark",
+            language: "auto",
+            activeModelId: null,
+          }}
+          entitlement={{
+            valid: false,
+            status: "canceled",
+            planTier: "free",
+            currentPeriodEnd: null,
+            reason: "An active Pro subscription is required.",
+          }}
+        />,
+      );
+    });
+
+    const pill = container.querySelector<HTMLElement>(
+      '[data-testid="floating-pill"]',
+    );
+    expect(pill?.dataset.access).toBe("required");
+    expect(pill?.textContent).toContain("Pro required");
+    expect(pill?.className).toContain("border-amber-300");
+    expect(pill?.title).toContain("open the desktop app");
+
     await act(async () => root.unmount());
   });
 });

@@ -5,7 +5,7 @@ import "@fontsource/jetbrains-mono/500.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://algorithvoice.com"),
+  metadataBase: new URL("https://app.trqsh.uz"),
   title: {
     default: "Algorith Voice — talk faster, type never",
     template: "%s | Algorith Voice",

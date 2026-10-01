@@ -20,6 +20,7 @@ use crate::error::{AppError, AppResult};
 use crate::local_asr::worker::TranscriptionWorker;
 use crate::state::Db;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State, WebviewUrl};
 
@@ -379,8 +380,10 @@ pub async fn transcribe_audio(
     model_id: Option<String>,
     #[allow(non_snake_case)] modelId: Option<String>,
     app: AppHandle,
+    app_state: State<'_, crate::state::AppState>,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
+    crate::require_pro_entitlement(&app, &app_state).await?;
     // Accept both snake_case and camelCase (frontend sends both for back-compat)
     let audio_base64 = audio_base64
         .or(audioBase64)
@@ -438,7 +441,7 @@ pub async fn transcribe_audio(
 /// (Ctrl+V on Windows).
 ///
 /// When `restore_clipboard` is true (default), the previous clipboard
-/// text — if any — is restored ~350 ms after pasting so the user's
+/// text or image — if any — is restored ~350 ms after pasting so the user's
 /// earlier copy is not lost. The delay is generous on purpose: target
 /// apps consume the paste asynchronously on their own message pump, and
 /// restoring too early pastes stale text (notably in Office/Electron
@@ -450,16 +453,23 @@ pub async fn paste_text(
     text: String,
     restore_clipboard: Option<bool>,
     #[allow(non_snake_case)] restoreClipboard: Option<bool>,
+    paste_mode: Option<String>,
+    #[allow(non_snake_case)] pasteMode: Option<String>,
 ) -> AppResult<()> {
     let restore_clipboard = restore_clipboard.or(restoreClipboard);
+    let paste_mode = paste_mode.or(pasteMode);
     // Off the async executor like the combo path: ~470ms of sleeps must
     // never saturate Tauri's sync worker pool (see transcribe_and_paste).
-    tokio::task::spawn_blocking(move || paste_text_blocking(text, restore_clipboard))
+    tokio::task::spawn_blocking(move || paste_text_blocking(text, restore_clipboard, paste_mode))
         .await
         .map_err(|e| AppError::new("paste", format!("paste worker: {e}")))?
 }
 
-fn paste_text_blocking(text: String, restore_clipboard: Option<bool>) -> AppResult<()> {
+fn paste_text_blocking(
+    text: String,
+    restore_clipboard: Option<bool>,
+    paste_mode: Option<String>,
+) -> AppResult<()> {
     let text = text.trim().to_owned();
     if text.is_empty() {
         return Err(AppError::new("paste", "nothing to paste"));
@@ -471,18 +481,29 @@ fn paste_text_blocking(text: String, restore_clipboard: Option<bool>) -> AppResu
 
     let mut clipboard =
         arboard::Clipboard::new().map_err(|e| AppError::new("paste", format!("clipboard: {e}")))?;
-    let previous = clipboard.get_text().ok();
+    let previous_text = clipboard.get_text().ok();
+    let previous_image = if previous_text.is_none() {
+        clipboard.get_image().ok().map(|image| arboard::ImageData {
+            width: image.width,
+            height: image.height,
+            bytes: Cow::Owned(image.bytes.into_owned()),
+        })
+    } else {
+        None
+    };
     clipboard
         .set_text(text.clone())
         .map_err(|e| AppError::new("paste", format!("clipboard write: {e}")))?;
     std::thread::sleep(std::time::Duration::from_millis(120));
 
-    let keystroke = paste_keystroke();
+    let keystroke = paste_keystroke(&text, paste_mode.as_deref());
     std::thread::sleep(std::time::Duration::from_millis(350));
 
     if restore && keystroke.is_ok() {
-        if let Some(old) = previous {
+        if let Some(old) = previous_text {
             let _ = clipboard.set_text(old);
+        } else if let Some(old) = previous_image {
+            let _ = clipboard.set_image(old);
         }
     }
     // On failure keep transcript on clipboard — frontend will also
@@ -491,18 +512,33 @@ fn paste_text_blocking(text: String, restore_clipboard: Option<bool>) -> AppResu
     Ok(())
 }
 
-fn paste_keystroke() -> AppResult<()> {
+fn paste_keystroke(text: &str, mode: Option<&str>) -> AppResult<()> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| AppError::new("paste", format!("enigo: {e}")))?;
-    // Windows-only: Ctrl+V. (macOS Cmd+V lives in the Swift app.)
+    if mode == Some("type") {
+        return enigo
+            .text(text)
+            .map_err(|e| AppError::new("paste", format!("type text: {e}")));
+    }
     let modifier = Key::Control;
     enigo
         .key(modifier, Direction::Press)
         .map_err(|e| AppError::new("paste", format!("paste key press: {e}")))?;
-    enigo
-        .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| AppError::new("paste", format!("paste key click: {e}")))?;
+    let shift = mode == Some("ctrl_shift_v")
+        || ((mode.is_none() || mode == Some("auto"))
+            && cfg!(target_os = "linux")
+            && std::env::var("TERM").is_ok_and(|term| term != "dumb"));
+    if shift {
+        enigo
+            .key(Key::Shift, Direction::Press)
+            .map_err(|e| AppError::new("paste", format!("shift press: {e}")))?;
+    }
+    let click = enigo.key(Key::Unicode('v'), Direction::Click);
+    if shift {
+        let _ = enigo.key(Key::Shift, Direction::Release);
+    }
+    click.map_err(|e| AppError::new("paste", format!("paste key click: {e}")))?;
     enigo
         .key(modifier, Direction::Release)
         .map_err(|e| AppError::new("paste", format!("paste key release: {e}")))?;
@@ -528,10 +564,13 @@ pub async fn transcribe_and_paste(
     #[allow(non_snake_case)] mimeType: Option<String>,
     restore_clipboard: Option<bool>,
     #[allow(non_snake_case)] restoreClipboard: Option<bool>,
+    paste_mode: Option<String>,
+    #[allow(non_snake_case)] pasteMode: Option<String>,
     mode: Option<String>,
     model_id: Option<String>,
     #[allow(non_snake_case)] modelId: Option<String>,
     app: AppHandle,
+    app_state: State<'_, crate::state::AppState>,
     worker: State<'_, Arc<TranscriptionWorker>>,
 ) -> AppResult<TranscribeResult> {
     let audio_base64 = audio_base64
@@ -540,6 +579,7 @@ pub async fn transcribe_and_paste(
     let api_key = api_key.or(apiKey);
     let mime_type = mime_type.or(mimeType);
     let restore_clipboard = restore_clipboard.or(restoreClipboard);
+    let paste_mode = paste_mode.or(pasteMode);
     let model_id = model_id.or(modelId);
     let result = transcribe_audio(
         Some(audio_base64),
@@ -553,14 +593,16 @@ pub async fn transcribe_and_paste(
         model_id,
         None,
         app,
+        app_state,
         worker,
     )
     .await?;
     let text = result.text.clone();
-    let paste_outcome =
-        tokio::task::spawn_blocking(move || paste_text_blocking(text, restore_clipboard))
-            .await
-            .map_err(|e| AppError::new("paste", format!("paste worker: {e}")))?;
+    let paste_outcome = tokio::task::spawn_blocking(move || {
+        paste_text_blocking(text, restore_clipboard, paste_mode)
+    })
+    .await
+    .map_err(|e| AppError::new("paste", format!("paste worker: {e}")))?;
     match paste_outcome {
         Ok(()) => Ok(TranscribeResult {
             text: result.text,

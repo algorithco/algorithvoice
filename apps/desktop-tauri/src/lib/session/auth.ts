@@ -1,12 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { API_URL as API } from "../endpoints.js";
 import { isTauri } from "./env.js";
 import type { AuthResponse, SessionInfo } from "./types.js";
 import { safeOpenUrl } from "./url-safety.js";
-
-const API: string =
-  (import.meta.env.VITE_API_URL as string | undefined) ??
-  (import.meta.env.DEV ? "http://localhost:3001" : "https://api.trqsh.uz");
 
 async function tauri<T>(
   cmd: string,
@@ -113,19 +110,18 @@ export async function logout(): Promise<void> {
     localStorage.removeItem("algorith-voice-history");
     localStorage.removeItem("algorith-voice-last-transcript");
   } catch {}
-  try {
-    await fetchWithTimeout(`${API}/auth/logout`, { method: "POST" }, 5000);
-  } catch {
-    // Backend logout is best-effort in Phase 1; keyring clear is authoritative.
-  }
   if (!isTauri()) return;
-  await tauri("clear_session");
+  // Rust reads and revokes the keyring tokens, then clears them even offline.
+  await tauri("revoke_and_clear_session", { apiBase: API });
 }
 
 // ---- First-party desktop OAuth (authorization_code + PKCE S256) ----
 
-const PREFERRED_REDIRECT_URI = "com.algorithvoice.app://oauth-callback";
-const LEGACY_REDIRECT_URI = "algorithvoice://auth-callback";
+// `algorithvoice` is the protocol registered by released Windows installers.
+// Keep accepting the reverse-domain alias, but do not select it until every
+// supported installer registers it reliably.
+const PREFERRED_REDIRECT_URI = "algorithvoice://auth-callback";
+const ALTERNATE_REDIRECT_URI = "com.algorithvoice.app://oauth-callback";
 const DESKTOP_CLIENT_ID = "desktop-app";
 // Matches backend REQUEST_TTL_SEC (300s): the pending browser request never
 // outlives the desktop listener, and Cancel/close deletes it immediately via
@@ -162,7 +158,7 @@ async function resolveDesktopRedirectUri(
       3000,
       signal,
     );
-    if (!response.ok) return LEGACY_REDIRECT_URI;
+    if (!response.ok) return PREFERRED_REDIRECT_URI;
     const metadata = (await response.json()) as {
       code_challenge_methods_supported?: unknown;
       redirect_uris_supported?: unknown;
@@ -182,7 +178,7 @@ async function resolveDesktopRedirectUri(
       throw new DOMException("Sign-in cancelled", "AbortError");
     }
   }
-  return LEGACY_REDIRECT_URI;
+  return PREFERRED_REDIRECT_URI;
 }
 
 export function parseOAuthCodeCallback(raw: string): {
@@ -197,13 +193,13 @@ export function parseOAuthCodeCallback(raw: string): {
   } catch {
     return null;
   }
-  const isPreferred =
+  const isAlternate =
     url.protocol === "com.algorithvoice.app:" &&
     (url.host || "").toLowerCase() === "oauth-callback";
-  const isLegacy =
+  const isPreferred =
     url.protocol === "algorithvoice:" &&
     (url.host || "").toLowerCase() === "auth-callback";
-  if (!isPreferred && !isLegacy) return null;
+  if (!isAlternate && !isPreferred) return null;
   if (url.username || url.password) return null;
   if (url.port || (url.pathname !== "" && url.pathname !== "/")) return null;
   // Authorization-code responses use the query component. Reject fragments
@@ -223,14 +219,16 @@ export function parseOAuthCodeCallback(raw: string): {
     return {
       error,
       state,
-      redirectUri: isPreferred ? PREFERRED_REDIRECT_URI : LEGACY_REDIRECT_URI,
+      redirectUri: isAlternate
+        ? ALTERNATE_REDIRECT_URI
+        : PREFERRED_REDIRECT_URI,
     };
   }
   if (!code || !CALLBACK_CODE_RE.test(code)) return null;
   return {
     code,
     state,
-    redirectUri: isPreferred ? PREFERRED_REDIRECT_URI : LEGACY_REDIRECT_URI,
+    redirectUri: isAlternate ? ALTERNATE_REDIRECT_URI : PREFERRED_REDIRECT_URI,
   };
 }
 
@@ -247,16 +245,24 @@ async function exchangeOAuthCode(
     redirect_uri: redirectUri,
     code_verifier: codeVerifier,
   });
-  const res = await fetchWithTimeout(
-    `${API}/oauth2/token`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-    },
-    15000,
-    signal,
-  );
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      `${API}/oauth2/token`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      },
+      15000,
+      signal,
+    );
+  } catch (error) {
+    if (signal.aborted) throw error;
+    throw new Error(
+      "Could not complete sign-in with api.trqsh.uz. Check your connection and try again.",
+    );
+  }
   const data = (await res.json().catch(() => ({}))) as {
     access_token?: string;
     refresh_token?: string;
@@ -348,7 +354,7 @@ export async function cancelDesktopAuthorize(state: string): Promise<void> {
 /**
  * First-party desktop sign-in. Generates a PKCE pair, opens the system
  * browser to the web consent page, and completes when the backend redirects
- * to `com.algorithvoice.app://oauth-callback?code=&state=`.
+ * to `algorithvoice://auth-callback?code=&state=`.
  *
  * Pass an AbortSignal to allow Cancel: abort rejects the pending promise
  * and releases the deep-link listener + timeout immediately instead of
@@ -387,6 +393,12 @@ export async function signInDesktop(options?: {
   const exchangeController = new AbortController();
   let finished = false;
   let exchangeStarted = false;
+  // Once the keyring write begins, the authorization is committed. The Rust
+  // command emits `session-changed` before its invoke promise resolves; that
+  // event removes AuthView, whose cleanup aborts this controller. Treating
+  // that lifecycle abort as a user cancellation used to delete the session
+  // immediately after a successful approval.
+  let commitStarted = false;
   const unlisten = await listen<string[]>("auth-callback", (event) => {
     if (finished || exchangeStarted) return;
     const urls = event.payload ?? [];
@@ -421,15 +433,12 @@ export async function signInDesktop(options?: {
           if (signal?.aborted || exchangeController.signal.aborted) {
             throw new DOMException("Sign-in cancelled", "AbortError");
           }
+          commitStarted = true;
           await tauri("store_session", {
             accessToken,
             email,
             refreshToken: refreshToken ?? null,
           });
-          if (signal?.aborted || exchangeController.signal.aborted) {
-            await tauri("clear_session").catch(() => {});
-            throw new DOMException("Sign-in cancelled", "AbortError");
-          }
           finished = true;
           resolveSession({ loggedIn: true, email });
         })
@@ -457,7 +466,9 @@ export async function signInDesktop(options?: {
     );
   }, DESKTOP_AUTH_TIMEOUT_MS);
   const onAbort = () => {
-    if (finished) return;
+    // Do not roll back a successfully authorized session just because the
+    // login view unmounted in response to Rust's `session-changed` event.
+    if (finished || commitStarted) return;
     finished = true;
     exchangeController.abort(signal?.reason);
     void cancelDesktopAuthorize(state);

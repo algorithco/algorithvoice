@@ -3,7 +3,15 @@
 import Link from "next/link";
 import { useState } from "react";
 
-export function BillingActions({ isPro }: { isPro: boolean }) {
+export function BillingActions({
+  isPro,
+  hasBillingAccount,
+  isPastDue,
+}: {
+  isPro: boolean;
+  hasBillingAccount: boolean;
+  isPastDue: boolean;
+}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +42,7 @@ export function BillingActions({ isPro }: { isPro: boolean }) {
     }
   }
 
-  if (!isPro) {
+  if (!isPro && !hasBillingAccount) {
     return (
       <Link
         href="/pricing#upgrade"
@@ -53,7 +61,11 @@ export function BillingActions({ isPro }: { isPro: boolean }) {
         disabled={loading}
         className="inline-flex min-h-[40px] items-center justify-center rounded-full bg-ink px-4 text-sm font-semibold text-canvas hover:bg-white disabled:opacity-50"
       >
-        {loading ? "Opening Stripe…" : "Manage billing"}
+        {loading
+          ? "Opening Stripe…"
+          : isPastDue
+            ? "Update payment"
+            : "Manage billing"}
       </button>
       {error ? (
         <p className="text-center font-mono text-xs text-red-400" role="alert">

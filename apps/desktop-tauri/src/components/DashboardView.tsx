@@ -5,6 +5,7 @@ import {
   listHistory,
 } from "../lib/history.js";
 import { ensureFloatingPill } from "../lib/ptt.js";
+import type { DesktopEntitlement } from "../lib/subscription.js";
 import { CirclePlus } from "./animate-ui/icons/circle-plus.js";
 import { ClipboardList } from "./animate-ui/icons/clipboard-list.js";
 
@@ -13,6 +14,7 @@ type Props = {
   mode?: "local" | "cloud" | "byok";
   activeModelId?: string | null;
   email?: string | null;
+  entitlement?: DesktopEntitlement | null;
   onNavigate: (view: "dashboard" | "dictate" | "history" | "settings") => void;
 };
 
@@ -58,6 +60,7 @@ export function DashboardView({
   mode,
   activeModelId,
   email,
+  entitlement,
   onNavigate,
 }: Props) {
   const isLocal = mode === "local";
@@ -130,6 +133,12 @@ export function DashboardView({
           </span>
           <span>
             {mode === "local" ? "Local" : mode === "byok" ? "BYOK" : "Cloud"}
+          </span>
+          <span className="hidden text-gray-300 dark:text-white/20 sm:inline">
+            •
+          </span>
+          <span className="font-semibold capitalize">
+            Pro · {entitlement?.status ?? "active"}
           </span>
         </div>
       </div>
@@ -283,7 +292,7 @@ export function DashboardView({
                   Hold {hotkey}
                 </p>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Press and hold anywhere to start listening
+                  Works from any app; the pill is for status and movement
                 </p>
               </div>
             </li>
