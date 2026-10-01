@@ -3,7 +3,7 @@
 Best-choice answers to the 7 open questions from the full-stack plan:
 
 1. **Next.js: 16.3 LTS + React 19.2 + Tailwind v4** (NOT 14 — EOL Oct 2026). `next-themes` dark-default, BFF proxy, Vercel root `apps/web`.
-2. **Infra: Fly.io primary for API+WS+worker** (single region `fra` EU, min-1-warm, Upstash Fixed 1GB or self-host Redis). **Vercel for web.** `docker-compose` local mirrors prod. (v1.0 mentioned a `railway.toml` fallback — no such file exists in the repo; removed.)
+2. **Infra: Docker Compose is authoritative for production and local development.** The production stack runs Postgres, Redis, migrations, API, worker, and web containers behind Cloudflare Tunnel. There is no provider-specific deploy workflow; deploy with `docker compose --env-file .env -f infra/docker-compose.yml up -d --build` on the Docker host.
 3. **Local models: 6-model `sherpa-onnx` int8 catalog, `parakeet-tdt-0.6b-v3` default.** Desktop cloud currently means BYO Groq; the backend exposes a separate OpenRouter STT path. Whether the desktop should migrate to the metered backend remains an open product decision.
 4. **Free tier: 60 min/mo on the metered backend path, unlimited local, 2 devices.** Pro has 10 devices. `past_due` is not entitled; missed webhooks are reconciled hourly. Direct BYO Groq traffic is not backend-metered.
 5. **Licensing decision open.** Device limits are enforced online (2 free / 10 pro), but signed offline license JWTs are not implemented. Tauri targets NSIS/deb/AppImage; macOS is a separate native Swift app.
