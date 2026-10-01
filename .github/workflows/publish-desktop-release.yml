@@ -43,6 +43,51 @@ jobs:
             echo "Built from the private development repo. Report issues via the website."
           } >> NOTES-public.md
 
+      - name: Point updater manifest at public downloads
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import quote
+
+          assets = Path("dist-assets")
+          manifest_path = assets / "latest.json"
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          tag = os.environ["RELEASE_TAG"]
+          base = f"https://github.com/algorithco/algorithvoice-app/releases/download/{quote(tag, safe='')}"
+
+          appimage = next(assets.glob("*.AppImage"))
+          deb = next(assets.glob("*.deb"))
+          windows = next(assets.glob("*-setup.exe"))
+          public_urls = {
+              "linux-x86_64": f"{base}/{quote(appimage.name)}",
+              "linux-x86_64-appimage": f"{base}/{quote(appimage.name)}",
+              "linux-x86_64-deb": f"{base}/{quote(deb.name)}",
+              "windows-x86_64": f"{base}/{quote(windows.name)}",
+              "windows-x86_64-nsis": f"{base}/{quote(windows.name)}",
+          }
+
+          for platform, url in public_urls.items():
+              if platform in manifest["platforms"]:
+                  manifest["platforms"][platform]["url"] = url
+
+          manifest_path.write_text(
+              json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+              encoding="utf-8",
+          )
+
+          private_urls = [
+              item["url"]
+              for item in manifest["platforms"].values()
+              if "algorithco/algorithvoice/releases/assets" in item["url"]
+          ]
+          if private_urls:
+              raise SystemExit("latest.json still contains private release URLs")
+          PY
+
       - name: Create or update public release
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_REPO_PAT }}
