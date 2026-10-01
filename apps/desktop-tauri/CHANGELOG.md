@@ -1,5 +1,11 @@
 # CHANGELOG — apps/desktop (@algorith-voice/desktop)
 
+## 0.5.21 — Subscription verification reliability
+- Keep a freshly stored desktop session in process memory so Windows Credential Manager read-after-write lag cannot make an authenticated account appear signed out during the Pro check.
+- Reuse the same cached session for subscription verification and session status, restore it from persistent storage after restart, and clear it on logout.
+- Distinguish an unavailable verification from a confirmed Free plan in the subscription gate; retry is primary while upgrade actions appear only after a verified non-Pro response.
+- Add native session-cache regression tests and renderer coverage for unavailable-versus-Free presentation.
+
 ## Priority 1 — Testing & CI Integrity
 - `package.json`: `test` is now `vitest run` (removed `--passWithNoTests`). 12 files / 49 tests pass.
 - New frontend unit tests:

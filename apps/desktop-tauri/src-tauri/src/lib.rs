@@ -70,26 +70,44 @@ fn validate_api_base(raw: Option<String>) -> AppResult<String> {
     Ok(raw.trim_end_matches('/').to_string())
 }
 
-fn read_session_payload(app: &tauri::AppHandle) -> Option<serde_json::Value> {
-    if let Some(payload) = app
-        .try_state::<AppState>()
-        .and_then(|state| state.session_payload.lock().ok()?.clone())
-    {
-        return Some(payload);
+fn cached_session_payload(state: &AppState) -> Option<serde_json::Value> {
+    state.session_payload.lock().ok()?.clone()
+}
+
+fn cache_session_payload(state: &AppState, payload: Option<serde_json::Value>) {
+    if let Ok(mut cached) = state.session_payload.lock() {
+        *cached = payload;
     }
-    let payload = match keyring_entry() {
-        Ok(entry) => match entry.get_password() {
-            Ok(raw) => serde_json::from_str(&raw).ok(),
-            Err(keyring::Error::NoEntry) => read_fallback_payload(app),
-            Err(e) if is_keyring_unavailable(&e) => read_fallback_payload(app),
-            Err(_) => None,
+}
+
+fn prefer_cached_session_payload<F>(
+    cached: Option<serde_json::Value>,
+    read_persisted: F,
+) -> Option<serde_json::Value>
+where
+    F: FnOnce() -> Option<serde_json::Value>,
+{
+    cached.or_else(read_persisted)
+}
+
+fn read_session_payload(app: &tauri::AppHandle) -> Option<serde_json::Value> {
+    let state = app.try_state::<AppState>();
+    let payload = prefer_cached_session_payload(
+        state
+            .as_ref()
+            .and_then(|state| cached_session_payload(state)),
+        || match keyring_entry() {
+            Ok(entry) => match entry.get_password() {
+                Ok(raw) => serde_json::from_str(&raw).ok(),
+                Err(keyring::Error::NoEntry) => read_fallback_payload(app),
+                Err(e) if is_keyring_unavailable(&e) => read_fallback_payload(app),
+                Err(_) => None,
+            },
+            Err(_) => read_fallback_payload(app),
         },
-        Err(_) => read_fallback_payload(app),
-    };
+    );
     if let (Some(state), Some(value)) = (app.try_state::<AppState>(), payload.as_ref()) {
-        if let Ok(mut cached) = state.session_payload.lock() {
-            *cached = Some(value.clone());
-        }
+        cache_session_payload(&state, Some(value.clone()));
     }
     payload
 }
@@ -582,9 +600,7 @@ fn store_session(
     }
     logging::log_event(&app, "auth", "store-session", "session stored");
     if let Some(state) = app.try_state::<AppState>() {
-        if let Ok(mut cached) = state.session_payload.lock() {
-            *cached = Some(payload);
-        }
+        cache_session_payload(&state, Some(payload));
         if let Ok(mut entitlement) = state.entitlement.lock() {
             *entitlement = state::EntitlementCache::default();
         }
@@ -661,9 +677,7 @@ fn clear_session(app: tauri::AppHandle) -> AppResult<()> {
     }
     logging::log_event(&app, "auth", "clear-session", "session cleared");
     if let Some(state) = app.try_state::<AppState>() {
-        if let Ok(mut cached) = state.session_payload.lock() {
-            *cached = None;
-        }
+        cache_session_payload(&state, None);
         if let Ok(mut entitlement) = state.entitlement.lock() {
             *entitlement = state::EntitlementCache::default();
         }
@@ -1163,7 +1177,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod oauth_deep_link_tests {
-    use super::{is_deep_link, validate_api_base};
+    use super::{
+        cache_session_payload, cached_session_payload, is_deep_link, prefer_cached_session_payload,
+        validate_api_base, AppState, DEFAULT_HOTKEY,
+    };
 
     #[test]
     fn accepts_only_exact_oauth_callback_routes() {
@@ -1194,5 +1211,51 @@ mod oauth_deep_link_tests {
         assert!(validate_api_base(Some("https://evil.example".to_string())).is_err());
         assert!(validate_api_base(Some("http://localhost:3001".to_string())).is_err());
         assert!(validate_api_base(Some("file:///tmp/fake-api".to_string())).is_err());
+    }
+
+    #[test]
+    fn freshly_stored_session_survives_persisted_read_lag() {
+        let state = AppState::with_hotkey(DEFAULT_HOTKEY);
+        let payload = serde_json::json!({
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "email": "pro@example.com"
+        });
+        cache_session_payload(&state, Some(payload.clone()));
+
+        let resolved = prefer_cached_session_payload(cached_session_payload(&state), || None);
+
+        assert_eq!(resolved, Some(payload));
+    }
+
+    #[test]
+    fn restart_restores_persisted_session_when_cache_is_empty() {
+        let state = AppState::with_hotkey(DEFAULT_HOTKEY);
+        let persisted = serde_json::json!({
+            "access_token": "persisted-access-token",
+            "email": "pro@example.com"
+        });
+
+        let resolved = prefer_cached_session_payload(cached_session_payload(&state), || {
+            Some(persisted.clone())
+        });
+
+        assert_eq!(resolved, Some(persisted));
+    }
+
+    #[test]
+    fn logout_clears_process_session_cache() {
+        let state = AppState::with_hotkey(DEFAULT_HOTKEY);
+        cache_session_payload(
+            &state,
+            Some(serde_json::json!({
+                "access_token": "access-token",
+                "email": "pro@example.com"
+            })),
+        );
+
+        cache_session_payload(&state, None);
+
+        assert_eq!(cached_session_payload(&state), None);
     }
 }
