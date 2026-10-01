@@ -10,7 +10,7 @@
 # need OpenSSL/glibc — Alpine/musl would require a compiler toolchain.
 # ------------------------------------------------------------------
 ARG NODE_VERSION=22-bookworm-slim
-# Prisma CLI for one-shot migrate jobs and Fly release commands.
+# Prisma CLI for one-shot migration containers.
 # MUST match the resolved version in pnpm-lock.yaml (check: prisma@x.y.z).
 ARG PRISMA_VERSION=6.19.3
 FROM node:${NODE_VERSION} AS base
@@ -83,7 +83,7 @@ COPY --from=builder --chown=app:app /app/node_modules ./node_modules
 COPY --from=builder --chown=app:app /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
 COPY --from=builder --chown=app:app /app/apps/backend/node_modules ./apps/backend/node_modules
 # Prisma schema + migrations ship with the image so one-shot migrate jobs
-# (`prisma migrate deploy`) and Fly release commands work offline.
+# (`prisma migrate deploy`) work offline.
 COPY --from=builder --chown=app:app /app/infra/prisma/schema.prisma ./infra/prisma/schema.prisma
 COPY --from=builder --chown=app:app /app/infra/prisma/migrations ./infra/prisma/migrations
 # The generated client lives inside the .pnpm store next to @prisma/client
